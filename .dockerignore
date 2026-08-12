@@ -1,0 +1,21 @@
+# Version control and task artifacts.
+.git
+.superpowers
+
+# Dependencies are installed inside the image from the frozen lockfile.
+**/node_modules
+
+# Compiled output is rebuilt inside the image.
+**/dist
+
+# Tests and local tooling config are not needed to build or run the image.
+**/tests
+
+# Local secrets must never enter the build context; .env.example is the
+# documented, secret-free template and stays.
+.env
+.env.*
+!.env.example
+
+# Logs and scratch files.
+**/*.log

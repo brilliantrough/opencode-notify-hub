@@ -1,0 +1,27 @@
+services:
+  gateway:
+    image: ${OPENCODE_NOTIFY_IMAGE:-opencode-notify-gateway:local}
+    env_file:
+      - ${OPENCODE_NOTIFY_ENV_FILE:-../.env}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - 127.0.0.1:${OPENCODE_NOTIFY_PORT:-8080}:8080
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - 'fetch("http://127.0.0.1:8080/health/live").then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      com.opencode.notify: "true"

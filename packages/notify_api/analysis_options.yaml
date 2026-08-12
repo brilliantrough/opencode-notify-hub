@@ -1,0 +1,6 @@
+# lib/ is fully machine-generated (openapi-generator + build_runner .g.dart
+# parts) and produces unavoidable unused-import/parameter warnings; only the
+# hand-written test/ and tool/ sources are linted here.
+analyzer:
+  exclude:
+    - lib/**

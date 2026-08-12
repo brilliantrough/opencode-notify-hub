@@ -1,0 +1,25 @@
+.superpowers/
+node_modules/
+dist/
+.dart_tool/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+
+# Platform credentials and signing material.
+**/google-services.json
+**/GoogleService-Info.plist
+**/key.properties
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.pfx
+**/*service-account*.json
+**/*service_account*.json
+
+# Local database exports and backups.
+*.dump
+*.sql.gz
+backups/

@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible non-security defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not post vulnerabilities or secrets. Use SECURITY.md for private reports.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - OpenCode plugin
+        - Gateway
+        - Linux client
+        - Windows client
+        - Android client
+        - Contracts/generated API
+        - Documentation/deployment
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.x.y or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, OpenCode, Node/pnpm, Flutter/Dart, Docker/PostgreSQL versions as relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized logs
+      description: Remove tokens, keys, email codes, Firebase data, user content, and private infrastructure details.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, personal data, and conversation content.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

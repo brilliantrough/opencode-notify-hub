@@ -1,0 +1,32 @@
+{
+  "name": "@notify/plugin",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/session-notify.js",
+  "types": "./dist/session-notify.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/session-notify.d.ts",
+      "default": "./dist/session-notify.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup && node scripts/smoke-dist.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "smoke:dist": "node scripts/smoke-dist.mjs"
+  },
+  "dependencies": {
+    "@notify/contracts": "workspace:*",
+    "@opencode-ai/plugin": "^1.18.15",
+    "@opencode-ai/sdk": "^1.18.15"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

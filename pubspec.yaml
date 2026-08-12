@@ -1,0 +1,10 @@
+name: opencode_notify
+description: Cross-platform notification client workspace for opencode-notify.
+publish_to: none
+
+environment:
+  sdk: ^3.8.0
+
+workspace:
+  - apps/client
+  - packages/notify_api

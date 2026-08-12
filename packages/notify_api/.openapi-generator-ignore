@@ -1,0 +1,8 @@
+# Package-owned files the generator must not overwrite.
+.gitignore
+README.md
+analysis_options.yaml
+doc/
+pubspec.yaml
+test/
+tool/
