@@ -94,6 +94,7 @@ HTTPS/WSS reverse proxy. Start with the generic
 
 ## Documentation
 
+- [Project roadmap](ROADMAP.md)
 - [Documentation index](docs/README.md)
 - [Client user guide](docs/client-guide.md)
 - [Client build setup](docs/client-setup.md)
@@ -103,6 +104,7 @@ HTTPS/WSS reverse proxy. Start with the generic
 - [Architecture](docs/architecture.md)
 - [API and event contracts](docs/api.md)
 - [Development](docs/development.md)
+- [Multi-device agent workflow](docs/agent-workflow.md)
 - [Testing](docs/testing.md)
 - [Release process](docs/releasing.md)
 

@@ -22,6 +22,8 @@ Choose the guide that matches what you are trying to do.
 
 ## Contributors
 
+- [Project roadmap](../ROADMAP.md): priorities, milestones, and phase exit
+  criteria, starting with the Windows development node.
 - [Architecture](architecture.md): components, trust boundaries, event flow,
   storage, and delivery semantics.
 - [Development](development.md): toolchains, local gateway setup, package
@@ -30,6 +32,9 @@ Choose the guide that matches what you are trying to do.
 - [Release process](releasing.md): versioning, release gates, signing, and
   artifact checklist.
 - [E2E verification](e2e-verification.md): reproducible maintainer matrix.
+- [Multi-device agent workflow](agent-workflow.md): GitHub Issues, isolated
+  branches/worktrees, pull requests, cross-machine handoff, and credential
+  boundaries for agent-assisted development.
 
 Project-wide policies live at the repository root:
 [Contributing](../CONTRIBUTING.md), [Security](../SECURITY.md),

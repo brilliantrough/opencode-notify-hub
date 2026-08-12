@@ -11,6 +11,8 @@ and free of credentials or personal data.
 3. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 4. Read [docs/development.md](docs/development.md) and
    [docs/testing.md](docs/testing.md).
+5. Agent-assisted and cross-device work follows
+   [docs/agent-workflow.md](docs/agent-workflow.md).
 
 ## Development workflow
 
