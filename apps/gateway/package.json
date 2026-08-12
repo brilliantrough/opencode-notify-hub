@@ -34,7 +34,7 @@
     "drizzle-kit": "^0.31.10",
     "testcontainers": "^12.1.0",
     "tsx": "^4.23.11",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "ws": "^8.21.3"
   }
