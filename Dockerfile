@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 # Build stage: full (dev + prod) install, compile contracts then gateway.
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 
 # Corepack supplies the pnpm version pinned by the root packageManager field
@@ -28,7 +28,7 @@ RUN pnpm --filter @notify/contracts build \
 # Runtime stage: production dependencies only, workspace layout preserved so
 # the @notify/contracts symlink keeps resolving, non-root `node` user.
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 LABEL org.opencontainers.image.licenses="MIT"
