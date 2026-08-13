@@ -6,13 +6,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  HistoryEntry entry(String eventId, String title, DateTime receivedAt) =>
-      HistoryEntry(
-        eventId: eventId,
-        title: title,
-        body: 'body of $title',
-        receivedAt: receivedAt,
-      );
+  HistoryEntry entry(
+    String eventId,
+    String title,
+    DateTime receivedAt, {
+    String? body,
+  }) => HistoryEntry(
+    eventId: eventId,
+    title: title,
+    body: body ?? 'body of $title',
+    receivedAt: receivedAt,
+  );
 
   Future<void> pumpHistory(
     WidgetTester tester,
@@ -36,8 +40,12 @@ void main() {
     final history = InMemoryNotificationHistory();
     final base = DateTime.utc(2026, 2, 1, 10);
     history.add(entry('e1', 'oldest entry', base));
-    history.add(entry('e2', 'middle entry', base.add(const Duration(hours: 1))));
-    history.add(entry('e3', 'newest entry', base.add(const Duration(hours: 2))));
+    history.add(
+      entry('e2', 'middle entry', base.add(const Duration(hours: 1))),
+    );
+    history.add(
+      entry('e3', 'newest entry', base.add(const Duration(hours: 2))),
+    );
 
     await pumpHistory(tester, history);
 
@@ -52,4 +60,32 @@ void main() {
     expect(newestY, lessThan(middleY));
     expect(middleY, lessThan(oldestY));
   });
+
+  for (final scale in [1.0, 1.25, 1.5, 2.0]) {
+    testWidgets('renders long notification text at ${scale}x display scale', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = scale;
+      tester.view.physicalSize = Size(1280 * scale, 720 * scale);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final history = InMemoryNotificationHistory();
+      history.add(
+        entry(
+          'long-$scale',
+          'OpenCode task completed with a deliberately long notification title',
+          DateTime.utc(2026, 2, 1, 10),
+          body:
+              'A long notification body remains readable without clipping or '
+              'overflow when Windows display scaling changes. '
+              'C:\\Users\\example\\Projects\\opencode-notify\\very-long-path',
+        ),
+      );
+
+      await pumpHistory(tester, history);
+
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(ValueKey('history-long-$scale')), findsOneWidget);
+    });
+  }
 }

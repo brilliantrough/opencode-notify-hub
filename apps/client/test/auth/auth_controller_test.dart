@@ -600,5 +600,33 @@ void main() {
       expect(await store.read(), isNull);
       expect(tokenHolder.accessToken, isNull);
     });
+
+    test('clears holder and state when secure storage clear fails', () async {
+      final failingStore = FailingClearStore();
+      final failingContainer = ProviderContainer(
+        overrides: [
+          authApiProvider.overrideWithValue(authApi),
+          credentialsStoreProvider.overrideWithValue(failingStore),
+          tokenRefresherProvider.overrideWithValue(refresher),
+          accessTokenHolderProvider.overrideWithValue(tokenHolder),
+        ],
+      );
+      addTearDown(failingContainer.dispose);
+      when(
+        () => authApi.login(loginBody: any(named: 'loginBody')),
+      ).thenAnswer((_) async => tokenPairResponse());
+      when(
+        () => authApi.logout(refreshBody: any(named: 'refreshBody')),
+      ).thenAnswer((_) async => voidResponse());
+
+      final failingController = failingContainer.read(
+        authControllerProvider.notifier,
+      );
+      await failingController.login(email, password);
+
+      await failingController.logout();
+      expect(failingContainer.read(authControllerProvider), isA<Unauthenticated>());
+      expect(tokenHolder.accessToken, isNull);
+    });
   });
 }

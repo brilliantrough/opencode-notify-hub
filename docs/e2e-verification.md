@@ -47,6 +47,22 @@ Record before testing:
 | Gateway restart reconnects (`1012`) | [ ] | [ ] | [ ] | n/a |
 | Token expiry refreshes/reconnects (`4401`/Upgrade 401) | [ ] | [ ] | [ ] | n/a |
 
+## Windows desktop checks
+
+| Scenario | Windows |
+| --- | --- |
+| Tray left-click restores, shows, and focuses the window | [ ] |
+| Tray right-click shows Open window, Pause notifications, and Quit | [ ] |
+| Close hides the window and notifications continue | [ ] |
+| Notification click restores the window after close and minimize | [ ] |
+| Tray and notification behavior survives sleep/resume | [ ] |
+| Tray behavior recovers after Explorer restarts | [ ] |
+| Notification shortcut/AUMID follows the moved release directory | [ ] |
+| Autostart survives restart and targets the tested executable | [ ] |
+| Sign-out removes persisted credentials and leaves no active session | [ ] |
+| Layout has no clipping at 100%, 125%, 150%, and 200% scaling | [ ] |
+| Long titles, bodies, paths, and account identifiers remain readable | [ ] |
+
 ## Desktop tray sequence
 
 1. Log in and verify a live WebSocket.

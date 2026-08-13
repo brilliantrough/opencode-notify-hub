@@ -19,6 +19,9 @@ Future<ProviderContainer> _pumpSettingsPage(
   final prefs = await SharedPreferences.getInstance();
   final toggle = startupToggle ?? MockStartupToggle();
   if (toggle is MockStartupToggle) {
+    when(
+      () => toggle.isEnabled(),
+    ).thenThrow(StateError('OS integration unavailable in widget tests'));
     when(() => toggle.setEnabled(any())).thenAnswer((_) async {});
   }
   final container = ProviderContainer(
