@@ -164,7 +164,15 @@ class AppBootstrap {
             .read(appForegroundProvider.notifier)
             .setForeground(foreground);
       },
-      onExitRequested: shutdown,
+      onExitRequested: _isDesktop
+          ? () async {
+              await windowManager.hide();
+              return AppExitResponse.cancel;
+            }
+          : () async {
+              await shutdown();
+              return AppExitResponse.exit;
+            },
     );
     WidgetsBinding.instance.addObserver(_lifecycleObserver!);
 
@@ -174,20 +182,17 @@ class AppBootstrap {
     // On sign-out, tear FCM down so no further pushes are routed into the
     // logged-out session (and the gateway's token is invalidated).
     _subscriptionClosers.add(
-      container
-          .listen(
-            authControllerProvider,
-            fireImmediately: true,
-            (previous, next) {
-              if (next is Authenticated && previous is! Authenticated) {
-                unawaited(_onLogin(container));
-              }
-              if (next is! Authenticated && previous is Authenticated) {
-                unawaited(_onLogout(container));
-              }
-            },
-          )
-          .close,
+      container.listen(authControllerProvider, fireImmediately: true, (
+        previous,
+        next,
+      ) {
+        if (next is Authenticated && previous is! Authenticated) {
+          unawaited(_onLogin(container));
+        }
+        if (next is! Authenticated && previous is Authenticated) {
+          unawaited(_onLogout(container));
+        }
+      }).close,
     );
 
     // Keep the realtime controller alive independent of the widget tree and
@@ -199,14 +204,20 @@ class AppBootstrap {
     );
 
     if (_isDesktop && _initDesktopWindowing) {
+      // Keep the provider alive for the process lifetime. A one-off read is
+      // disposed by Riverpod after init, removing the native event listeners
+      // while Windows still has prevent-close enabled.
+      _subscriptionClosers.add(
+        container
+            .listen(trayControllerProvider, fireImmediately: true, (_, _) {})
+            .close,
+      );
       // Refresh the tray menu when the paused flag changes from the
       // settings page, so the checkbox always reflects current settings.
       _subscriptionClosers.add(
-        container
-            .listen(settingsControllerProvider, (_, _) {
-              unawaited(_refreshTrayMenu(container));
-            })
-            .close,
+        container.listen(settingsControllerProvider, (_, _) {
+          unawaited(_refreshTrayMenu(container));
+        }).close,
       );
       unawaited(() async {
         try {
@@ -319,7 +330,10 @@ class AppBootstrap {
 /// actual process exit is handled by [AppBootstrap.shutdown]. On Android,
 /// `paused`/`hidden`/`detached` disconnect the socket and FCM takes over.
 @visibleForTesting
-bool realtimeForegroundFor(AppLifecycleState state, {required bool isDesktop}) =>
+bool realtimeForegroundFor(
+  AppLifecycleState state, {
+  required bool isDesktop,
+}) =>
     isDesktop ||
     switch (state) {
       AppLifecycleState.resumed || AppLifecycleState.inactive => true,
@@ -334,14 +348,14 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
   _AppLifecycleObserver({
     required bool isDesktop,
     required void Function(bool foreground) onForegroundChanged,
-    required Future<void> Function() onExitRequested,
+    required Future<AppExitResponse> Function() onExitRequested,
   }) : _isDesktop = isDesktop,
        _onForegroundChanged = onForegroundChanged,
        _onExitRequested = onExitRequested;
 
   final bool _isDesktop;
   final void Function(bool foreground) _onForegroundChanged;
-  final Future<void> Function() _onExitRequested;
+  final Future<AppExitResponse> Function() _onExitRequested;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -349,8 +363,5 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
   }
 
   @override
-  Future<AppExitResponse> didRequestAppExit() async {
-    await _onExitRequested();
-    return AppExitResponse.exit;
-  }
+  Future<AppExitResponse> didRequestAppExit() => _onExitRequested();
 }

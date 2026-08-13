@@ -46,4 +46,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/sounds/
-    - assets/tray/
+    - assets/tray/icon.png
+    - windows/runner/resources/app_icon.ico

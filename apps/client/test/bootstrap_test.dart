@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
@@ -9,8 +10,10 @@ import 'package:client/notifications/notification_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tray_manager/tray_manager.dart';
 
 import 'fcm/fcm_service_test.dart' show FakeFcmClient;
 import 'ui/fake_auth_controller.dart';
@@ -39,19 +42,16 @@ void main() {
       AppLifecycleState.detached: false,
     };
 
-    test(
-      'Android: only resumed/inactive are foreground; paused/hidden '
-      'background the socket (FCM takes over)',
-      () {
-        for (final entry in cases.entries) {
-          expect(
-            realtimeForegroundFor(entry.key, isDesktop: false),
-            entry.value,
-            reason: 'Android ${entry.key}',
-          );
-        }
-      },
-    );
+    test('Android: only resumed/inactive are foreground; paused/hidden '
+        'background the socket (FCM takes over)', () {
+      for (final entry in cases.entries) {
+        expect(
+          realtimeForegroundFor(entry.key, isDesktop: false),
+          entry.value,
+          reason: 'Android ${entry.key}',
+        );
+      }
+    });
 
     test(
       'desktop: every lifecycle state stays connected while the process runs',
@@ -121,5 +121,69 @@ void main() {
         await pumpEventQueue();
       },
     );
+  });
+
+  test(
+    'desktop attach keeps tray event listeners alive until shutdown',
+    () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      SharedPreferences.setMockInitialValues({});
+      const trayChannel = MethodChannel('tray_manager');
+      const windowChannel = MethodChannel('window_manager');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(trayChannel, (_) async => true);
+      messenger.setMockMethodCallHandler(windowChannel, (_) async => true);
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(trayChannel, null);
+        messenger.setMockMethodCallHandler(windowChannel, null);
+      });
+      final bootstrap = await AppBootstrap.initialize(
+        platform: ClientPlatform.windows,
+        notificationService: FakeNotificationService(),
+      );
+      final container = ProviderContainer(overrides: bootstrap.overrides);
+
+      bootstrap.attach(container);
+      await pumpEventQueue();
+
+      expect(trayManager.hasListeners, isTrue);
+
+      await bootstrap.shutdown();
+      expect(trayManager.hasListeners, isFalse);
+    },
+  );
+
+  test('desktop app-exit requests keep tray listeners alive', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+    const trayChannel = MethodChannel('tray_manager');
+    const windowChannel = MethodChannel('window_manager');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(trayChannel, (_) async => true);
+    final windowCalls = <String>[];
+    messenger.setMockMethodCallHandler(windowChannel, (call) async {
+      windowCalls.add(call.method);
+      return true;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(trayChannel, null);
+      messenger.setMockMethodCallHandler(windowChannel, null);
+    });
+    final bootstrap = await AppBootstrap.initialize(
+      platform: ClientPlatform.windows,
+      notificationService: FakeNotificationService(),
+    );
+    final container = ProviderContainer(overrides: bootstrap.overrides);
+    bootstrap.attach(container);
+    await pumpEventQueue();
+
+    final response = await WidgetsBinding.instance.handleRequestAppExit();
+
+    expect(response, AppExitResponse.cancel);
+    expect(trayManager.hasListeners, isTrue);
+    expect(windowCalls, contains('hide'));
+    await bootstrap.shutdown();
   });
 }

@@ -21,7 +21,10 @@ Future<ProviderContainer> _createContainer({
   }
   final prefs = await SharedPreferences.getInstance();
   final toggle = startupToggle ?? MockStartupToggle();
-  if (toggle is MockStartupToggle) {
+  if (startupToggle == null && toggle is MockStartupToggle) {
+    when(
+      () => toggle.isEnabled(),
+    ).thenThrow(StateError('OS integration unavailable in unit tests'));
     when(() => toggle.setEnabled(any())).thenAnswer((_) async {});
   }
   final container = ProviderContainer(
@@ -32,8 +35,7 @@ Future<ProviderContainer> _createContainer({
   );
   addTearDown(container.dispose);
   // Trigger build and let the async hydration microtask complete.
-  container.read(settingsControllerProvider);
-  await Future<void>.delayed(Duration.zero);
+  await container.read(settingsControllerProvider.notifier).hydrated;
   return container;
 }
 
@@ -160,6 +162,45 @@ void main() {
 
       expect(first.read(settingsControllerProvider).launchAtStartup, isFalse);
       verify(() => toggle.setEnabled(false)).called(1);
+    });
+
+    test('hydrates launch-at-startup from the current OS state', () async {
+      final toggle = MockStartupToggle();
+      when(() => toggle.isEnabled()).thenAnswer((_) async => true);
+      when(() => toggle.setEnabled(any())).thenAnswer((_) async {});
+
+      final container = await _createContainer(startupToggle: toggle);
+
+      expect(
+        container.read(settingsControllerProvider).launchAtStartup,
+        isTrue,
+      );
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool(SettingsController.launchAtStartupKey), isTrue);
+    });
+
+    test('quotes Windows startup paths containing spaces', () {
+      expect(
+        LaunchAtStartupToggle.startupPath(
+          r'C:\Program Files\OpenCode Notify\client.exe',
+          windows: true,
+        ),
+        r'"C:\Program Files\OpenCode Notify\client.exe"',
+      );
+      expect(
+        LaunchAtStartupToggle.startupPath(
+          '/opt/opencode/client',
+          windows: false,
+        ),
+        '/opt/opencode/client',
+      );
+      expect(
+        LaunchAtStartupToggle.startupPath(
+          r'D:\Linewrite\client.exe',
+          windows: true,
+        ),
+        r'D:\Linewrite\client.exe',
+      );
     });
 
     test('setLaunchAtStartup persists the final value', () async {

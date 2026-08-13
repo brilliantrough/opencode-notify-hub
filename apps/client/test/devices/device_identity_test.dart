@@ -4,11 +4,13 @@ import 'package:client/devices/device_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  // These tests exercise the host (Linux) branches; the Windows/Android
-  // branches are covered by the DevicesController tests via a fake identity.
   group('currentPlatform', () {
-    test('returns linux on the Linux test host', () {
-      expect(currentPlatform(), ClientPlatform.linux);
+    test('returns the current desktop host platform', () {
+      final expected = Platform.isWindows
+          ? ClientPlatform.windows
+          : ClientPlatform.linux;
+
+      expect(currentPlatform(), expected);
     });
   });
 
@@ -19,12 +21,19 @@ void main() {
   });
 
   group('defaultName', () {
-    test('linux returns the non-empty host name', () async {
-      final identity = DeviceIdentity(platform: ClientPlatform.linux);
+    test('desktop returns the non-empty host name', () async {
+      final platform = Platform.isWindows
+          ? ClientPlatform.windows
+          : ClientPlatform.linux;
+      final identity = DeviceIdentity(platform: platform);
 
       final name = await identity.defaultName();
 
-      expect(name, Platform.localHostname);
+      final computerName = Platform.environment['COMPUTERNAME'];
+      final expected = Platform.isWindows && computerName?.isNotEmpty == true
+          ? computerName!
+          : Platform.localHostname;
+      expect(name, expected);
       expect(name, isNotEmpty);
     });
   });

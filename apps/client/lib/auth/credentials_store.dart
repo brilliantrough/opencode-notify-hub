@@ -14,7 +14,10 @@ class Credentials {
 
 /// Store for session credentials.
 abstract class CredentialsStore {
-  Future<void> save({required String refreshToken, required String accountEmail});
+  Future<void> save({
+    required String refreshToken,
+    required String accountEmail,
+  });
 
   Future<Credentials?> read();
 
@@ -49,7 +52,7 @@ class InMemoryCredentialsStore implements CredentialsStore {
 /// `flutter_secure_storage`.
 class SecureCredentialsStore implements CredentialsStore {
   SecureCredentialsStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   static const String _refreshTokenKey = 'refresh_token_v1';
   static const String _accountEmailKey = 'account_email_v1';
@@ -78,7 +81,22 @@ class SecureCredentialsStore implements CredentialsStore {
 
   @override
   Future<void> clear() async {
-    await _storage.delete(key: _refreshTokenKey);
-    await _storage.delete(key: _accountEmailKey);
+    Object? firstError;
+    StackTrace? firstStackTrace;
+    try {
+      await _storage.delete(key: _refreshTokenKey);
+    } catch (error, stackTrace) {
+      firstError = error;
+      firstStackTrace = stackTrace;
+    }
+    try {
+      await _storage.delete(key: _accountEmailKey);
+    } catch (error, stackTrace) {
+      firstError ??= error;
+      firstStackTrace ??= stackTrace;
+    }
+    if (firstError != null) {
+      Error.throwWithStackTrace(firstError, firstStackTrace!);
+    }
   }
 }

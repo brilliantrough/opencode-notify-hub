@@ -12,6 +12,9 @@ import '../devices/devices_controller.dart' show sharedPreferencesProvider;
 /// Abstracted so tests can mock it: the real implementation touches the
 /// `launch_at_startup` platform channel, which is unavailable in unit tests.
 abstract class StartupToggle {
+  /// Reads the current OS autostart state.
+  Future<bool> isEnabled();
+
   /// Enables or disables launching the app at OS startup.
   Future<void> setEnabled(bool enabled);
 }
@@ -29,9 +32,24 @@ class LaunchAtStartupToggle implements StartupToggle {
     }
     launchAtStartup.setup(
       appName: 'opencode-notify',
-      appPath: Platform.resolvedExecutable,
+      appPath: startupPath(Platform.resolvedExecutable),
     );
     _setupDone = true;
+  }
+
+  /// Formats an executable path for the Windows Run registry value.
+  static String startupPath(String executablePath, {bool? windows}) {
+    if (!(windows ?? Platform.isWindows)) {
+      return executablePath;
+    }
+    final sanitized = executablePath.replaceAll('"', '');
+    return sanitized.contains(RegExp(r'\s')) ? '"$sanitized"' : sanitized;
+  }
+
+  @override
+  Future<bool> isEnabled() async {
+    _ensureSetup();
+    return launchAtStartup.isEnabled();
   }
 
   @override
@@ -136,6 +154,9 @@ class SettingsController extends Notifier<SettingsState> {
   /// hydration failure so setters never hang.
   final Completer<void> _hydrated = Completer<void>();
 
+  /// Completes when persisted and OS-backed settings have been loaded.
+  Future<void> get hydrated => _hydrated.future;
+
   Future<SharedPreferences> get _prefs => ref.read(sharedPreferencesProvider);
 
   @override
@@ -158,10 +179,22 @@ class SettingsController extends Notifier<SettingsState> {
       if (_disposed) {
         return;
       }
+      var launchAtStartupEnabled = prefs.getBool(launchAtStartupKey) ?? false;
+      try {
+        launchAtStartupEnabled = await ref
+            .read(startupToggleProvider)
+            .isEnabled();
+        await prefs.setBool(launchAtStartupKey, launchAtStartupEnabled);
+      } catch (_) {
+        // Keep the persisted state if the OS integration is unavailable.
+      }
+      if (_disposed) {
+        return;
+      }
       state = SettingsState(
         soundEnabled: prefs.getBool(soundEnabledKey) ?? true,
         paused: prefs.getBool(pausedKey) ?? false,
-        launchAtStartup: prefs.getBool(launchAtStartupKey) ?? false,
+        launchAtStartup: launchAtStartupEnabled,
         textScale: normalizeTextScale(prefs.getDouble(textScaleKey) ?? 1),
       );
     } finally {

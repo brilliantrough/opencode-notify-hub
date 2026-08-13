@@ -332,10 +332,11 @@ class AuthController extends Notifier<AuthState> {
   /// Signs out: best-effort server-side revocation of the refresh token,
   /// then unconditional local cleanup. Local sign-out proceeds even when
   /// the revoke request fails (e.g. offline) — any throwable from the
-  /// revoke is swallowed and cleanup runs in `finally`.
+  /// revoke and storage errors are swallowed so the local session is always
+  /// dropped.
   Future<void> logout() async {
-    final credentials = await _store.read();
     try {
+      final credentials = await _store.read();
       if (credentials != null) {
         await _authApi.logout(
           refreshBody: RefreshBody(
@@ -345,12 +346,15 @@ class AuthController extends Notifier<AuthState> {
       }
     } catch (_) {
       // Best-effort revoke: local sign-out proceeds regardless.
-    } finally {
-      await _store.clear();
-      _tokenHolder.accessToken = null;
-      _pendingPassword = null;
-      state = const Unauthenticated();
     }
+    try {
+      await _store.clear();
+    } catch (_) {
+      // Best-effort secure-storage cleanup must not block local sign-out.
+    }
+    _tokenHolder.accessToken = null;
+    _pendingPassword = null;
+    state = const Unauthenticated();
   }
 
   /// Called by the `AuthInterceptor` when a `401` could not be recovered:

@@ -105,8 +105,9 @@ class TrayController with TrayListener, WindowListener {
   }
 
   /// Asset path of the tray icon for the current desktop platform.
-  static String trayIconAsset() =>
-      Platform.isWindows ? 'assets/tray/icon.ico' : 'assets/tray/icon.png';
+  static String trayIconAsset() => Platform.isWindows
+      ? 'windows/runner/resources/app_icon.ico'
+      : 'assets/tray/icon.png';
 
   /// Installs the tray icon/menu and close-to-tray behavior. No-op off
   /// desktop.
@@ -152,6 +153,24 @@ class TrayController with TrayListener, WindowListener {
 
   @override
   void onTrayIconMouseUp() {
-    unawaited(_showWindow());
+    if (_isLinux()) {
+      unawaited(_showWindow());
+    }
+  }
+
+  /// tray_manager 0.5.3 emits this callback for a Windows left-button release.
+  @override
+  void onTrayIconMouseDown() {
+    if (!_isLinux()) {
+      unawaited(_showWindow());
+    }
+  }
+
+  /// Windows requires the Dart side to explicitly display the native menu.
+  @override
+  void onTrayIconRightMouseDown() {
+    if (!_isLinux()) {
+      unawaited(trayManager.popUpContextMenu());
+    }
   }
 }

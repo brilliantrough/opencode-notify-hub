@@ -31,7 +31,7 @@
  * Exits non-zero with a message on any failure.
  */
 
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -60,7 +60,7 @@ process.env.NOTIFY_INGEST_KEY = "smokekey.smokesecret";
 process.env.NOTIFY_IDLE_DEBOUNCE_MS = "15000";
 process.env.NOTIFY_HEARTBEAT_MS = "60000";
 
-const mod = await import(bundlePath);
+const mod = await import(pathToFileURL(bundlePath).href);
 
 // --- Invariant 1: exact export shape -----------------------------------
 const keys = Object.keys(mod);

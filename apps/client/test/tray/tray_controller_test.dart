@@ -160,5 +160,53 @@ void main() {
       expect(windowCalls, ['restore', 'isMinimized', 'show', 'focus']);
       controller.dispose();
     });
+
+    test('Windows tray clicks open the window and show its menu', () async {
+      final trayCalls = <String>[];
+      var shown = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(trayChannel, (call) async {
+            trayCalls.add(call.method);
+            return true;
+          });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowChannel, (_) async => true);
+      final controller = TrayController(
+        readPaused: () => false,
+        writePaused: (_) async {},
+        showWindow: () async => shown++,
+        isDesktop: () => true,
+        isLinux: () => false,
+      );
+      await controller.init();
+      trayCalls.clear();
+
+      controller.onTrayIconMouseDown();
+      controller.onTrayIconRightMouseDown();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(shown, 1);
+      expect(trayCalls, ['popUpContextMenu']);
+      controller.dispose();
+    });
+
+    test('closing the window hides it instead of exiting', () async {
+      final windowCalls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowChannel, (call) async {
+            windowCalls.add(call.method);
+            return true;
+          });
+      final controller = TrayController(
+        readPaused: () => false,
+        writePaused: (_) async {},
+        isDesktop: () => true,
+      );
+
+      controller.onWindowClose();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(windowCalls, ['hide']);
+    });
   });
 }
