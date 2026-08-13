@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,6 +28,20 @@ final isAndroidProvider = Provider<bool>((ref) {
   }
 });
 
+/// Builds the app theme while preserving native typography off Windows.
+ThemeData notifyThemeFor(TargetPlatform platform) {
+  return ThemeData(
+    platform: platform,
+    colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+    fontFamily: platform == TargetPlatform.windows
+        ? 'Microsoft YaHei UI'
+        : null,
+    fontFamilyFallback: platform == TargetPlatform.windows
+        ? const ['Microsoft YaHei', 'Segoe UI', 'Arial']
+        : null,
+  );
+}
+
 /// Root application widget.
 class NotifyApp extends ConsumerWidget {
   const NotifyApp({super.key});
@@ -38,9 +53,7 @@ class NotifyApp extends ConsumerWidget {
     final settingsController = ref.read(settingsControllerProvider.notifier);
     return MaterialApp(
       title: 'OpenCode Notify',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
+      theme: notifyThemeFor(defaultTargetPlatform),
       builder: (context, child) {
         if (child == null || isAndroid) {
           return child ?? const SizedBox.shrink();

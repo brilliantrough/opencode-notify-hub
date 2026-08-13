@@ -22,6 +22,31 @@ import 'fake_auth_controller.dart';
 void main() {
   late FakeAuthController auth;
 
+  test('Windows theme uses Microsoft YaHei UI consistently', () {
+    final theme = notifyThemeFor(TargetPlatform.windows);
+
+    expect(theme.textTheme.bodyMedium?.fontFamily, 'Microsoft YaHei UI');
+    expect(theme.textTheme.bodyMedium?.fontFamilyFallback, [
+      'Microsoft YaHei',
+      'Segoe UI',
+      'Arial',
+    ]);
+  });
+
+  test('non-Windows themes keep their platform typography', () {
+    final linuxTheme = notifyThemeFor(TargetPlatform.linux);
+    final androidTheme = notifyThemeFor(TargetPlatform.android);
+
+    expect(
+      linuxTheme.textTheme.bodyMedium?.fontFamily,
+      isNot('Microsoft YaHei UI'),
+    );
+    expect(
+      androidTheme.textTheme.bodyMedium?.fontFamily,
+      isNot('Microsoft YaHei UI'),
+    );
+  });
+
   Future<void> pumpApp(
     WidgetTester tester, {
     bool? isAndroid,
