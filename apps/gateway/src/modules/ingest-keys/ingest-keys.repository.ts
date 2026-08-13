@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, lt, or } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import * as schema from "../../db/schema.js";
@@ -43,6 +43,8 @@ export interface IngestKeyRepository {
    * key with `id` belongs to `userId` (unknown, foreign, or already revoked).
    */
   revoke(input: { userId: string; id: string }): Promise<boolean>;
+  /** Records an accepted event request for the user's active key. */
+  recordUse(input: { userId: string; id: string; usedAt: Date }): Promise<void>;
   /** Lookup by the public keyId for credential verification; active keys only. */
   findActiveByKeyId(keyId: string): Promise<ActiveIngestKeySecret | null>;
 }
@@ -101,6 +103,20 @@ export class DrizzleIngestKeyRepository implements IngestKeyRepository {
       )
       .returning({ id: ingestKeys.id });
     return rows.length > 0;
+  }
+
+  async recordUse(input: { userId: string; id: string; usedAt: Date }): Promise<void> {
+    await this.db
+      .update(ingestKeys)
+      .set({ lastUsedAt: input.usedAt })
+      .where(
+        and(
+          eq(ingestKeys.id, input.id),
+          eq(ingestKeys.userId, input.userId),
+          isNull(ingestKeys.revokedAt),
+          or(isNull(ingestKeys.lastUsedAt), lt(ingestKeys.lastUsedAt, input.usedAt)),
+        ),
+      );
   }
 
   async findActiveByKeyId(keyId: string): Promise<ActiveIngestKeySecret | null> {

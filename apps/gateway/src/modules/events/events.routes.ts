@@ -154,6 +154,15 @@ export function eventRoutes(deps: EventRouteDeps): FastifyPluginAsync {
           const duplicate = await dedupe.dispatchOnce(verified.userId, event.eventId, () =>
             deps.dispatcher.dispatch({ userId: verified.userId, event }),
           );
+          try {
+            // A deduplicated 202 still counts as key use: the credential was
+            // valid and the gateway accepted the request.
+            await deps.ingestKeys.recordUse(verified, deps.clock.now());
+          } catch (error) {
+            // Usage metadata is best-effort: the event has already been
+            // delivered and must not be retried solely for a failed timestamp.
+            request.log.warn(error, "failed to update ingest key last-used time");
+          }
           return reply.status(202).send({ eventId: event.eventId, deduplicated: duplicate });
         } catch (error) {
           request.log.error(error, "event dispatch failed");

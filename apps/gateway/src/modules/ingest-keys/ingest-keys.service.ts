@@ -84,4 +84,9 @@ export class IngestKeyService {
     }
     return { id: active.id, userId: active.userId, keyId: active.keyId };
   }
+
+  /** Records that an authenticated key request was accepted. */
+  async recordUse(key: VerifiedIngestKey, usedAt: Date): Promise<void> {
+    await this.repository.recordUse({ id: key.id, userId: key.userId, usedAt });
+  }
 }

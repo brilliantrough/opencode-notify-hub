@@ -66,6 +66,18 @@ class FakeIngestKeyRepository implements IngestKeyRepository {
     return true;
   }
 
+  async recordUse(input: { userId: string; id: string; usedAt: Date }): Promise<void> {
+    const row = this.rows.find(
+      (candidate) =>
+        candidate.id === input.id && candidate.userId === input.userId && !candidate.revoked,
+    );
+    if (row !== undefined) {
+      if (row.lastUsedAt === null || row.lastUsedAt < input.usedAt) {
+        row.lastUsedAt = input.usedAt;
+      }
+    }
+  }
+
   async findActiveByKeyId(keyId: string) {
     const row = this.rows.find((candidate) => candidate.keyId === keyId && !candidate.revoked);
     if (row === undefined) {
@@ -187,5 +199,34 @@ describe("IngestKeyService.verify", () => {
     ]) {
       expect(await service.verify(malformed)).toBeNull();
     }
+  });
+});
+
+describe("IngestKeyService.recordUse", () => {
+  it("records the supplied timestamp on the active key", async () => {
+    const repository = new FakeIngestKeyRepository();
+    const service = new IngestKeyService(repository);
+    const { record } = await service.create("user-1", "workstation");
+    const usedAt = new Date("2026-08-13T12:00:00.000Z");
+
+    await service.recordUse(
+      { id: record.id, userId: record.userId, keyId: record.keyId },
+      usedAt,
+    );
+
+    expect(repository.rows[0].lastUsedAt).toEqual(usedAt);
+  });
+
+  it("does not move the usage time backwards", async () => {
+    const repository = new FakeIngestKeyRepository();
+    const service = new IngestKeyService(repository);
+    const { record } = await service.create("user-1", "workstation");
+    const key = { id: record.id, userId: record.userId, keyId: record.keyId };
+    const later = new Date("2026-08-13T13:00:00.000Z");
+
+    await service.recordUse(key, later);
+    await service.recordUse(key, new Date("2026-08-13T12:00:00.000Z"));
+
+    expect(repository.rows[0].lastUsedAt).toEqual(later);
   });
 });

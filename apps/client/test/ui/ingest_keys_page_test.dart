@@ -13,6 +13,7 @@ class FakeIngestKeysController extends IngestKeysController {
   final List<IngestKey> _initial;
   final List<String> createdNames = [];
   final List<String> revokedIds = [];
+  int listCalls = 0;
   String nextSecret = 'nk-secret-abc';
   int _nextId = 100;
   late List<IngestKey> _keys;
@@ -41,6 +42,7 @@ class FakeIngestKeysController extends IngestKeysController {
 
   @override
   Future<List<IngestKey>> list() async {
+    listCalls += 1;
     state = AsyncData(_keys);
     return _keys;
   }
@@ -48,7 +50,10 @@ class FakeIngestKeysController extends IngestKeysController {
   @override
   Future<void> revoke(String id) async {
     revokedIds.add(id);
-    _keys = [for (final key in _keys) if (key.id != id) key];
+    _keys = [
+      for (final key in _keys)
+        if (key.id != id) key,
+    ];
     state = AsyncData(_keys);
   }
 }
@@ -99,8 +104,28 @@ void main() {
     expect(find.text('新建密钥'), findsOneWidget);
   });
 
-  testWidgets('create shows the secret exactly once with a copy button',
-      (tester) async {
+  testWidgets('refresh button reloads key usage metadata', (tester) async {
+    mockClipboard(tester);
+    controller = FakeIngestKeysController([
+      IngestKey(
+        id: 'key-1',
+        name: 'ci-runner',
+        createdAt: t1,
+        lastUsedAt: DateTime.utc(2026, 1, 3, 12),
+      ),
+    ]);
+
+    await pumpPage(tester);
+    await tester.tap(find.byKey(const ValueKey('refresh-ingest-keys')));
+    await tester.pumpAndSettle();
+
+    expect(controller.listCalls, 1);
+    expect(find.textContaining('最近使用'), findsOneWidget);
+  });
+
+  testWidgets('create shows the secret exactly once with a copy button', (
+    tester,
+  ) async {
     mockClipboard(tester);
     controller = FakeIngestKeysController(const []);
 
@@ -136,8 +161,9 @@ void main() {
     expect(find.text('new-key'), findsOneWidget);
   });
 
-  testWidgets('revoke calls the controller and removes the row',
-      (tester) async {
+  testWidgets('revoke calls the controller and removes the row', (
+    tester,
+  ) async {
     mockClipboard(tester);
     controller = FakeIngestKeysController([
       IngestKey(id: 'key-1', name: 'ci-runner', createdAt: t1),

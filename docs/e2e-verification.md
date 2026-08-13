@@ -23,7 +23,7 @@ Record before testing:
 | Register, verify, login | Account authenticates |
 | Refresh rotation | New refresh works; reused old refresh is rejected/revoked |
 | Device CRUD | User can create/list/update/delete only owned devices |
-| Ingest-key lifecycle | Secret appears once; list omits secret; revoke blocks use |
+| Ingest-key lifecycle | Secret appears once; successful event updates last used; list omits secret; revoke blocks use |
 | Valid HMAC event | 202, `deduplicated:false` |
 | Duplicate event id | 202, `deduplicated:true` |
 | Tampered body or stale timestamp | 401 |

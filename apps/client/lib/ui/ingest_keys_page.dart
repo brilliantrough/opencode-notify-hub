@@ -15,7 +15,17 @@ class IngestKeysPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final keys = ref.watch(ingestKeysControllerProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('接入密钥')),
+      appBar: AppBar(
+        title: const Text('接入密钥'),
+        actions: [
+          IconButton(
+            key: const ValueKey('refresh-ingest-keys'),
+            icon: const Icon(Icons.refresh),
+            tooltip: '刷新',
+            onPressed: () => _refresh(context, ref),
+          ),
+        ],
+      ),
       body: switch (keys) {
         AsyncData(:final value) =>
           value.isEmpty
@@ -53,6 +63,18 @@ class IngestKeysPage extends ConsumerWidget {
     return lastUsed == null
         ? '$created · 从未使用'
         : '$created · 最近使用 ${lastUsed.toLocal()}';
+  }
+
+  Future<void> _refresh(BuildContext context, WidgetRef ref) async {
+    try {
+      await ref.read(ingestKeysControllerProvider.notifier).list();
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('刷新失败: $error')));
+      }
+    }
   }
 
   Future<void> _revoke(

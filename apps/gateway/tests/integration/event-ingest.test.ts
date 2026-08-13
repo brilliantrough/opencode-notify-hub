@@ -292,7 +292,7 @@ describe("event ingestion", () => {
   });
 
   describe("acceptance", () => {
-    it("accepts a validly signed event: 202 contract shape, dispatched once, nothing persisted", async () => {
+    it("accepts a validly signed event, records key use, and persists no event payload", async () => {
       currentCredential = await createCredential("alice@example.com");
       const userId = await userIdFor("alice@example.com");
 
@@ -306,6 +306,12 @@ describe("event ingestion", () => {
       expect(dispatcher.calls[0].userId).toBe(userId);
       expect(dispatcher.calls[0].event.eventId).toBe(EVENT_ID);
       expect((dispatcher.calls[0].event.session as { id: string }).id).toBe("session-1");
+
+      const keyId = currentCredential.slice(0, currentCredential.indexOf("."));
+      const keyRows = (await handle.db.execute<{ lastUsedAt: Date | null }>(
+        sql`select last_used_at as "lastUsedAt" from ingest_keys where key_id = ${keyId}`,
+      )) as { lastUsedAt: Date | null }[];
+      expect(keyRows[0].lastUsedAt).toEqual(clock.now());
 
       // No event persistence: the schema has no events table at all.
       const tables = (await handle.db.execute<{ tablename: string }>(
