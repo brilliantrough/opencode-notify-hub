@@ -37,10 +37,7 @@ class PluginSetupPage extends ConsumerWidget {
           const _StepTitle('2. 配置环境变量'),
           const Text('在启动 OpenCode 的环境中设置以下变量：'),
           const SizedBox(height: 8),
-          Text(
-            envExample,
-            style: const TextStyle(fontFamily: 'monospace'),
-          ),
+          Text(envExample),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
@@ -95,10 +92,7 @@ class _CopyRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(fontFamily: 'monospace'),
-          ),
+          child: Text(value),
         ),
         IconButton(
           key: copyKey,

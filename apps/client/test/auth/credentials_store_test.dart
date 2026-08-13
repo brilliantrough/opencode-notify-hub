@@ -1,8 +1,12 @@
 import 'package:client/auth/credentials_store.dart';
 import 'package:client/config/app_config.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('InMemoryCredentialsStore', () {
     test('read returns null before any save', () async {
       final store = InMemoryCredentialsStore();
@@ -72,6 +76,41 @@ void main() {
         AppConfig(gatewayHttpBase: 'https://notify.example.com/').gatewayWsBase,
         'wss://notify.example.com/v1/ws',
       );
+    });
+  });
+
+  group('SecureCredentialsStore', () {
+    const channel = MethodChannel(
+      'plugins.it_nomads.com/flutter_secure_storage',
+    );
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    test('reads both credentials with one platform call', () async {
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            if (call.method == 'readAll') {
+              return <String, String>{
+                'refresh_token_v1': 'refresh-abc',
+                'account_email_v1': 'user@example.com',
+              };
+            }
+            return null;
+          });
+      final store = SecureCredentialsStore(
+        storage: const FlutterSecureStorage(),
+      );
+
+      final credentials = await store.read();
+
+      expect(credentials?.refreshToken, 'refresh-abc');
+      expect(credentials?.accountEmail, 'user@example.com');
+      expect(calls.map((call) => call.method), ['readAll']);
     });
   });
 }

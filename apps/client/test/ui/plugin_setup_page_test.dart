@@ -66,6 +66,15 @@ void main() {
     // Points the user at the ingest-keys page for the secret.
     expect(find.textContaining('密钥'), findsWidgets);
     expect(find.byType(SelectableText), findsNothing);
+    final codeTexts = tester
+        .widgetList<Text>(find.byType(Text))
+        .where(
+          (text) =>
+              text.data?.contains('session-notify.js') == true ||
+              text.data?.contains('NOTIFY_GATEWAY_URL=') == true,
+        );
+    expect(codeTexts, isNotEmpty);
+    expect(codeTexts.every((text) => text.style?.fontFamily == null), isTrue);
   });
 
   testWidgets('copy button for the install path writes to the clipboard', (

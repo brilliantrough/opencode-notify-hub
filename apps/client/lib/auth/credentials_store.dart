@@ -67,8 +67,9 @@ class SecureCredentialsStore implements CredentialsStore {
 
   @override
   Future<Credentials?> read() async {
-    final refreshToken = await _storage.read(key: _refreshTokenKey);
-    final accountEmail = await _storage.read(key: _accountEmailKey);
+    final values = await _storage.readAll();
+    final refreshToken = values[_refreshTokenKey];
+    final accountEmail = values[_accountEmailKey];
     if (refreshToken == null || accountEmail == null) {
       return null;
     }
