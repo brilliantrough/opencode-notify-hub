@@ -23,3 +23,6 @@ coverage/
 *.dump
 *.sql.gz
 backups/
+
+# Manually synchronized cross-machine agent memory. Keep credentials out.
+docs/project_memory/
