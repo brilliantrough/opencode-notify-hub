@@ -184,7 +184,7 @@ describe("production event dispatch composition", () => {
     const push = fcm.sent[0];
     expect(push.token).toBe(DEVICE_TOKEN);
     expect(push.channelId).toBe(CHANNEL_SILENT); // soundEnabled: false
-    expect(push.title).toBe("workstation · notify · action_required: question");
+    expect(push.title).toBe("notify · workstation · 需要回答");
     const parsed = JSON.parse(push.dataEvent) as { eventId: string; type: string };
     expect(parsed.eventId).toBe(EVENT_ID);
     expect(parsed.type).toBe("action_required");

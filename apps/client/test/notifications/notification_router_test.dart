@@ -148,8 +148,8 @@ void main() {
       expect(service.shown, hasLength(1));
       final request = service.shown.single;
       expect(request.eventId, 'evt-act');
-      expect(request.title, 'macbook · linewrite · action_required');
-      expect(request.body, 'Permission: filesystem');
+      expect(request.title, 'linewrite · macbook · 需要授权');
+      expect(request.body, '请求权限：filesystem');
       expect(request.playSound, isTrue);
     });
   });
@@ -166,8 +166,8 @@ void main() {
       expect(service.shown, hasLength(2));
       final request = service.shown.last;
       expect(request.eventId, 'evt-term');
-      expect(request.title, 'macbook · linewrite · terminal');
-      expect(request.body, 'completed in 300s\nAll done');
+      expect(request.title, 'linewrite · macbook · 任务已完成');
+      expect(request.body, '用时 300 秒\nAll done');
       expect(request.playSound, isTrue);
     });
   });

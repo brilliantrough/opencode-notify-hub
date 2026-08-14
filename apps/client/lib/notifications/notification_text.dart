@@ -4,20 +4,18 @@ import '../realtime/notify_event.dart';
 /// collapse into a single remaining-count line.
 const _maxQuestionsInBody = 3;
 
-/// Notification title per spec §11: leads with the event source and the
-/// literal wire event type, so a lockscreen shows WHICH machine/project
-/// needs the user and WHAT happened without opening the app.
+/// Concise user-facing title. Internal wire names and ids stay out of UI text.
 String buildNotificationTitle(NotifyEvent event) =>
-    '${event.machine} · ${event.project} · ${event.type.wireName}';
+    '${event.project} · ${event.machine} · ${_statusLabel(event)}';
 
 /// Notification body per spec §11.
 ///
 /// - question: up to the first [_maxQuestionsInBody] questions with their
 ///   option labels, plus a remaining-count line when more exist.
-/// - permission: the permission type.
-/// - terminal: outcome, elapsed duration, and the optional summary.
-/// - heartbeat/action_resolved (never shown as notifications) and
-///   provider_action (whose detail lives in the app) have no body.
+/// - permission/provider action: a direct next step.
+/// - terminal: elapsed duration and the optional summary.
+/// - heartbeat/action_resolved are never shown as notifications and have no
+///   body.
 String buildNotificationBody(NotifyEvent event) {
   return switch (event.type) {
     NotifyEventType.actionRequired => _actionRequiredBody(event),
@@ -28,12 +26,17 @@ String buildNotificationBody(NotifyEvent event) {
 }
 
 String _actionRequiredBody(NotifyEvent event) {
-  return switch (event.actionKind) {
+  final detail = switch (event.actionKind) {
     ActionKind.question => _questionBody(event.questions),
-    ActionKind.permission => 'Permission: ${event.permissionType}',
-    ActionKind.providerAction => '',
-    null => '',
+    ActionKind.permission => [
+      '请求权限：${event.permissionType}',
+      if (event.permissionSummary != null) event.permissionSummary!,
+    ].join('\n'),
+    ActionKind.providerAction =>
+      event.providerActionMessage ?? '请在 OpenCode 中完成操作',
+    null => '请打开 OpenCode 查看详情',
   };
+  return detail;
 }
 
 String _questionBody(List<QuestionPrompt> questions) {
@@ -42,19 +45,35 @@ String _questionBody(List<QuestionPrompt> questions) {
     for (final question in shown) ...[
       question.text,
       if (question.options.isNotEmpty)
-        'Options: ${question.options.map((o) => o.label).join(', ')}',
+        '选项：${question.options.map((o) => o.label).join('、')}',
     ],
   ];
   final remaining = questions.length - shown.length;
   if (remaining > 0) {
-    final plural = remaining == 1 ? 'question' : 'questions';
-    lines.add('…and $remaining more $plural');
+    lines.add('还有 $remaining 个问题');
   }
   return lines.join('\n');
 }
 
 String _terminalBody(NotifyEvent event) {
-  final base = '${event.outcome!.wireName} in ${event.elapsedSeconds}s';
+  final base = '用时 ${event.elapsedSeconds} 秒';
   final summary = event.summary;
   return summary == null ? base : '$base\n$summary';
 }
+
+String _statusLabel(NotifyEvent event) => switch (event.type) {
+  NotifyEventType.heartbeat => '任务进行中',
+  NotifyEventType.actionResolved => '操作已处理',
+  NotifyEventType.actionRequired => switch (event.actionKind) {
+    ActionKind.question => '需要回答',
+    ActionKind.permission => '需要授权',
+    ActionKind.providerAction => '需要操作',
+    null => '需要处理',
+  },
+  NotifyEventType.terminal => switch (event.outcome) {
+    TerminalOutcome.completed => '任务已完成',
+    TerminalOutcome.failed => '任务失败',
+    TerminalOutcome.stopped => '任务已停止',
+    null => '任务已结束',
+  },
+};

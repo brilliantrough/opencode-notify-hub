@@ -64,7 +64,7 @@ class DesktopNotificationService implements NotificationService {
   @override
   Future<void> show(NotifyRequest request) async {
     await _notifier.show(
-      title: 'OpenCode Notify · ${request.title}',
+      title: request.title,
       body: request.body,
       onClick: () => _bringWindowToFront(),
     );

@@ -1,4 +1,5 @@
 import type { NotifyEvent } from "@notify/contracts";
+import { posix, win32 } from "node:path";
 
 /**
  * Conservative UTF-8 budget for the WHOLE push message: the serialized
@@ -122,37 +123,91 @@ function compactEvent(event: NotifyEvent, caps: CompactionCaps): NotifyEvent {
   };
 }
 
+const INTERNAL_PROJECT_ID = /^(?:[0-9a-f]{32,64}|prj_[A-Za-z0-9_-]+)$/i;
+
+function displayProject(event: NotifyEvent): string {
+  if (!INTERNAL_PROJECT_ID.test(event.source.project)) {
+    return event.source.project;
+  }
+  const path = event.source.directory.includes("\\") ? win32 : posix;
+  const label = path.basename(path.normalize(event.source.directory));
+  return label.length > 0 && label !== "." ? label : "unknown";
+}
+
+function statusLabel(event: NotifyEvent): string {
+  if (event.type === "terminal") {
+    return event.payload.outcome === "completed"
+      ? "任务已完成"
+      : event.payload.outcome === "failed"
+        ? "任务失败"
+        : "任务已停止";
+  }
+  if (event.type === "action_required") {
+    return event.payload.kind === "question"
+      ? "需要回答"
+      : event.payload.kind === "permission"
+        ? "需要授权"
+        : "需要操作";
+  }
+  return event.type === "heartbeat" ? "任务进行中" : "操作已处理";
+}
+
+function questionBody(event: Extract<NotifyEvent, { type: "action_required" }>): string {
+  if (event.payload.kind !== "question") {
+    return "";
+  }
+  const shown = event.payload.questions.slice(0, 3);
+  const lines = shown.flatMap((question) => [
+    question.question,
+    ...(question.options !== undefined && question.options.length > 0
+      ? [`选项：${question.options.map((option) => option.label).join("、")}`]
+      : []),
+  ]);
+  const remaining = event.payload.questions.length - shown.length;
+  if (remaining > 0) {
+    lines.push(`还有 ${remaining} 个问题`);
+  }
+  return lines.join("\n");
+}
+
 /** Notification title/body, derived from the (possibly compacted) event. */
 function describeEvent(
   event: NotifyEvent,
   caps: CompactionCaps,
 ): { title: string; body: string } {
-  // The title always leads with the event source and the literal event
-  // type: on a lockscreen the user must see WHICH machine/project needs
-  // them and WHAT happened without opening the app.
-  const prefix = `${event.source.machine} · ${event.source.project} · `;
+  const title = truncate(
+    `${displayProject(event)} · ${event.source.machine} · ${statusLabel(event)}`,
+    caps.title,
+  );
   if (event.type === "terminal") {
+    const base = `用时 ${event.payload.elapsedSeconds} 秒`;
     return {
-      title: truncate(`${prefix}terminal: run ${event.payload.outcome}`, caps.title),
-      body: truncate(event.payload.summary ?? event.session.title, caps.body),
+      title,
+      body: truncate(
+        event.payload.summary === undefined ? base : `${base}\n${event.payload.summary}`,
+        caps.body,
+      ),
     };
   }
   if (event.type === "action_required") {
     const payload = event.payload;
     if (payload.kind === "question") {
       return {
-        title: truncate(`${prefix}action_required: question`, caps.title),
-        body: truncate(payload.questions[0]?.question ?? "", caps.body),
+        title,
+        body: truncate(questionBody(event), caps.body),
       };
     }
     if (payload.kind === "permission") {
       return {
-        title: truncate(`${prefix}action_required: permission`, caps.title),
-        body: truncate(payload.permission.summary, caps.body),
+        title,
+        body: truncate(
+          `请求权限：${payload.permission.permission}\n${payload.permission.summary}`,
+          caps.body,
+        ),
       };
     }
     return {
-      title: truncate(`${prefix}action_required: provider action`, caps.title),
+      title,
       body: truncate(payload.providerAction.message, caps.body),
     };
   }

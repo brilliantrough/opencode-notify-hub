@@ -71,12 +71,12 @@ describe("envelope base", () => {
     expect(validateNotifyEvent(event)).toBe(true);
   });
 
-  it("falls back to the session id when the title is empty or missing", () => {
+  it("uses a readable fallback when the session title is empty or missing", () => {
     const factory = makeFactory();
     const untitled = factory.heartbeat({ id: "ses_x", title: "" }, { sessionID: "ses_x", status: "busy", elapsedMs: 0 });
-    expect(untitled.session).toEqual({ id: "ses_x", title: "ses_x" });
+    expect(untitled.session).toEqual({ id: "ses_x", title: "未命名会话" });
     const missing = factory.heartbeat({ id: "ses_y" }, { sessionID: "ses_y", status: "busy", elapsedMs: 0 });
-    expect(missing.session).toEqual({ id: "ses_y", title: "ses_y" });
+    expect(missing.session).toEqual({ id: "ses_y", title: "未命名会话" });
     expect(validateNotifyEvent(untitled)).toBe(true);
     expect(validateNotifyEvent(missing)).toBe(true);
   });

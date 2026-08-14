@@ -74,27 +74,40 @@ NotifyEvent terminal({String outcome = 'completed', String? summary}) =>
 
 void main() {
   group('buildNotificationTitle', () {
-    test('contains machine, project, and type for every event variant', () {
+    test('uses a short project and human-readable status for every event variant', () {
       final cases = {
-        heartbeat(): 'heartbeat',
+        heartbeat(): '任务进行中',
         question([
           {'question': 'Continue?'},
-        ]): 'action_required',
-        resolved(): 'action_resolved',
-        terminal(): 'terminal',
+        ]): '需要回答',
+        resolved(): '操作已处理',
+        terminal(): '任务已完成',
       };
       for (final entry in cases.entries) {
         final title = buildNotificationTitle(entry.key);
-        expect(title, contains('devbox'));
         expect(title, contains('api'));
         expect(title, contains(entry.value));
+        expect(title, contains('devbox'));
       }
     });
 
-    test('is exactly "machine · project · type"', () {
+    test('is exactly "project · machine · status"', () {
       expect(
         buildNotificationTitle(terminal()),
-        'devbox · api · terminal',
+        'api · devbox · 任务已完成',
+      );
+    });
+
+    test('distinguishes action kinds and terminal outcomes', () {
+      expect(buildNotificationTitle(permission()), 'api · devbox · 需要授权');
+      expect(buildNotificationTitle(providerAction()), 'api · devbox · 需要操作');
+      expect(
+        buildNotificationTitle(terminal(outcome: 'failed')),
+        'api · devbox · 任务失败',
+      );
+      expect(
+        buildNotificationTitle(terminal(outcome: 'stopped')),
+        'api · devbox · 任务已停止',
       );
     });
   });
@@ -116,7 +129,7 @@ void main() {
       expect(
         body,
         'Which database should I use?\n'
-        'Options: Postgres, SQLite',
+        '选项：Postgres、SQLite',
       );
     });
 
@@ -149,7 +162,7 @@ void main() {
         ]),
       );
 
-      expect(body.split('\n').last, '…and 2 more questions');
+      expect(body.split('\n').last, '还有 2 个问题');
     });
 
     test('uses the singular form for one remaining question', () {
@@ -162,7 +175,7 @@ void main() {
         ]),
       );
 
-      expect(body.split('\n').last, '…and 1 more question');
+      expect(body.split('\n').last, '还有 1 个问题');
     });
 
     test('omits the remaining-count line at exactly three questions', () {
@@ -174,7 +187,7 @@ void main() {
         ]),
       );
 
-      expect(body, isNot(contains('more question')));
+      expect(body, isNot(contains('还有')));
     });
 
     test('omits the options line for a question without options', () {
@@ -189,14 +202,20 @@ void main() {
   });
 
   group('buildNotificationBody permission', () {
-    test('contains the permission type', () {
-      expect(buildNotificationBody(permission()), contains('bash'));
+    test('shows the permission type and summary', () {
+      expect(
+        buildNotificationBody(permission()),
+        '请求权限：bash\nRun rm -rf build/',
+      );
     });
   });
 
   group('buildNotificationBody provider_action', () {
-    test('is empty (provider detail stays in the app)', () {
-      expect(buildNotificationBody(providerAction()), isEmpty);
+    test('shows the provider action message', () {
+      expect(
+        buildNotificationBody(providerAction()),
+        'Your Anthropic session has expired.',
+      );
     });
   });
 
@@ -204,7 +223,7 @@ void main() {
     test('contains outcome and elapsed duration for every outcome', () {
       for (final outcome in ['completed', 'failed', 'stopped']) {
         final body = buildNotificationBody(terminal(outcome: outcome));
-        expect(body, contains(outcome), reason: outcome);
+        expect(body, startsWith('用时 42 秒'), reason: outcome);
         expect(body, contains('42'), reason: outcome);
       }
     });
@@ -218,7 +237,7 @@ void main() {
     });
 
     test('omits the summary when absent', () {
-      expect(buildNotificationBody(terminal()), 'completed in 42s');
+      expect(buildNotificationBody(terminal()), '用时 42 秒');
     });
   });
 

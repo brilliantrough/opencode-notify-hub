@@ -210,8 +210,8 @@ void main() {
       expect(notifications.shown, hasLength(1));
       final request = notifications.shown.single;
       expect(request.eventId, 'evt-term');
-      expect(request.title, 'devbox · api · terminal');
-      expect(request.body, 'completed in 42s');
+      expect(request.title, 'api · devbox · 任务已完成');
+      expect(request.body, '用时 42 秒');
     });
 
     test('ignores malformed foreground payloads', () async {
@@ -237,8 +237,8 @@ void main() {
 
         expect(history.contains('evt-term'), isTrue);
         final entry = history.entries.single;
-        expect(entry.title, 'devbox · api · terminal');
-        expect(entry.body, 'completed in 42s');
+        expect(entry.title, 'api · devbox · 任务已完成');
+        expect(entry.body, '用时 42 秒');
         expect(notifications.shown, isEmpty, reason: 'no double alert');
       },
     );

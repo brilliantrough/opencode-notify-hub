@@ -297,20 +297,56 @@ describe("CompositeEventDispatcher", () => {
     expect(JSON.parse(dataEvent)).toEqual(QUESTION_EVENT);
   });
 
-  it("push title carries machine, project, and event type for lockscreen rendering", async () => {
+  it("push uses a concise project, machine, and status title", async () => {
     const { dispatcher, devices, fcm } = makeDispatcher();
     devices.targets = [TARGET_SOUND];
     await dispatcher.dispatch({ userId: USER, event: QUESTION_EVENT });
-    expect(fcm.sent[0]?.title).toBe("workstation · notify · action_required: question");
-    expect(fcm.sent[0]?.body).toBe(SENSITIVE_QUESTION);
+    expect(fcm.sent[0]?.title).toBe("notify · workstation · 需要回答");
+    expect(fcm.sent[0]?.body).toBe(`${SENSITIVE_QUESTION}\n选项：Yes、No`);
   });
 
-  it("terminal push title carries machine, project, type, and the outcome", async () => {
+  it("terminal push uses a readable outcome and duration body", async () => {
     const { dispatcher, devices, fcm } = makeDispatcher();
     devices.targets = [TARGET_SOUND];
     await dispatcher.dispatch({ userId: USER, event: TERMINAL_EVENT });
-    expect(fcm.sent[0]?.title).toBe("workstation · notify · terminal: run completed");
-    expect(fcm.sent[0]?.body).toBe("All tests pass");
+    expect(fcm.sent[0]?.title).toBe("notify · workstation · 任务已完成");
+    expect(fcm.sent[0]?.body).toBe("用时 42 秒\nAll tests pass");
+  });
+
+  it("replaces a legacy internal project id and never falls back to a session id", () => {
+    const sessionId = "ses_internal_123";
+    const event = {
+      ...BASE,
+      source: {
+        machine: "workstation",
+        project: "03c3139669b073a1c6f2d7daa73a08eb70a3c037",
+        directory: String.raw`C:\work\opencode-notify`,
+      },
+      session: { id: sessionId, title: sessionId },
+      type: "terminal",
+      payload: { outcome: "completed", elapsedSeconds: 5 },
+    } as NotifyEvent;
+
+    const content = buildPushContent(event);
+
+    expect(content?.title).toBe("opencode-notify · workstation · 任务已完成");
+    expect(content?.body).toBe("用时 5 秒");
+    expect(content?.title).not.toContain(sessionId);
+    expect(content?.body).not.toContain(sessionId);
+  });
+
+  it("question push shows three prompts and summarizes the remainder", () => {
+    const event = {
+      ...QUESTION_EVENT,
+      payload: {
+        ...QUESTION_EVENT.payload,
+        questions: ["Q1", "Q2", "Q3", "Q4"].map((question) => ({ question })),
+      },
+    } as NotifyEvent;
+
+    const content = buildPushContent(event);
+
+    expect(content?.body).toBe("Q1\nQ2\nQ3\n还有 1 个问题");
   });
 
   it("zero targets resolves without any FCM send", async () => {
@@ -708,7 +744,7 @@ describe("buildPushContent", () => {
     expect(buildPushContent(event)).toBeNull();
   });
 
-  it("every push title carries source.machine, source.project, and the event type", () => {
+  it("every push title carries the project and a readable status", () => {
     const permission: NotifyEvent = {
       ...BASE,
       type: "action_required",
@@ -735,9 +771,8 @@ describe("buildPushContent", () => {
     for (const event of [QUESTION_EVENT, permission, providerAction, TERMINAL_EVENT]) {
       const content = buildPushContent(event);
       expect(content).not.toBeNull();
-      expect(content?.title).toContain(event.source.machine);
       expect(content?.title).toContain(event.source.project);
-      expect(content?.title).toContain(event.type);
+      expect(content?.title).toContain(event.source.machine);
     }
   });
 

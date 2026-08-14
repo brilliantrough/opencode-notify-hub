@@ -231,8 +231,8 @@ describe("SessionNotifyPlugin", () => {
     let posted = postedEvents(calls);
     expect(posted.map((event) => event.type)).toEqual(["action_required"]);
     expect(posted[0].payload).toMatchObject({ requestId: "qst_req1", kind: "question" });
-    // No session upsert was seen: the title falls back to the session id.
-    expect(posted[0].session).toEqual({ id: SESSION_ID, title: SESSION_ID });
+    // Internal session ids never become user-facing fallback titles.
+    expect(posted[0].session).toEqual({ id: SESSION_ID, title: "未命名会话" });
 
     await emit(hooks, devQuestionReplied());
     await settle();
@@ -293,7 +293,7 @@ describe("SessionNotifyPlugin", () => {
     expect(posted[0].payload).toEqual({ status: "busy", elapsedSeconds: 60 });
     expect(posted[0].source).toEqual({
       machine: "test-machine",
-      project: "prj_1",
+      project: "project",
       directory: "/home/dev/project",
     });
     expect(posted[0].session).toEqual({ id: SESSION_ID, title: "Fix login redirect" });
@@ -303,6 +303,23 @@ describe("SessionNotifyPlugin", () => {
     posted = postedEvents(calls);
     expect(posted).toHaveLength(2);
     expect(posted[1].payload).toEqual({ status: "busy", elapsedSeconds: 120 });
+  });
+
+  it("derives a readable project label from a Windows worktree", async () => {
+    const { calls, fetchImpl } = makeRecordingFetch();
+    vi.stubGlobal("fetch", fetchImpl);
+    const { client } = makeClient();
+    const input = makeInput(client);
+    input.project.worktree = String.raw`C:\work\opencode-notify`;
+    input.worktree = String.raw`C:\work\opencode-notify`;
+    input.directory = String.raw`C:\work\opencode-notify`;
+    const hooks = await SessionNotifyPlugin(input);
+
+    await emit(hooks, sessionCreated());
+    await emit(hooks, devQuestionAsked());
+    await settle();
+
+    expect(postedEvents(calls)[0].source.project).toBe("opencode-notify");
   });
 
   it("reports retry status on the heartbeat", async () => {

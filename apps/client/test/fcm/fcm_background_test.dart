@@ -105,8 +105,8 @@ void main() {
       expect(history.entries, hasLength(1));
       final entry = history.entries.single;
       expect(entry.eventId, 'evt-action_required');
-      expect(entry.title, 'devbox · api · action_required');
-      expect(entry.body, 'Permission: bash');
+      expect(entry.title, 'api · devbox · 需要授权');
+      expect(entry.body, '请求权限：bash\nRun rm -rf build/');
       expect(entry.receivedAt, DateTime.utc(2026, 1, 2));
     });
 
@@ -118,8 +118,8 @@ void main() {
       );
 
       expect(history.entries, hasLength(1));
-      expect(history.entries.single.title, 'devbox · api · terminal');
-      expect(history.entries.single.body, 'completed in 42s');
+      expect(history.entries.single.title, 'api · devbox · 任务已完成');
+      expect(history.entries.single.body, '用时 42 秒');
     });
 
     test('skips heartbeat events entirely', () async {

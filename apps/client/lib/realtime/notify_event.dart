@@ -1,4 +1,5 @@
 import 'package:notify_api/notify_api.dart' as gen;
+import 'package:path/path.dart' as path;
 
 /// The four wire event types of the NotifyEvent envelope.
 enum NotifyEventType {
@@ -62,8 +63,9 @@ class QuestionPrompt {
 ///
 /// Fields that only exist on some variants stay null (or empty) elsewhere:
 /// [requestId]/[actionKind] on the action events, [questions] on question
-/// payloads, [permissionType] on permission payloads, [outcome]/[summary] on
-/// terminal events, and [elapsedSeconds] on heartbeat/terminal events.
+/// payloads, permission/provider details on their respective action payloads,
+/// [outcome]/[summary] on terminal events, and [elapsedSeconds] on
+/// heartbeat/terminal events.
 class NotifyEvent {
   const NotifyEvent({
     required this.eventId,
@@ -78,6 +80,8 @@ class NotifyEvent {
     this.actionKind,
     this.questions = const [],
     this.permissionType,
+    this.permissionSummary,
+    this.providerActionMessage,
     this.outcome,
     this.elapsedSeconds,
     this.summary,
@@ -95,6 +99,8 @@ class NotifyEvent {
   final ActionKind? actionKind;
   final List<QuestionPrompt> questions;
   final String? permissionType;
+  final String? permissionSummary;
+  final String? providerActionMessage;
   final TerminalOutcome? outcome;
   final int? elapsedSeconds;
   final String? summary;
@@ -170,6 +176,7 @@ class NotifyEvent {
         requestId: p.requestId,
         actionKind: ActionKind.permission,
         permissionType: p.permission.permission,
+        permissionSummary: p.permission.summary,
       ),
       gen.NotifyEventOneOf1PayloadOneOf2 p => _base(
         v.eventId,
@@ -179,6 +186,7 @@ class NotifyEvent {
         NotifyEventType.actionRequired,
         requestId: p.requestId,
         actionKind: ActionKind.providerAction,
+        providerActionMessage: p.providerAction.message,
       ),
       _ => throw FormatException(
         'Unknown action_required payload kind',
@@ -241,6 +249,8 @@ class NotifyEvent {
     ActionKind? actionKind,
     List<QuestionPrompt> questions = const [],
     String? permissionType,
+    String? permissionSummary,
+    String? providerActionMessage,
     TerminalOutcome? outcome,
     int? elapsedSeconds,
     String? summary,
@@ -248,17 +258,37 @@ class NotifyEvent {
     eventId: eventId,
     occurredAt: occurredAt,
     machine: source.machine,
-    project: source.project,
+    project: _readableProject(source.project, source.directory),
     directory: source.directory,
     sessionId: session.id,
-    sessionTitle: session.title,
+    sessionTitle: session.title.trim().isEmpty || session.title == session.id
+        ? '未命名会话'
+        : session.title,
     type: type,
     requestId: requestId,
     actionKind: actionKind,
     questions: questions,
     permissionType: permissionType,
+    permissionSummary: permissionSummary,
+    providerActionMessage: providerActionMessage,
     outcome: outcome,
     elapsedSeconds: elapsedSeconds,
     summary: summary,
   );
+}
+
+final _internalProjectId = RegExp(
+  r'^(?:[0-9a-f]{32,64}|prj_[A-Za-z0-9_-]+)$',
+  caseSensitive: false,
+);
+
+String _readableProject(String project, String directory) {
+  if (!_internalProjectId.hasMatch(project)) {
+    return project;
+  }
+  final context = directory.contains(r'\')
+      ? path.Context(style: path.Style.windows)
+      : path.posix;
+  final label = context.basename(context.normalize(directory));
+  return label.isEmpty || label == '.' ? 'unknown' : label;
 }

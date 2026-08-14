@@ -104,6 +104,24 @@ void main() {
       expect(event.actionKind, isNull);
     });
 
+    test('replaces internal project and session ids with readable labels', () {
+      final envelope = terminalEvent();
+      envelope['source'] = {
+        'machine': 'devbox',
+        'project': '03c3139669b073a1c6f2d7daa73a08eb70a3c037',
+        'directory': r'C:\work\opencode-notify',
+      };
+      envelope['session'] = {
+        'id': 'ses_internal_123',
+        'title': 'ses_internal_123',
+      };
+
+      final event = NotifyEvent.parse(envelope);
+
+      expect(event.project, 'opencode-notify');
+      expect(event.sessionTitle, '未命名会话');
+    });
+
     test('parses a heartbeat event', () {
       final event = NotifyEvent.parse(heartbeatEvent());
 
@@ -162,6 +180,7 @@ void main() {
       expect(event.actionKind, ActionKind.permission);
       expect(event.requestId, 'per_1');
       expect(event.permissionType, 'bash');
+      expect(event.permissionSummary, 'Run rm -rf build/');
       expect(event.questions, isEmpty);
     });
 
@@ -171,6 +190,10 @@ void main() {
       expect(event.type, NotifyEventType.actionRequired);
       expect(event.actionKind, ActionKind.providerAction);
       expect(event.requestId, 'pro_1');
+      expect(
+        event.providerActionMessage,
+        'Your Anthropic session has expired.',
+      );
     });
 
     test('parses an action_resolved question event', () {

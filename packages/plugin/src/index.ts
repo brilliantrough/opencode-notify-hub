@@ -30,6 +30,7 @@
 
 import type { Hooks, Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { NotifyEvent } from "@notify/contracts";
+import { posix, win32 } from "node:path";
 
 import { loadConfig, type PluginConfig } from "./config.js";
 import {
@@ -78,6 +79,22 @@ function safeNonEmpty(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
 
+/** Human-readable project label; OpenCode's `project.id` is an internal hash. */
+function projectLabel(input: PluginInput): string {
+  const project = input.project as PluginInput["project"] | undefined;
+  for (const root of [project?.worktree, input.worktree, input.directory]) {
+    if (typeof root !== "string" || root.trim().length === 0) {
+      continue;
+    }
+    const path = root.includes("\\") ? win32 : posix;
+    const label = path.basename(path.normalize(root.trim()));
+    if (label.length > 0 && label !== ".") {
+      return label;
+    }
+  }
+  return "unknown";
+}
+
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -111,7 +128,7 @@ export function createSessionNotifyHooks(
   const envelopes = new EnvelopeFactory({
     source: {
       machine: config.machine,
-      project: safeNonEmpty(input.project?.id, "unknown"),
+      project: projectLabel(input),
       directory: safeNonEmpty(input.directory, safeNonEmpty(input.worktree, "unknown")),
     },
     includeSummary: config.includeSummary,

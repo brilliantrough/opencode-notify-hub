@@ -57,7 +57,7 @@ void main() {
       await service().show(_request());
 
       expect(notifier.shown, hasLength(1));
-      expect(notifier.shown.single.title, 'OpenCode Notify · 构建完成');
+      expect(notifier.shown.single.title, '构建完成');
       expect(notifier.shown.single.body, '会话 abc 已结束');
     });
 

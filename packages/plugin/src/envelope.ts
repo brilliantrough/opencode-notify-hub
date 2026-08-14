@@ -360,7 +360,9 @@ export class EnvelopeFactory {
 
   private sessionSection(session: EnvelopeSession): { id: string; title: string } {
     const title =
-      session.title !== undefined && session.title.length > 0 ? session.title : session.id;
+      session.title !== undefined && session.title.trim().length > 0
+        ? session.title
+        : "未命名会话";
     return { id: session.id, title };
   }
 
