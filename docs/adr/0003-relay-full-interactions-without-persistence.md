@@ -1,0 +1,3 @@
+# Relay full interactions without persistence
+
+The remote-unblock path will relay complete question and permission payloads, including unredacted commands, paths, patterns, metadata, and user answers, because users need the exact authorization object and this small trusted team accepts the transport exposure. Gateway may hold command outcomes in memory for about ten minutes but must not persist interaction bodies or include them in logs. This intentionally changes the previous privacy boundary from "Gateway never handles prompt-like content" to "Gateway handles interaction content transiently over TLS" without turning Gateway into a conversation or audit store.

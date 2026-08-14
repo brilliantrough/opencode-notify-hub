@@ -1,0 +1,3 @@
+# Use one Plugin key for notification and control
+
+The first remote-unblock Beta will reuse the existing globally configured Plugin key for both event ingestion and the outbound control connection, rather than adding a second credential or pairing flow. This deliberately accepts the larger credential blast radius because the product is operated by a small trusted team, one-time global environment configuration is a core usability constraint, payloads are low-value internal work, and revoking the key can immediately disable both capabilities. A future multi-tenant or higher-trust release must revisit this decision before broadening access.

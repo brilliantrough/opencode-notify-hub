@@ -1,0 +1,3 @@
+# Use Plugin-mediated remote control
+
+Remote interactions will travel through an outbound control connection owned by the existing OpenCode Notify Plugin, with OpenCode remaining authoritative for pending questions and permissions. We rejected exposing or generically proxying the OpenCode Server port and adding a separate connector process because the first expands the remote attack surface while the second adds installation and supervision work; the Plugin already has the instance-specific SDK client, server URL, machine context, and lifecycle needed to route commands. Gateway state is therefore routing and projection state, not a durable substitute for OpenCode interaction state.
