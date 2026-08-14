@@ -1,5 +1,7 @@
 import type { JSONSchema } from "json-schema-to-ts";
 
+import { pendingInteractionSchema } from "./pending.js";
+
 const nonEmptyString = { type: "string", minLength: 1 } as const;
 
 export const instancePresenceStateSchema = {
@@ -32,7 +34,7 @@ export const instancePresenceSchema = {
   },
 } as const satisfies JSONSchema;
 
-export const pluginControlClientMessageSchema = {
+const pluginRegistrationSchema = {
   type: "object",
   additionalProperties: false,
   required: [
@@ -55,7 +57,23 @@ export const pluginControlClientMessageSchema = {
   },
 } as const satisfies JSONSchema;
 
-export const pluginControlServerMessageSchema = {
+const pendingSnapshotResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "requestId", "instanceId", "interactions"],
+  properties: {
+    type: { const: "pending_snapshot_response" },
+    requestId: { type: "string", format: "uuid" },
+    instanceId: { type: "string", format: "uuid" },
+    interactions: { type: "array", items: pendingInteractionSchema },
+  },
+} as const satisfies JSONSchema;
+
+export const pluginControlClientMessageSchema = {
+  oneOf: [pluginRegistrationSchema, pendingSnapshotResponseSchema],
+} as const satisfies JSONSchema;
+
+const pluginRegistrationResultSchema = {
   type: "object",
   additionalProperties: false,
   required: ["type", "instanceId", "state"],
@@ -67,4 +85,18 @@ export const pluginControlServerMessageSchema = {
       enum: ["controllable", "conflicting", "incompatible"],
     },
   },
+} as const satisfies JSONSchema;
+
+const pendingSnapshotRequestSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "requestId"],
+  properties: {
+    type: { const: "pending_snapshot_request" },
+    requestId: { type: "string", format: "uuid" },
+  },
+} as const satisfies JSONSchema;
+
+export const pluginControlServerMessageSchema = {
+  oneOf: [pluginRegistrationResultSchema, pendingSnapshotRequestSchema],
 } as const satisfies JSONSchema;

@@ -55,11 +55,27 @@ Serializers _$serializers =
           ..add(NotifyEventOneOfSource.serializer)
           ..add(NotifyEventOneOfTypeEnum.serializer)
           ..add(PatchDeviceBody.serializer)
+          ..add(PendingInteraction.serializer)
+          ..add(PendingInteractionOneOf.serializer)
+          ..add(PendingInteractionOneOf1.serializer)
+          ..add(PendingInteractionOneOf1KindEnum.serializer)
+          ..add(PendingInteractionOneOfKindEnum.serializer)
+          ..add(PendingInteractionOneOfQuestionsInner.serializer)
+          ..add(PendingInteractionOneOfQuestionsInnerOptionsInner.serializer)
+          ..add(PendingInteractionOneOfTool.serializer)
+          ..add(PendingSnapshot.serializer)
+          ..add(PendingSnapshotInteractionsInner.serializer)
           ..add(PluginControlClientMessage.serializer)
-          ..add(PluginControlClientMessageTypeEnum.serializer)
+          ..add(PluginControlClientMessageOneOf.serializer)
+          ..add(PluginControlClientMessageOneOf1.serializer)
+          ..add(PluginControlClientMessageOneOf1TypeEnum.serializer)
+          ..add(PluginControlClientMessageOneOfTypeEnum.serializer)
           ..add(PluginControlServerMessage.serializer)
-          ..add(PluginControlServerMessageStateEnum.serializer)
-          ..add(PluginControlServerMessageTypeEnum.serializer)
+          ..add(PluginControlServerMessageOneOf.serializer)
+          ..add(PluginControlServerMessageOneOf1.serializer)
+          ..add(PluginControlServerMessageOneOf1TypeEnum.serializer)
+          ..add(PluginControlServerMessageOneOfStateEnum.serializer)
+          ..add(PluginControlServerMessageOneOfTypeEnum.serializer)
           ..add(RefreshBody.serializer)
           ..add(RegisterBody.serializer)
           ..add(RegisterDeviceBody.serializer)
@@ -91,6 +107,41 @@ Serializers _$serializers =
                 ListBuilder<
                   NotifyEventOneOf1PayloadOneOfQuestionsInnerOptionsInner
                 >(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [
+              const FullType(PendingInteractionOneOfQuestionsInner),
+            ]),
+            () => ListBuilder<PendingInteractionOneOfQuestionsInner>(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [
+              const FullType(PendingInteractionOneOfQuestionsInnerOptionsInner),
+            ]),
+            () =>
+                ListBuilder<
+                  PendingInteractionOneOfQuestionsInnerOptionsInner
+                >(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [
+              const FullType(PendingSnapshotInteractionsInner),
+            ]),
+            () => ListBuilder<PendingSnapshotInteractionsInner>(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [
+              const FullType(PendingSnapshotInteractionsInner),
+            ]),
+            () => ListBuilder<PendingSnapshotInteractionsInner>(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [const FullType(String)]),
+            () => ListBuilder<String>(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [const FullType(String)]),
+            () => ListBuilder<String>(),
           )
           ..addBuilderFactory(
             const FullType(BuiltList, const [

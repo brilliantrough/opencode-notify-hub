@@ -585,57 +585,586 @@ components:
         soundEnabled:
           type: boolean
       type: object
+    PendingInteraction:
+      oneOf:
+        - additionalProperties: false
+          properties:
+            directory:
+              minLength: 1
+              type: string
+            instanceId:
+              format: uuid
+              type: string
+            kind:
+              const: question
+            machine:
+              minLength: 1
+              type: string
+            occurredAt:
+              format: date-time
+              type: string
+            project:
+              minLength: 1
+              type: string
+            questions:
+              items:
+                additionalProperties: false
+                properties:
+                  custom:
+                    type: boolean
+                  header:
+                    minLength: 1
+                    type: string
+                  multiple:
+                    type: boolean
+                  options:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        description:
+                          type: string
+                        label:
+                          minLength: 1
+                          type: string
+                      required:
+                        - label
+                        - description
+                      type: object
+                    type: array
+                  question:
+                    minLength: 1
+                    type: string
+                required:
+                  - header
+                  - question
+                  - options
+                  - multiple
+                  - custom
+                type: object
+              minItems: 1
+              type: array
+            requestId:
+              minLength: 1
+              type: string
+            sessionId:
+              minLength: 1
+              type: string
+            sessionTitle:
+              type: string
+            tool:
+              additionalProperties: false
+              properties:
+                callId:
+                  minLength: 1
+                  type: string
+                messageId:
+                  minLength: 1
+                  type: string
+              required:
+                - messageId
+                - callId
+              type: object
+          required:
+            - instanceId
+            - machine
+            - project
+            - directory
+            - sessionId
+            - sessionTitle
+            - requestId
+            - occurredAt
+            - kind
+            - questions
+          type: object
+        - additionalProperties: false
+          properties:
+            always:
+              items:
+                minLength: 1
+                type: string
+              type: array
+            directory:
+              minLength: 1
+              type: string
+            instanceId:
+              format: uuid
+              type: string
+            kind:
+              const: permission
+            machine:
+              minLength: 1
+              type: string
+            metadata:
+              additionalProperties: true
+              type: object
+            occurredAt:
+              format: date-time
+              type: string
+            patterns:
+              items:
+                minLength: 1
+                type: string
+              type: array
+            permission:
+              minLength: 1
+              type: string
+            project:
+              minLength: 1
+              type: string
+            requestId:
+              minLength: 1
+              type: string
+            sessionId:
+              minLength: 1
+              type: string
+            sessionTitle:
+              type: string
+            tool:
+              additionalProperties: false
+              properties:
+                callId:
+                  minLength: 1
+                  type: string
+                messageId:
+                  minLength: 1
+                  type: string
+              required:
+                - messageId
+                - callId
+              type: object
+          required:
+            - instanceId
+            - machine
+            - project
+            - directory
+            - sessionId
+            - sessionTitle
+            - requestId
+            - occurredAt
+            - kind
+            - permission
+            - patterns
+            - always
+            - metadata
+          type: object
+    PendingSnapshot:
+      additionalProperties: false
+      properties:
+        generatedAt:
+          format: date-time
+          type: string
+        interactions:
+          items:
+            oneOf:
+              - additionalProperties: false
+                properties:
+                  directory:
+                    minLength: 1
+                    type: string
+                  instanceId:
+                    format: uuid
+                    type: string
+                  kind:
+                    const: question
+                  machine:
+                    minLength: 1
+                    type: string
+                  occurredAt:
+                    format: date-time
+                    type: string
+                  project:
+                    minLength: 1
+                    type: string
+                  questions:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        custom:
+                          type: boolean
+                        header:
+                          minLength: 1
+                          type: string
+                        multiple:
+                          type: boolean
+                        options:
+                          items:
+                            additionalProperties: false
+                            properties:
+                              description:
+                                type: string
+                              label:
+                                minLength: 1
+                                type: string
+                            required:
+                              - label
+                              - description
+                            type: object
+                          type: array
+                        question:
+                          minLength: 1
+                          type: string
+                      required:
+                        - header
+                        - question
+                        - options
+                        - multiple
+                        - custom
+                      type: object
+                    minItems: 1
+                    type: array
+                  requestId:
+                    minLength: 1
+                    type: string
+                  sessionId:
+                    minLength: 1
+                    type: string
+                  sessionTitle:
+                    type: string
+                  tool:
+                    additionalProperties: false
+                    properties:
+                      callId:
+                        minLength: 1
+                        type: string
+                      messageId:
+                        minLength: 1
+                        type: string
+                    required:
+                      - messageId
+                      - callId
+                    type: object
+                required:
+                  - instanceId
+                  - machine
+                  - project
+                  - directory
+                  - sessionId
+                  - sessionTitle
+                  - requestId
+                  - occurredAt
+                  - kind
+                  - questions
+                type: object
+              - additionalProperties: false
+                properties:
+                  always:
+                    items:
+                      minLength: 1
+                      type: string
+                    type: array
+                  directory:
+                    minLength: 1
+                    type: string
+                  instanceId:
+                    format: uuid
+                    type: string
+                  kind:
+                    const: permission
+                  machine:
+                    minLength: 1
+                    type: string
+                  metadata:
+                    additionalProperties: true
+                    type: object
+                  occurredAt:
+                    format: date-time
+                    type: string
+                  patterns:
+                    items:
+                      minLength: 1
+                      type: string
+                    type: array
+                  permission:
+                    minLength: 1
+                    type: string
+                  project:
+                    minLength: 1
+                    type: string
+                  requestId:
+                    minLength: 1
+                    type: string
+                  sessionId:
+                    minLength: 1
+                    type: string
+                  sessionTitle:
+                    type: string
+                  tool:
+                    additionalProperties: false
+                    properties:
+                      callId:
+                        minLength: 1
+                        type: string
+                      messageId:
+                        minLength: 1
+                        type: string
+                    required:
+                      - messageId
+                      - callId
+                    type: object
+                required:
+                  - instanceId
+                  - machine
+                  - project
+                  - directory
+                  - sessionId
+                  - sessionTitle
+                  - requestId
+                  - occurredAt
+                  - kind
+                  - permission
+                  - patterns
+                  - always
+                  - metadata
+                type: object
+          type: array
+      required:
+        - generatedAt
+        - interactions
+      type: object
     PluginControlClientMessage:
-      additionalProperties: false
-      properties:
-        directory:
-          minLength: 1
-          type: string
-        instanceId:
-          format: uuid
-          type: string
-        machine:
-          minLength: 1
-          type: string
-        openCodeVersion:
-          minLength: 1
-          type: string
-        project:
-          minLength: 1
-          type: string
-        protocolVersion:
-          minimum: 1
-          type: integer
-        type:
-          const: register
-      required:
-        - type
-        - instanceId
-        - machine
-        - project
-        - directory
-        - openCodeVersion
-        - protocolVersion
-      type: object
+      oneOf:
+        - additionalProperties: false
+          properties:
+            directory:
+              minLength: 1
+              type: string
+            instanceId:
+              format: uuid
+              type: string
+            machine:
+              minLength: 1
+              type: string
+            openCodeVersion:
+              minLength: 1
+              type: string
+            project:
+              minLength: 1
+              type: string
+            protocolVersion:
+              minimum: 1
+              type: integer
+            type:
+              const: register
+          required:
+            - type
+            - instanceId
+            - machine
+            - project
+            - directory
+            - openCodeVersion
+            - protocolVersion
+          type: object
+        - additionalProperties: false
+          properties:
+            instanceId:
+              format: uuid
+              type: string
+            interactions:
+              items:
+                oneOf:
+                  - additionalProperties: false
+                    properties:
+                      directory:
+                        minLength: 1
+                        type: string
+                      instanceId:
+                        format: uuid
+                        type: string
+                      kind:
+                        const: question
+                      machine:
+                        minLength: 1
+                        type: string
+                      occurredAt:
+                        format: date-time
+                        type: string
+                      project:
+                        minLength: 1
+                        type: string
+                      questions:
+                        items:
+                          additionalProperties: false
+                          properties:
+                            custom:
+                              type: boolean
+                            header:
+                              minLength: 1
+                              type: string
+                            multiple:
+                              type: boolean
+                            options:
+                              items:
+                                additionalProperties: false
+                                properties:
+                                  description:
+                                    type: string
+                                  label:
+                                    minLength: 1
+                                    type: string
+                                required:
+                                  - label
+                                  - description
+                                type: object
+                              type: array
+                            question:
+                              minLength: 1
+                              type: string
+                          required:
+                            - header
+                            - question
+                            - options
+                            - multiple
+                            - custom
+                          type: object
+                        minItems: 1
+                        type: array
+                      requestId:
+                        minLength: 1
+                        type: string
+                      sessionId:
+                        minLength: 1
+                        type: string
+                      sessionTitle:
+                        type: string
+                      tool:
+                        additionalProperties: false
+                        properties:
+                          callId:
+                            minLength: 1
+                            type: string
+                          messageId:
+                            minLength: 1
+                            type: string
+                        required:
+                          - messageId
+                          - callId
+                        type: object
+                    required:
+                      - instanceId
+                      - machine
+                      - project
+                      - directory
+                      - sessionId
+                      - sessionTitle
+                      - requestId
+                      - occurredAt
+                      - kind
+                      - questions
+                    type: object
+                  - additionalProperties: false
+                    properties:
+                      always:
+                        items:
+                          minLength: 1
+                          type: string
+                        type: array
+                      directory:
+                        minLength: 1
+                        type: string
+                      instanceId:
+                        format: uuid
+                        type: string
+                      kind:
+                        const: permission
+                      machine:
+                        minLength: 1
+                        type: string
+                      metadata:
+                        additionalProperties: true
+                        type: object
+                      occurredAt:
+                        format: date-time
+                        type: string
+                      patterns:
+                        items:
+                          minLength: 1
+                          type: string
+                        type: array
+                      permission:
+                        minLength: 1
+                        type: string
+                      project:
+                        minLength: 1
+                        type: string
+                      requestId:
+                        minLength: 1
+                        type: string
+                      sessionId:
+                        minLength: 1
+                        type: string
+                      sessionTitle:
+                        type: string
+                      tool:
+                        additionalProperties: false
+                        properties:
+                          callId:
+                            minLength: 1
+                            type: string
+                          messageId:
+                            minLength: 1
+                            type: string
+                        required:
+                          - messageId
+                          - callId
+                        type: object
+                    required:
+                      - instanceId
+                      - machine
+                      - project
+                      - directory
+                      - sessionId
+                      - sessionTitle
+                      - requestId
+                      - occurredAt
+                      - kind
+                      - permission
+                      - patterns
+                      - always
+                      - metadata
+                    type: object
+              type: array
+            requestId:
+              format: uuid
+              type: string
+            type:
+              const: pending_snapshot_response
+          required:
+            - type
+            - requestId
+            - instanceId
+            - interactions
+          type: object
     PluginControlServerMessage:
-      additionalProperties: false
-      properties:
-        instanceId:
-          format: uuid
-          type: string
-        state:
-          enum:
-            - controllable
-            - conflicting
-            - incompatible
-          type: string
-        type:
-          const: registration
-      required:
-        - type
-        - instanceId
-        - state
-      type: object
+      oneOf:
+        - additionalProperties: false
+          properties:
+            instanceId:
+              format: uuid
+              type: string
+            state:
+              enum:
+                - controllable
+                - conflicting
+                - incompatible
+              type: string
+            type:
+              const: registration
+          required:
+            - type
+            - instanceId
+            - state
+          type: object
+        - additionalProperties: false
+          properties:
+            requestId:
+              format: uuid
+              type: string
+            type:
+              const: pending_snapshot_request
+          required:
+            - type
+            - requestId
+          type: object
     RefreshBody:
       additionalProperties: false
       properties:
@@ -1728,6 +2257,28 @@ paths:
       summary: Revoke an ingest key.
       tags:
         - ingest-keys
+  /v1/pending-interactions:
+    get:
+      description: Asks every owned online compatible Plugin instance for its current OpenCode questions and permissions and returns a unified snapshot. OpenCode is authoritative; the snapshot is a projection. Conflicting, incompatible, and offline instances are not queried, and provider actions never appear here.
+      operationId: getPendingInteractions
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingSnapshot"
+          description: Pending interactions snapshot.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Missing or invalid access token.
+      security:
+        - bearerAuth: []
+      summary: List the authenticated user's pending interactions.
+      tags:
+        - pending
   /v1/plugin/ws:
     get:
       description: The HTTP Upgrade authenticates with the existing Plugin key. The Plugin sends one PluginControlClientMessage registration and receives a PluginControlServerMessage result. Notification ingestion remains available when control is conflicting or incompatible.

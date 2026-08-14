@@ -29,6 +29,9 @@ const SENTINELS = {
   permission: "SENTINEL-PERM-5b4a3928",
   provider: "SENTINEL-PROV-4a392817",
   summary: "SENTINEL-SUMM-39281706",
+  metadata: "SENTINEL-META-28170615",
+  option: "SENTINEL-OPTI-17061524",
+  always: "SENTINEL-ALWY-06152433",
   nestedToken: "SENTINEL-NEST-28170615",
   authHeader: "SENTINEL-AUTH-17061524",
 };
@@ -365,6 +368,68 @@ describe("redaction of nested sensitive fields", () => {
     expect(logged).toContain("nested probe");
     expect(logged).toContain("[redacted]");
     expectNoSentinels(logged);
+  });
+
+  it("redacts remote-unblock interaction content at any logged depth", async () => {
+    const { stream, output } = captureLogStream();
+    const app = await buildServer({
+      config: buildTestConfig({ logLevel: "info" }),
+      loggerStream: stream,
+    });
+    app.post("/_probe-interactions", async (request) => {
+      request.log.info(
+        {
+          // Depth 2: a pending snapshot under a response body.
+          body: {
+            interactions: [
+              {
+                instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+                machine: "devbox",
+                project: "api",
+                directory: "/work/api",
+                sessionId: "ses_1",
+                sessionTitle: "Implement API",
+                requestId: "req_1",
+                occurredAt: "2026-08-14T09:00:00.000Z",
+                kind: "question",
+                questions: [
+                  {
+                    header: "DB",
+                    question: SENTINELS.question,
+                    options: [{ label: "Postgres", description: SENTINELS.option }],
+                  },
+                ],
+              },
+            ],
+          },
+          // Depth 3: interaction content nested under an error context.
+          failure: {
+            snapshot: {
+              interactions: [
+                {
+                  kind: "permission",
+                  permission: SENTINELS.permission,
+                  patterns: ["rm -rf build/"],
+                  always: [SENTINELS.always],
+                  metadata: SENTINELS.metadata,
+                },
+              ],
+            },
+          },
+        },
+        "interaction probe",
+      );
+      return { status: "ok" };
+    });
+
+    const res = await app.inject({ method: "POST", url: "/_probe-interactions" });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+
+    const logged = output();
+    expect(logged).toContain("interaction probe");
+    expect(logged).toContain("[redacted]");
+    expectNoSentinels(logged, [SENTINELS.metadata]);
   });
 });
 

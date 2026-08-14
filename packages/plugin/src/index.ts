@@ -43,6 +43,7 @@ import {
 import { normalizeEvent, type NormalizedEvent } from "./events.js";
 import { createSafeLogger, type SafeLogger } from "./log.js";
 import { MessageCache } from "./message-cache.js";
+import { PendingAdapter } from "./pending-adapter.js";
 import { QueuePump } from "./pump.js";
 import { GatewaySender } from "./sender.js";
 import {
@@ -152,6 +153,11 @@ export function createSessionNotifyHooks(
       capacity: config.queueCapacity,
     });
   const directory = source.directory;
+  // Lazy pending-interaction adapter: the V2 SDK client and adapter are only
+  // constructed on the first snapshot request, long after the plugin
+  // initialized, so no self-HTTP happens during startup. The instance is
+  // reused across requests so first-observed timestamps stay stable.
+  let pending: PendingAdapter | null = null;
   const control =
     deps.control ??
     (input.serverUrl instanceof URL
@@ -177,6 +183,16 @@ export function createSessionNotifyHooks(
             });
             const result = await client.global.health();
             return result.data?.version ?? "unknown";
+          },
+          listPendingInteractions: (pendingSource, signal) => {
+            pending ??= new PendingAdapter({
+              client: createOpencodeClient({
+                baseUrl: input.serverUrl.toString(),
+                directory,
+              }),
+              titleForSession: (sessionID) => registry.title(sessionID),
+            });
+            return pending.list(pendingSource, signal);
           },
         })
       : null);

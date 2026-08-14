@@ -31,6 +31,7 @@ import {
   createIngestKeyResponseSchema,
   ingestKeyListResponseSchema,
 } from "../src/schemas/ingest-keys.js";
+import { pendingInteractionSchema, pendingSnapshotSchema } from "../src/schemas/pending.js";
 import { wsServerMessageSchema } from "../src/schemas/ws.js";
 
 // The API version is sourced from the package metadata so the document can
@@ -346,6 +347,24 @@ const document = {
         },
       },
     },
+    "/v1/pending-interactions": {
+      get: {
+        operationId: "getPendingInteractions",
+        tags: ["pending"],
+        security: bearerSecurity,
+        summary: "List the authenticated user's pending interactions.",
+        description:
+          "Asks every owned online compatible Plugin instance for its current " +
+          "OpenCode questions and permissions and returns a unified snapshot. " +
+          "OpenCode is authoritative; the snapshot is a projection. Conflicting, " +
+          "incompatible, and offline instances are not queried, and provider " +
+          "actions never appear here.",
+        responses: {
+          "200": jsonResponse("Pending interactions snapshot.", "PendingSnapshot"),
+          "401": errorResponse("Missing or invalid access token."),
+        },
+      },
+    },
     "/v1/ws": {
       get: {
         operationId: "connectEvents",
@@ -446,6 +465,8 @@ const document = {
       InstancePresence: instancePresenceSchema,
       LoginBody: loginBodySchema,
       NotifyEvent: notifyEventSchema,
+      PendingInteraction: pendingInteractionSchema,
+      PendingSnapshot: pendingSnapshotSchema,
       PluginControlClientMessage: pluginControlClientMessageSchema,
       PluginControlServerMessage: pluginControlServerMessageSchema,
       PatchDeviceBody: patchDeviceBodySchema,

@@ -14,6 +14,7 @@ import 'package:notify_api/src/api/devices_api.dart';
 import 'package:notify_api/src/api/events_api.dart';
 import 'package:notify_api/src/api/health_api.dart';
 import 'package:notify_api/src/api/ingest_keys_api.dart';
+import 'package:notify_api/src/api/pending_api.dart';
 import 'package:notify_api/src/api/realtime_api.dart';
 
 class NotifyApi {
@@ -117,6 +118,12 @@ class NotifyApi {
   /// by doing that all interceptors will not be executed
   IngestKeysApi getIngestKeysApi() {
     return IngestKeysApi(dio, serializers);
+  }
+
+  /// Get PendingApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  PendingApi getPendingApi() {
+    return PendingApi(dio, serializers);
   }
 
   /// Get RealtimeApi instance, base route and serializer can be overridden by a given but be careful,

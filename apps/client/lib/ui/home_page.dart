@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../pending/pending_controller.dart';
+import '../pending/pending_interaction.dart';
 import '../realtime/active_sessions.dart';
 import '../realtime/instance_presence.dart';
 import '../realtime/realtime_controller.dart';
 import '../realtime/ws_client.dart';
+import 'pending_interaction_page.dart';
 
 /// Live socket status for the dashboard chip. Drives (and therefore starts)
 /// the [realtimeControllerProvider] while authenticated; `disconnected`
@@ -26,22 +31,64 @@ class HomePage extends ConsumerWidget {
     final status = ref.watch(wsStatusProvider).value ?? WsStatus.disconnected;
     final sessions = ref.watch(activeSessionsProvider);
     final instances = ref.watch(instancePresencesProvider);
+    final pending = ref.watch(pendingInteractionsProvider);
+    final interactions = pending.value ?? const <PendingInteraction>[];
     final ordered = sessions.values.toList()
       ..sort((a, b) => b.lastHeartbeatAt.compareTo(a.lastHeartbeatAt));
     return Scaffold(
       appBar: AppBar(
         title: const Text('首页'),
         actions: [
+          IconButton(
+            key: const ValueKey('pending-refresh'),
+            tooltip: '刷新待处理请求',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => unawaited(
+              ref.read(pendingInteractionsProvider.notifier).refresh(),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: WsStatusChip(status: status),
           ),
         ],
       ),
-      body: ordered.isEmpty && instances.isEmpty
+      body:
+          ordered.isEmpty &&
+              instances.isEmpty &&
+              interactions.isEmpty &&
+              !pending.isLoading &&
+              !pending.hasError
           ? const Center(child: Text('暂无活动会话'))
           : ListView(
               children: [
+                if (pending.isLoading && interactions.isEmpty)
+                  const LinearProgressIndicator(
+                    key: ValueKey('pending-loading'),
+                  ),
+                if (pending.hasError && interactions.isEmpty)
+                  ListTile(
+                    key: const ValueKey('pending-error'),
+                    leading: const Icon(Icons.sync_problem_outlined),
+                    title: const Text('待处理请求同步失败'),
+                    trailing: IconButton(
+                      tooltip: '重试',
+                      icon: const Icon(Icons.refresh),
+                      onPressed: () => unawaited(
+                        ref
+                            .read(pendingInteractionsProvider.notifier)
+                            .refresh(),
+                      ),
+                    ),
+                  ),
+                if (interactions.isNotEmpty) ...[
+                  const _SectionHeader('待处理请求'),
+                  for (final interaction in interactions)
+                    _PendingTile(interaction: interaction),
+                ],
+                if (interactions.isNotEmpty &&
+                    (instances.isNotEmpty || ordered.isNotEmpty))
+                  const Divider(height: 24),
                 if (instances.isNotEmpty) ...[
                   const _SectionHeader('OpenCode 实例'),
                   for (final instance in instances.values)
@@ -55,6 +102,43 @@ class HomePage extends ConsumerWidget {
             ),
     );
   }
+}
+
+class _PendingTile extends StatelessWidget {
+  const _PendingTile({required this.interaction});
+
+  final PendingInteraction interaction;
+
+  @override
+  Widget build(BuildContext context) {
+    final isQuestion = interaction is PendingQuestion;
+    return ListTile(
+      key: ValueKey(
+        'interaction-${interaction.instanceId}-${interaction.requestId}',
+      ),
+      leading: Icon(isQuestion ? Icons.help_outline : Icons.shield_outlined),
+      title: Text('${interaction.machine} · ${interaction.project}'),
+      subtitle: Text(
+        '${interaction.sessionTitle.isEmpty ? interaction.sessionId : interaction.sessionTitle} · ${_waitingText(interaction.occurredAt)}',
+      ),
+      trailing: Chip(
+        label: Text(isQuestion ? '待回答' : '待授权'),
+        visualDensity: VisualDensity.compact,
+      ),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PendingInteractionPage(interaction: interaction),
+        ),
+      ),
+    );
+  }
+}
+
+String _waitingText(DateTime occurredAt) {
+  final elapsed = DateTime.now().difference(occurredAt);
+  if (elapsed.inSeconds < 60) return '等待不到1分钟';
+  if (elapsed.inMinutes < 60) return '等待${elapsed.inMinutes}分钟';
+  return '等待${elapsed.inHours}小时';
 }
 
 class _SectionHeader extends StatelessWidget {

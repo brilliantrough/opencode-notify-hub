@@ -25,6 +25,8 @@ import {
   validatePluginControlClientMessage,
   validatePluginControlServerMessage,
   validateWsServerMessage,
+  validatePendingInteraction,
+  validatePendingSnapshot,
 } from "../src/index.js";
 
 const EVENT_ID = "3b8f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b";
@@ -799,6 +801,411 @@ describe("Plugin control WebSocket messages", () => {
   it("carries unsupported control protocol versions for a diagnosable result", () => {
     expect(validatePluginControlClientMessage({ ...registration, protocolVersion: 2 })).toBe(true);
     expect(validatePluginControlClientMessage({ ...registration, protocolVersion: 0 })).toBe(false);
+  });
+
+  it("accepts a pending_snapshot_response with no pending interactions", () => {
+    expect(
+      validatePluginControlClientMessage({
+        type: "pending_snapshot_response",
+        requestId: "0e3f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b",
+        instanceId: registration.instanceId,
+        interactions: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a pending_snapshot_response with a non-uuid requestId or instanceId", () => {
+    const response = {
+      type: "pending_snapshot_response",
+      requestId: "0e3f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b",
+      instanceId: registration.instanceId,
+      interactions: [],
+    };
+    expect(validatePluginControlClientMessage({ ...response, requestId: "req_1" })).toBe(false);
+    expect(validatePluginControlClientMessage({ ...response, instanceId: "runtime-1" })).toBe(false);
+  });
+
+  it("rejects a pending_snapshot_response carrying provider_action interactions", () => {
+    expect(
+      validatePluginControlClientMessage({
+        type: "pending_snapshot_response",
+        requestId: "0e3f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b",
+        instanceId: registration.instanceId,
+        interactions: [
+          {
+            kind: "provider_action",
+            instanceId: registration.instanceId,
+            machine: "devbox",
+            project: "api",
+            directory: "/work/api",
+            sessionId: "ses_1",
+            sessionTitle: "Implement API",
+            requestId: "pro_1",
+            occurredAt: "2026-08-14T09:00:00.000Z",
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts a pending_snapshot_request server frame", () => {
+    expect(
+      validatePluginControlServerMessage({
+        type: "pending_snapshot_request",
+        requestId: "0e3f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a pending_snapshot_request without a uuid requestId", () => {
+    expect(
+      validatePluginControlServerMessage({
+        type: "pending_snapshot_request",
+        requestId: "snap-1",
+      }),
+    ).toBe(false);
+    expect(validatePluginControlServerMessage({ type: "pending_snapshot_request" })).toBe(false);
+  });
+
+  it("rejects control frames that mix union members", () => {
+    expect(
+      validatePluginControlClientMessage({
+        ...registration,
+        type: "pending_snapshot_request",
+      }),
+    ).toBe(false);
+    expect(
+      validatePluginControlServerMessage({
+        type: "pending_snapshot_request",
+        requestId: "0e3f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b",
+        state: "controllable",
+      }),
+    ).toBe(false);
+    expect(
+      validatePluginControlServerMessage({
+        type: "registration",
+        instanceId: registration.instanceId,
+        state: "controllable",
+        requestId: "0e3f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("PendingInteraction union", () => {
+  const source = {
+    instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+    machine: "devbox",
+    project: "api",
+    directory: "/work/api",
+    sessionId: "ses_1",
+    sessionTitle: "Implement API",
+    requestId: "req_1",
+    occurredAt: "2026-08-14T09:00:00.000Z",
+  };
+
+  const validQuestion = {
+    ...source,
+    kind: "question",
+    tool: { messageId: "msg_1", callId: "call_1" },
+    questions: [
+      {
+        header: "Database",
+        question: "Which database should I use?",
+        options: [
+          { label: "Postgres", description: "Relational" },
+          { label: "SQLite", description: "Embedded" },
+        ],
+        multiple: false,
+        custom: true,
+      },
+    ],
+  };
+
+  const validPermission = {
+    ...source,
+    kind: "permission",
+    permission: "bash",
+    patterns: ["rm -rf build/"],
+    always: ["printf *"],
+    metadata: { source: "interactive", depth: 1 },
+  };
+
+  it("accepts a question interaction", () => {
+    expect(validatePendingInteraction(validQuestion)).toBe(true);
+  });
+
+  it("accepts a permission interaction", () => {
+    expect(validatePendingInteraction(validPermission)).toBe(true);
+  });
+
+  it("rejects provider_action interactions: they stay ordinary notifications", () => {
+    expect(validatePendingInteraction({ ...source, kind: "provider_action" })).toBe(false);
+  });
+
+  it("rejects an unknown kind", () => {
+    expect(validatePendingInteraction({ ...source, kind: "approval", permission: "bash" })).toBe(
+      false,
+    );
+  });
+
+  it("rejects a question kind carrying permission content", () => {
+    expect(
+      validatePendingInteraction({
+        ...validPermission,
+        kind: "question",
+        questions: [{ header: "h", question: "Q?", options: [], multiple: false, custom: true }],
+      }),
+    ).toBe(false);
+    const { permission: _permission, ...rest } = validPermission;
+    expect(validatePendingInteraction({ ...rest, kind: "question" })).toBe(false);
+  });
+
+  it("rejects a permission kind carrying questions", () => {
+    expect(
+      validatePendingInteraction({ ...validQuestion, kind: "permission", permission: "bash" }),
+    ).toBe(false);
+  });
+
+  it("rejects unknown properties on the common source", () => {
+    expect(validatePendingInteraction({ ...validQuestion, extra: "nope" })).toBe(false);
+    expect(validatePendingInteraction({ ...validPermission, cursor: 1 })).toBe(false);
+  });
+
+  it("rejects a missing common source field", () => {
+    const { sessionTitle: _sessionTitle, ...withoutTitle } = validPermission;
+    expect(validatePendingInteraction(withoutTitle)).toBe(false);
+    const { occurredAt: _occurredAt, ...withoutTime } = validPermission;
+    expect(validatePendingInteraction(withoutTime)).toBe(false);
+  });
+
+  it("rejects a non-uuid instanceId", () => {
+    expect(validatePendingInteraction({ ...validQuestion, instanceId: "runtime-1" })).toBe(false);
+  });
+
+  it("rejects a malformed occurredAt", () => {
+    expect(validatePendingInteraction({ ...validQuestion, occurredAt: "yesterday" })).toBe(false);
+  });
+
+  it("requires a non-empty requestId", () => {
+    expect(validatePendingInteraction({ ...validQuestion, requestId: "" })).toBe(false);
+  });
+});
+
+describe("PendingInteraction question content", () => {
+  const base = {
+    kind: "question",
+    instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+    machine: "devbox",
+    project: "api",
+    directory: "/work/api",
+    sessionId: "ses_1",
+    sessionTitle: "Implement API",
+    requestId: "req_1",
+    occurredAt: "2026-08-14T09:00:00.000Z",
+  };
+
+  const withQuestions = (questions: unknown) => ({ ...base, questions });
+
+  it("requires the normalized question fields", () => {
+    expect(validatePendingInteraction(withQuestions([{ question: "Q?", options: [] }]))).toBe(false);
+    expect(validatePendingInteraction(withQuestions([{ header: "h", options: [] }]))).toBe(false);
+    expect(validatePendingInteraction(withQuestions([{ header: "h", question: "Q?" }]))).toBe(false);
+    expect(
+      validatePendingInteraction(
+        withQuestions([{ header: "h", question: "Q?", options: [], custom: true }]),
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts a question with an empty options array and no tool", () => {
+    expect(
+      validatePendingInteraction(
+        withQuestions([
+          { header: "h", question: "Q?", options: [], multiple: false, custom: true },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts multiple, custom, and tool", () => {
+    expect(
+      validatePendingInteraction(
+        {
+          ...withQuestions([
+            {
+              header: "h",
+              question: "Q?",
+              options: [{ label: "A", description: "desc" }],
+              multiple: true,
+              custom: false,
+            },
+          ]),
+          tool: { messageId: "msg_1", callId: "call_1" },
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a malformed tool", () => {
+    expect(
+      validatePendingInteraction(
+        {
+          ...withQuestions([
+            { header: "h", question: "Q?", options: [], multiple: false, custom: true },
+          ]),
+          tool: { messageId: "msg_1" },
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it("retains large complete question payloads", () => {
+    expect(
+      validatePendingInteraction(
+        withQuestions([
+          {
+            header: "h",
+            question: "q".repeat(2001),
+            options: Array.from({ length: 17 }, (_, i) => ({
+              label: `opt-${i}`,
+              description: `description-${i}`,
+            })),
+            multiple: true,
+            custom: true,
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects unknown properties on a question item", () => {
+    expect(
+      validatePendingInteraction(
+        withQuestions([
+          {
+            header: "h",
+            question: "Q?",
+            options: [],
+            multiple: false,
+            custom: true,
+            note: "nope",
+          },
+        ]),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("PendingInteraction permission content", () => {
+  const base = {
+    kind: "permission",
+    instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+    machine: "devbox",
+    project: "api",
+    directory: "/work/api",
+    sessionId: "ses_1",
+    sessionTitle: "Implement API",
+    requestId: "per_1",
+    occurredAt: "2026-08-14T09:00:00.000Z",
+    permission: "bash",
+    patterns: ["rm -rf build/"],
+    always: ["printf *"],
+    metadata: { source: "interactive" },
+  };
+
+  it("accepts empty patterns and always arrays", () => {
+    expect(validatePendingInteraction({ ...base, patterns: [], always: [] })).toBe(true);
+  });
+
+  it("accepts the optional tool identity", () => {
+    expect(validatePendingInteraction({ ...base, tool: { messageId: "msg_1", callId: "call_1" } }))
+      .toBe(true);
+  });
+
+  it("rejects a non-empty permission string", () => {
+    expect(validatePendingInteraction({ ...base, permission: "" })).toBe(false);
+  });
+
+  it("rejects unknown properties on the permission content", () => {
+    expect(validatePendingInteraction({ ...base, summary: "nope" })).toBe(false);
+  });
+
+  it("retains arbitrary nested metadata verbatim", () => {
+    const metadata = {
+      source: "interactive",
+      count: 3,
+      nested: { list: [1, "two", true, null], deep: { ratio: 0.5 } },
+    };
+    expect(validatePendingInteraction({ ...base, metadata })).toBe(true);
+  });
+
+  it("requires metadata", () => {
+    const { metadata: _metadata, ...withoutMetadata } = base;
+    expect(validatePendingInteraction(withoutMetadata)).toBe(false);
+  });
+});
+
+describe("PendingSnapshot", () => {
+  const interaction = {
+    kind: "question",
+    instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+    machine: "devbox",
+    project: "api",
+    directory: "/work/api",
+    sessionId: "ses_1",
+    sessionTitle: "Implement API",
+    requestId: "req_1",
+    occurredAt: "2026-08-14T09:00:00.000Z",
+    questions: [
+      { header: "h", question: "Q?", options: [], multiple: false, custom: true },
+    ],
+  };
+
+  it("accepts a snapshot with one interaction", () => {
+    expect(
+      validatePendingSnapshot({
+        generatedAt: "2026-08-14T09:00:05.000Z",
+        interactions: [interaction],
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts an empty snapshot", () => {
+    expect(
+      validatePendingSnapshot({ generatedAt: "2026-08-14T09:00:05.000Z", interactions: [] }),
+    ).toBe(true);
+  });
+
+  it("requires generatedAt and interactions", () => {
+    expect(
+      validatePendingSnapshot({ interactions: [interaction] }),
+    ).toBe(false);
+    expect(
+      validatePendingSnapshot({ generatedAt: "2026-08-14T09:00:05.000Z" }),
+    ).toBe(false);
+  });
+
+  it("rejects unknown properties and malformed generatedAt", () => {
+    expect(
+      validatePendingSnapshot({
+        generatedAt: "2026-08-14T09:00:05.000Z",
+        interactions: [interaction],
+        cursor: 1,
+      }),
+    ).toBe(false);
+    expect(
+      validatePendingSnapshot({ generatedAt: "yesterday", interactions: [] }),
+    ).toBe(false);
+  });
+
+  it("rejects a snapshot containing a provider_action interaction", () => {
+    expect(
+      validatePendingSnapshot({
+        generatedAt: "2026-08-14T09:00:05.000Z",
+        interactions: [{ ...interaction, kind: "provider_action" }],
+      }),
+    ).toBe(false);
   });
 });
 

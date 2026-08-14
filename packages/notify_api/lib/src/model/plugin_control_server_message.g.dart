@@ -43,6 +43,9 @@ _$pluginControlServerMessageStateEnumValues =
 const PluginControlServerMessageTypeEnum
 _$pluginControlServerMessageTypeEnum_registration =
     const PluginControlServerMessageTypeEnum._('registration');
+const PluginControlServerMessageTypeEnum
+_$pluginControlServerMessageTypeEnum_pendingSnapshotRequest =
+    const PluginControlServerMessageTypeEnum._('pendingSnapshotRequest');
 
 PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
   String name,
@@ -50,6 +53,8 @@ PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
   switch (name) {
     case 'registration':
       return _$pluginControlServerMessageTypeEnum_registration;
+    case 'pendingSnapshotRequest':
+      return _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest;
     default:
       throw ArgumentError(name);
   }
@@ -60,6 +65,7 @@ _$pluginControlServerMessageTypeEnumValues =
     BuiltSet<PluginControlServerMessageTypeEnum>(
       const <PluginControlServerMessageTypeEnum>[
         _$pluginControlServerMessageTypeEnum_registration,
+        _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest,
       ],
     );
 
@@ -111,9 +117,11 @@ class _$PluginControlServerMessageTypeEnumSerializer
     implements PrimitiveSerializer<PluginControlServerMessageTypeEnum> {
   static const Map<String, Object> _toWire = const <String, Object>{
     'registration': 'registration',
+    'pendingSnapshotRequest': 'pending_snapshot_request',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'registration': 'registration',
+    'pending_snapshot_request': 'pendingSnapshotRequest',
   };
 
   @override
@@ -140,21 +148,13 @@ class _$PluginControlServerMessageTypeEnumSerializer
 
 class _$PluginControlServerMessage extends PluginControlServerMessage {
   @override
-  final String instanceId;
-  @override
-  final PluginControlServerMessageStateEnum state;
-  @override
-  final PluginControlServerMessageTypeEnum type;
+  final OneOf oneOf;
 
   factory _$PluginControlServerMessage([
     void Function(PluginControlServerMessageBuilder)? updates,
   ]) => (PluginControlServerMessageBuilder()..update(updates))._build();
 
-  _$PluginControlServerMessage._({
-    required this.instanceId,
-    required this.state,
-    required this.type,
-  }) : super._();
+  _$PluginControlServerMessage._({required this.oneOf}) : super._();
   @override
   PluginControlServerMessage rebuild(
     void Function(PluginControlServerMessageBuilder) updates,
@@ -167,29 +167,22 @@ class _$PluginControlServerMessage extends PluginControlServerMessage {
   @override
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
-    return other is PluginControlServerMessage &&
-        instanceId == other.instanceId &&
-        state == other.state &&
-        type == other.type;
+    return other is PluginControlServerMessage && oneOf == other.oneOf;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, instanceId.hashCode);
-    _$hash = $jc(_$hash, state.hashCode);
-    _$hash = $jc(_$hash, type.hashCode);
+    _$hash = $jc(_$hash, oneOf.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
 
   @override
   String toString() {
-    return (newBuiltValueToStringHelper(r'PluginControlServerMessage')
-          ..add('instanceId', instanceId)
-          ..add('state', state)
-          ..add('type', type))
-        .toString();
+    return (newBuiltValueToStringHelper(
+      r'PluginControlServerMessage',
+    )..add('oneOf', oneOf)).toString();
   }
 }
 
@@ -198,18 +191,9 @@ class PluginControlServerMessageBuilder
         Builder<PluginControlServerMessage, PluginControlServerMessageBuilder> {
   _$PluginControlServerMessage? _$v;
 
-  String? _instanceId;
-  String? get instanceId => _$this._instanceId;
-  set instanceId(String? instanceId) => _$this._instanceId = instanceId;
-
-  PluginControlServerMessageStateEnum? _state;
-  PluginControlServerMessageStateEnum? get state => _$this._state;
-  set state(PluginControlServerMessageStateEnum? state) =>
-      _$this._state = state;
-
-  PluginControlServerMessageTypeEnum? _type;
-  PluginControlServerMessageTypeEnum? get type => _$this._type;
-  set type(PluginControlServerMessageTypeEnum? type) => _$this._type = type;
+  OneOf? _oneOf;
+  OneOf? get oneOf => _$this._oneOf;
+  set oneOf(OneOf? oneOf) => _$this._oneOf = oneOf;
 
   PluginControlServerMessageBuilder() {
     PluginControlServerMessage._defaults(this);
@@ -218,9 +202,7 @@ class PluginControlServerMessageBuilder
   PluginControlServerMessageBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _instanceId = $v.instanceId;
-      _state = $v.state;
-      _type = $v.type;
+      _oneOf = $v.oneOf;
       _$v = null;
     }
     return this;
@@ -243,20 +225,10 @@ class PluginControlServerMessageBuilder
     final _$result =
         _$v ??
         _$PluginControlServerMessage._(
-          instanceId: BuiltValueNullFieldError.checkNotNull(
-            instanceId,
+          oneOf: BuiltValueNullFieldError.checkNotNull(
+            oneOf,
             r'PluginControlServerMessage',
-            'instanceId',
-          ),
-          state: BuiltValueNullFieldError.checkNotNull(
-            state,
-            r'PluginControlServerMessage',
-            'state',
-          ),
-          type: BuiltValueNullFieldError.checkNotNull(
-            type,
-            r'PluginControlServerMessage',
-            'type',
+            'oneOf',
           ),
         );
     replace(_$result);

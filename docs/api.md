@@ -11,6 +11,7 @@ Examples use `https://notify.example.com`.
 - Account/device/key endpoints use `Authorization: Bearer <access-token>`.
 - `POST /v1/events` uses an ingest credential and HMAC headers.
 - Native WebSocket clients use a bearer access token during HTTP Upgrade.
+- Plugin control WebSockets use the existing Plugin key during HTTP Upgrade.
 
 ## Endpoints
 
@@ -31,7 +32,9 @@ Examples use `https://notify.example.com`.
 | `GET, POST /v1/ingest-keys` | List and create ingest keys |
 | `DELETE /v1/ingest-keys/{id}` | Revoke an ingest key |
 | `POST /v1/events` | Accept one signed notification event (`202`) |
+| `GET /v1/pending-interactions` | Collect the user's authoritative OpenCode pending snapshot |
 | `GET /v1/ws` | Upgrade to the authenticated realtime WebSocket |
+| `GET /v1/plugin/ws` | Upgrade to the Plugin control WebSocket |
 
 Use the OpenAPI document for exact request/response schemas and status codes.
 
@@ -75,10 +78,11 @@ Deduplication is scoped per user.
 ## WebSocket
 
 Connect to `wss://notify.example.com/v1/ws` with a live access token. The
-gateway sends only:
+gateway sends notification events and complete instance-presence snapshots:
 
 ```json
 {"type":"event","event":{}}
+{"type":"instance_presence","instances":[]}
 ```
 
 where `event` satisfies the notification-event union. Malformed or unknown
@@ -88,6 +92,24 @@ frames should be ignored by clients.
 - Close `1012`: gateway restart; reconnect with backoff.
 - Other disconnects: reconnect with bounded exponential backoff.
 - Missed events are not replayed.
+
+## Pending interactions
+
+`GET /v1/pending-interactions` uses an account access token. The gateway asks
+only that account's online, compatible, non-conflicting Plugin instances and
+returns a partial `200` snapshot if one does not answer before the bounded
+timeout. Question and permission bodies transit gateway memory but are not
+persisted or logged. Provider actions remain notification events and never
+enter this snapshot.
+
+OpenCode `1.18.18` does not expose a creation timestamp in its pending-list
+responses. `occurredAt` is therefore the Plugin's stable first-observed time
+for the request while that Plugin process remains online.
+
+Each upgraded Plugin connects to `/v1/plugin/ws`, registers its OpenCode
+instance, and handles `pending_snapshot_request` frames. Its response carries
+the complete question or permission context from its own instance-specific
+OpenCode Server. The OpenAPI document defines the exact discriminated unions.
 
 ## Regeneration
 

@@ -25,6 +25,7 @@ import type { Mailer } from "./modules/mail/mailer.js";
 import { NodemailerMailer } from "./modules/mail/nodemailer.mailer.js";
 import { controlWsRoutes } from "./modules/control/control-ws.routes.js";
 import { InstanceRegistry } from "./modules/control/instance-registry.js";
+import { pendingInteractionsRoutes } from "./modules/control/pending-interactions.routes.js";
 import {
   ConnectionRegistry,
   WS_CLOSE_SERVER_SHUTDOWN,
@@ -65,6 +66,11 @@ export interface GatewayDeps {
   fcmSender?: FcmSender;
   /** Realtime tuning; tests shrink the heartbeat interval. */
   realtime?: { pingIntervalMs?: number };
+  /**
+   * Control-channel tuning; tests shrink the pending-snapshot timeout so
+   * partial-snapshot behavior is exercised without real waits.
+   */
+  control?: { snapshotTimeoutMs?: number };
 }
 
 /**
@@ -93,10 +99,17 @@ const LOG_REDACT_PATHS = [
   "body.payload.permission",
   "body.payload.providerAction",
   "body.payload.summary",
+  // Remote-unblock pending interactions: full question/permission payloads
+  // must never reach the logs regardless of nesting (wildcards below match
+  // exactly one segment, so array-index segments inside `interactions` are
+  // covered by the deepest wildcard). `session` stays visible so operators
+  // can correlate a log line to a session without the sensitive content.
+  "body.interactions",
   // Catch-alls for the same fields logged at any other depth: one wildcard
   // per nesting level (fast-redact wildcards match exactly one segment), so
-  // credentials, tokens, codes, signatures, FCM tokens, and event payloads
-  // are redacted however deep inside a logged object they end up.
+  // credentials, tokens, codes, signatures, FCM tokens, event payloads, and
+  // interaction question/permission content are redacted however deep inside
+  // a logged object they end up.
   ...[
     "password",
     "newPassword",
@@ -107,6 +120,16 @@ const LOG_REDACT_PATHS = [
     "fcmToken",
     "signature",
     "payload",
+    "interactions",
+    "question",
+    "questions",
+    "permission",
+    "patterns",
+    "always",
+    "options",
+    "metadata",
+    "providerAction",
+    "summary",
   ].flatMap((key) => [`*.${key}`, `*.*.${key}`, `*.*.*.${key}`]),
 ];
 
@@ -235,6 +258,9 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
       ...(deps.realtime?.pingIntervalMs !== undefined
         ? { pingIntervalMs: deps.realtime.pingIntervalMs }
         : {}),
+      ...(deps.control?.snapshotTimeoutMs !== undefined
+        ? { snapshotTimeoutMs: deps.control.snapshotTimeoutMs }
+        : {}),
     });
     await app.register(
       ingestKeyRoutes(ingestKeyRepository, { onRevoked: (id) => instances.revokeKey(id) }),
@@ -258,6 +284,7 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
       }),
     );
     await app.register(controlWsRoutes({ pluginKeys: ingestKeys, registry: instances }));
+    await app.register(pendingInteractionsRoutes(instances));
     // Production default fanout: WebSocket (registry) + Android push (FCM)
     // composed behind the ingest route's dispatcher seam. The Firebase app
     // is only initialized when the real sender is needed — an injected

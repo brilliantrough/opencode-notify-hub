@@ -45,8 +45,20 @@ import 'package:notify_api/src/model/notify_event_one_of_payload.dart';
 import 'package:notify_api/src/model/notify_event_one_of_session.dart';
 import 'package:notify_api/src/model/notify_event_one_of_source.dart';
 import 'package:notify_api/src/model/patch_device_body.dart';
+import 'package:notify_api/src/model/pending_interaction.dart';
+import 'package:notify_api/src/model/pending_interaction_one_of.dart';
+import 'package:notify_api/src/model/pending_interaction_one_of1.dart';
+import 'package:notify_api/src/model/pending_interaction_one_of_questions_inner.dart';
+import 'package:notify_api/src/model/pending_interaction_one_of_questions_inner_options_inner.dart';
+import 'package:notify_api/src/model/pending_interaction_one_of_tool.dart';
+import 'package:notify_api/src/model/pending_snapshot.dart';
+import 'package:notify_api/src/model/pending_snapshot_interactions_inner.dart';
 import 'package:notify_api/src/model/plugin_control_client_message.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of1.dart';
 import 'package:notify_api/src/model/plugin_control_server_message.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
 import 'package:notify_api/src/model/refresh_body.dart';
 import 'package:notify_api/src/model/register_body.dart';
 import 'package:notify_api/src/model/register_device_body.dart';
@@ -93,8 +105,20 @@ part 'serializers.g.dart';
   NotifyEventOneOfSession,
   NotifyEventOneOfSource,
   PatchDeviceBody,
+  PendingInteraction,
+  PendingInteractionOneOf,
+  PendingInteractionOneOf1,
+  PendingInteractionOneOfQuestionsInner,
+  PendingInteractionOneOfQuestionsInnerOptionsInner,
+  PendingInteractionOneOfTool,
+  PendingSnapshot,
+  PendingSnapshotInteractionsInner,
   PluginControlClientMessage,
+  PluginControlClientMessageOneOf,
+  PluginControlClientMessageOneOf1,
   PluginControlServerMessage,
+  PluginControlServerMessageOneOf,
+  PluginControlServerMessageOneOf1,
   RefreshBody,
   RegisterBody,
   RegisterDeviceBody,

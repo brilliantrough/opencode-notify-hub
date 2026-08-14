@@ -4,8 +4,11 @@
 
 // ignore_for_file: unused_element
 import 'package:built_collection/built_collection.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
+import 'package:one_of/one_of.dart';
 
 part 'plugin_control_server_message.g.dart';
 
@@ -15,20 +18,13 @@ part 'plugin_control_server_message.g.dart';
 /// * [instanceId]
 /// * [state]
 /// * [type]
+/// * [requestId]
 @BuiltValue()
 abstract class PluginControlServerMessage
     implements
         Built<PluginControlServerMessage, PluginControlServerMessageBuilder> {
-  @BuiltValueField(wireName: r'instanceId')
-  String get instanceId;
-
-  @BuiltValueField(wireName: r'state')
-  PluginControlServerMessageStateEnum get state;
-  // enum stateEnum {  controllable,  conflicting,  incompatible,  };
-
-  @BuiltValueField(wireName: r'type')
-  PluginControlServerMessageTypeEnum get type;
-  // enum typeEnum {  registration,  };
+  /// One Of [PluginControlServerMessageOneOf], [PluginControlServerMessageOneOf1]
+  OneOf get oneOf;
 
   PluginControlServerMessage._();
 
@@ -59,23 +55,7 @@ class _$PluginControlServerMessageSerializer
     Serializers serializers,
     PluginControlServerMessage object, {
     FullType specifiedType = FullType.unspecified,
-  }) sync* {
-    yield r'instanceId';
-    yield serializers.serialize(
-      object.instanceId,
-      specifiedType: const FullType(String),
-    );
-    yield r'state';
-    yield serializers.serialize(
-      object.state,
-      specifiedType: const FullType(PluginControlServerMessageStateEnum),
-    );
-    yield r'type';
-    yield serializers.serialize(
-      object.type,
-      specifiedType: const FullType(PluginControlServerMessageTypeEnum),
-    );
-  }
+  }) sync* {}
 
   @override
   Object serialize(
@@ -83,62 +63,11 @@ class _$PluginControlServerMessageSerializer
     PluginControlServerMessage object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(
-      serializers,
-      object,
-      specifiedType: specifiedType,
-    ).toList();
-  }
-
-  void _deserializeProperties(
-    Serializers serializers,
-    Object serialized, {
-    FullType specifiedType = FullType.unspecified,
-    required List<Object?> serializedList,
-    required PluginControlServerMessageBuilder result,
-    required List<Object?> unhandled,
-  }) {
-    for (var i = 0; i < serializedList.length; i += 2) {
-      final key = serializedList[i] as String;
-      final value = serializedList[i + 1];
-      switch (key) {
-        case r'instanceId':
-          final valueDes =
-              serializers.deserialize(
-                    value,
-                    specifiedType: const FullType(String),
-                  )
-                  as String;
-          result.instanceId = valueDes;
-          break;
-        case r'state':
-          final valueDes =
-              serializers.deserialize(
-                    value,
-                    specifiedType: const FullType(
-                      PluginControlServerMessageStateEnum,
-                    ),
-                  )
-                  as PluginControlServerMessageStateEnum;
-          result.state = valueDes;
-          break;
-        case r'type':
-          final valueDes =
-              serializers.deserialize(
-                    value,
-                    specifiedType: const FullType(
-                      PluginControlServerMessageTypeEnum,
-                    ),
-                  )
-                  as PluginControlServerMessageTypeEnum;
-          result.type = valueDes;
-          break;
-        default:
-          unhandled.add(key);
-          unhandled.add(value);
-          break;
-      }
-    }
+    final oneOf = object.oneOf;
+    return serializers.serialize(
+      oneOf.value,
+      specifiedType: FullType(oneOf.valueType),
+    )!;
   }
 
   @override
@@ -148,16 +77,15 @@ class _$PluginControlServerMessageSerializer
     FullType specifiedType = FullType.unspecified,
   }) {
     final result = PluginControlServerMessageBuilder();
-    final serializedList = (serialized as Iterable<Object?>).toList();
-    final unhandled = <Object?>[];
-    _deserializeProperties(
-      serializers,
-      serialized,
-      specifiedType: specifiedType,
-      serializedList: serializedList,
-      unhandled: unhandled,
-      result: result,
-    );
+    Object? oneOfDataSrc;
+    final targetType = const FullType(OneOf, [
+      FullType(PluginControlServerMessageOneOf),
+      FullType(PluginControlServerMessageOneOf1),
+    ]);
+    oneOfDataSrc = serialized;
+    result.oneOf =
+        serializers.deserialize(oneOfDataSrc, specifiedType: targetType)
+            as OneOf;
     return result.build();
   }
 }
@@ -188,6 +116,9 @@ class PluginControlServerMessageTypeEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'registration')
   static const PluginControlServerMessageTypeEnum registration =
       _$pluginControlServerMessageTypeEnum_registration;
+  @BuiltValueEnumConst(wireName: r'pending_snapshot_request')
+  static const PluginControlServerMessageTypeEnum pendingSnapshotRequest =
+      _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest;
 
   static Serializer<PluginControlServerMessageTypeEnum> get serializer =>
       _$pluginControlServerMessageTypeEnumSerializer;

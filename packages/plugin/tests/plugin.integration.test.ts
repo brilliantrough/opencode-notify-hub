@@ -129,8 +129,7 @@ function makeHangingFetch(): {
   calls: FetchCall[];
   fetchImpl: typeof fetch;
   release: () => void;
-} {
-  const calls: FetchCall[] = [];
+} {  const calls: FetchCall[] = [];
   let released = false;
   const pending: Array<(response: Response) => void> = [];
   const fetchImpl = ((url: unknown, init?: { headers?: unknown; body?: unknown }) => {
@@ -179,6 +178,34 @@ async function emit(hooks: Hooks, event: unknown): Promise<void> {
 async function settle(times = 20): Promise<void> {
   for (let i = 0; i < times; i += 1) {
     await Promise.resolve();
+  }
+}
+
+/** Capturing control socket so the deferred-startup test can drive frames. */
+class CapturingSocket {
+  readonly sent: string[] = [];
+  private readonly listeners = new Map<string, Set<(event?: unknown) => void>>();
+
+  addEventListener(event: string, listener: (event?: unknown) => void): void {
+    const listeners = this.listeners.get(event) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(event, listeners);
+  }
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  closed = false;
+
+  emit(event: string, value?: unknown): void {
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener(value);
+    }
   }
 }
 
@@ -766,5 +793,88 @@ describe("SessionNotifyPlugin", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     await settle();
     expect(calls).toHaveLength(1);
+  });
+
+  it("defers pending-interaction queries until a snapshot request arrives (no self-HTTP at init)", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = (async (url: unknown, init?: { headers?: unknown; body?: unknown }) => {
+      const requestUrl =
+        url !== null && typeof url === "object" && "url" in url
+          ? String((url as { url: unknown }).url)
+          : String(url);
+      calls.push({
+        url: requestUrl,
+        body: String(init?.body),
+        headers: init?.headers as Record<string, string>,
+      });
+      return new Response("true", { status: 202 });
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchImpl);
+    const sockets: CapturingSocket[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        readonly delegate: CapturingSocket;
+        constructor() {
+          this.delegate = new CapturingSocket();
+          sockets.push(this.delegate);
+        }
+        addEventListener(event: string, listener: (event?: unknown) => void): void {
+          this.delegate.addEventListener(event, listener);
+        }
+        send(data: string): void {
+          this.delegate.send(data);
+        }
+        close(): void {
+          this.delegate.close();
+        }
+      },
+    );
+    const { client } = makeClient();
+
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+
+    // Initialization made no pending queries and no self-HTTP: the adapter
+    // and its V2 SDK client are only constructed on the first snapshot
+    // request, never during plugin startup.
+    expect(sockets).toHaveLength(0);
+    expect(calls.filter((call) => call.url.startsWith("http://127.0.0.1"))).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(0); // deferred control start
+    expect(sockets).toHaveLength(1);
+    expect(calls.filter((call) => call.url.startsWith("http://127.0.0.1"))).toHaveLength(0);
+
+    sockets[0].emit("open");
+    sockets[0].emit("message", {
+      data: JSON.stringify({
+        type: "registration",
+        instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+        state: "controllable",
+      }),
+    });
+    expect(calls.filter((call) => call.url.startsWith("http://127.0.0.1"))).toHaveLength(0);
+
+    sockets[0].emit("message", {
+      data: JSON.stringify({
+        type: "pending_snapshot_request",
+        requestId: "0e3f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b",
+      }),
+    });
+    await settle();
+
+    // The lazy adapter now queried its own OpenCode instance (self-HTTP only
+    // after initialization) and answered with a snapshot response.
+    const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    expect(selfCalls.length).toBeGreaterThan(0);
+    const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: "pending_snapshot_response",
+        requestId: "0e3f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b",
+        instanceId: expect.any(String),
+      }),
+    );
+
+    await hooks.dispose?.();
   });
 });

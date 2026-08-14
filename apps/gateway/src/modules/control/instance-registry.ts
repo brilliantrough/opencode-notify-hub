@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
+
 import {
   validatePluginControlClientMessage,
   type InstancePresence,
+  type PendingInteraction,
+  type PendingSnapshot,
   type PluginControlClientMessage,
   type PluginControlServerMessage,
   type WsServerMessage,
@@ -17,21 +21,38 @@ import {
 
 export const CONTROL_CLOSE_INVALID_FRAME = 4400;
 export const CONTROL_CLOSE_KEY_REVOKED = 4403;
+export const CONTROL_MAX_FRAME_BYTES = 1024 * 1024;
+
+/**
+ * Default per-instance wait for a `pending_snapshot_response` during a
+ * pending-interactions collection (issue #8). Injectable through
+ * {@link InstanceRegistryDeps.snapshotTimeoutMs}; tests shrink it.
+ */
+export const PENDING_SNAPSHOT_TIMEOUT_MS = 2500;
 
 const READY_OPEN = 1;
 const SUPPORTED_OPENCODE_VERSION = "1.18.18";
 const SUPPORTED_PROTOCOL_VERSION = 1;
 
+/** The `register` member of the extended Plugin control client protocol. */
+type RegisterMessage = Extract<PluginControlClientMessage, { type: "register" }>;
+
+type PendingSnapshotResponse = Extract<
+  PluginControlClientMessage,
+  { type: "pending_snapshot_response" }
+>;
+
 interface ControlConnection {
   readonly auth: VerifiedIngestKey;
   readonly socket: RealtimeSocket;
+  readonly uid: number;
   alive: boolean;
   heartbeat: NodeJS.Timeout;
   instanceId?: string;
 }
 
 interface InstanceRecord {
-  readonly registration: PluginControlClientMessage;
+  readonly registration: RegisterMessage;
   readonly userId: string;
   readonly sequence: number;
   state: InstancePresence["state"];
@@ -39,32 +60,59 @@ interface InstanceRecord {
   connection?: ControlConnection;
 }
 
+/** One outstanding `pending_snapshot_request` awaiting its response. */
+interface PendingSnapshotRequest {
+  readonly connection: ControlConnection;
+  readonly requestId: string;
+  /** Authoritative source identity from the registered record (enrichment). */
+  readonly registration: RegisterMessage;
+  readonly timer: NodeJS.Timeout;
+  readonly resolve: (interactions: PendingInteraction[]) => void;
+}
+
 export interface InstanceRegistryDeps {
   clock: Clock;
   publish(userId: string, message: WsServerMessage): void;
   pingIntervalMs?: number;
+  /** Defaults to {@link PENDING_SNAPSHOT_TIMEOUT_MS}; tests inject a short wait. */
+  snapshotTimeoutMs?: number;
 }
 
-/** In-memory owner-scoped projection of Plugin control connections. */
+/**
+ * In-memory owner-scoped projection of Plugin control connections. Owns
+ * registration rules (first machine/project owner wins, incompatible and
+ * conflicting instances are not actionable) and the owner-scoped read-only
+ * pending-interaction collection: only connected `controllable` instances of
+ * one user are ever queried, responses are accepted only after registration
+ * and only for the exact requestId+connection+instanceId that was issued,
+ * and every query settles after {@link PENDING_SNAPSHOT_TIMEOUT_MS} (partial
+ * snapshot on timeouts). Late or unknown responses are ignored; malformed
+ * frames and registration violations still close the control connection.
+ */
 export class InstanceRegistry {
   private readonly records = new Map<string, InstanceRecord>();
   private readonly ownership = new Map<string, string>();
   private readonly connections = new Set<ControlConnection>();
+  private readonly pendingRequests = new Map<string, PendingSnapshotRequest>();
   private readonly clock: Clock;
   private readonly publish: InstanceRegistryDeps["publish"];
   private readonly pingIntervalMs: number;
+  private readonly snapshotTimeoutMs: number;
   private nextSequence = 0;
+  private nextConnectionUid = 0;
 
   constructor(deps: InstanceRegistryDeps) {
     this.clock = deps.clock;
     this.publish = deps.publish;
     this.pingIntervalMs = deps.pingIntervalMs ?? WS_PING_INTERVAL_MS;
+    this.snapshotTimeoutMs = deps.snapshotTimeoutMs ?? PENDING_SNAPSHOT_TIMEOUT_MS;
   }
 
   add(auth: VerifiedIngestKey, socket: RealtimeSocket): void {
     const connection: ControlConnection = {
       auth,
       socket,
+      uid: this.nextConnectionUid++,
       alive: true,
       heartbeat: setInterval(() => {
         if (socket.readyState !== READY_OPEN) {
@@ -102,6 +150,36 @@ export class InstanceRegistry {
     }
   }
 
+  /**
+   * Issue #8: collect a read-only pending-interaction snapshot for one user.
+   * Only connected, `controllable` instances of the user are queried; every
+   * other account's instances are invisible. Each instance gets its own UUID
+   * correlation and settles after {@link PENDING_SNAPSHOT_TIMEOUT_MS}, so the
+   * result is a partial 200 snapshot when some instances never answer.
+   * Interaction source identity (instanceId/machine/project/directory) is
+   * always overwritten from the registered record, never trusted from the
+   * wire.
+   */
+  async collectPendingInteractions(userId: string): Promise<PendingSnapshot> {
+    const targets = [...this.records.values()].filter(
+      (record) =>
+        record.userId === userId &&
+        record.state === "controllable" &&
+        record.connection !== undefined &&
+        record.connection.socket.readyState === READY_OPEN,
+    );
+    if (targets.length === 0) {
+      return { generatedAt: this.clock.now().toISOString(), interactions: [] };
+    }
+    const batches = await Promise.all(
+      targets.map((record) => this.queryPendingSnapshot(record)),
+    );
+    return {
+      generatedAt: this.clock.now().toISOString(),
+      interactions: batches.flat(),
+    };
+  }
+
   revokeKey(ingestKeyId: string): void {
     for (const connection of [...this.connections]) {
       if (connection.auth.id !== ingestKeyId) {
@@ -127,18 +205,83 @@ export class InstanceRegistry {
       connection.socket.close(CONTROL_CLOSE_INVALID_FRAME, "invalid control frame");
       return;
     }
+    const message = value as PluginControlClientMessage;
+    if (message.type === "pending_snapshot_response") {
+      // Validated snapshot answers are not registration traffic: unknown,
+      // late, or foreign responses are ignored, never a connection error.
+      this.handleSnapshotResponse(connection, message);
+      return;
+    }
     if (connection.instanceId !== undefined) {
       this.disconnect(connection);
       connection.socket.close(CONTROL_CLOSE_INVALID_FRAME, "already registered");
       return;
     }
-    this.register(connection, value as PluginControlClientMessage);
+    this.register(connection, message as RegisterMessage);
   }
 
-  private register(
+  private queryPendingSnapshot(record: InstanceRecord): Promise<PendingInteraction[]> {
+    const connection = record.connection as ControlConnection;
+    const requestId = randomUUID();
+    return new Promise<PendingInteraction[]>((resolve) => {
+      const entry: PendingSnapshotRequest = {
+        connection,
+        requestId,
+        registration: record.registration,
+        timer: setTimeout(() => {
+          this.pendingRequests.delete(this.pendingKey(connection, requestId));
+          resolve([]);
+        }, this.snapshotTimeoutMs),
+        resolve,
+      };
+      this.pendingRequests.set(this.pendingKey(connection, requestId), entry);
+      this.send(connection, { type: "pending_snapshot_request", requestId });
+    });
+  }
+
+  private handleSnapshotResponse(
     connection: ControlConnection,
-    registration: PluginControlClientMessage,
+    message: PendingSnapshotResponse,
   ): void {
+    if (connection.instanceId === undefined) {
+      // A response before registration cannot be correlated to anything.
+      return;
+    }
+    if (message.instanceId !== connection.instanceId) {
+      // The frame names an instance this connection does not own: ignore.
+      return;
+    }
+    const key = this.pendingKey(connection, message.requestId);
+    const pending = this.pendingRequests.get(key);
+    if (pending === undefined) {
+      // Unknown, already-settled (late), or duplicate requestId: ignore.
+      return;
+    }
+    this.pendingRequests.delete(key);
+    clearTimeout(pending.timer);
+    pending.resolve(
+      message.interactions.map((interaction) => this.enrich(interaction, pending.registration)),
+    );
+  }
+
+  /**
+   * Authoritative source enrichment: the interaction's instance/machine/
+   * project/directory always come from the registered record, so a Plugin
+   * cannot misattribute its pending requests. All other fields (requestId,
+   * session, kind, and complete question/permission content) pass through
+   * verbatim.
+   */
+  private enrich(interaction: PendingInteraction, registration: RegisterMessage): PendingInteraction {
+    return {
+      ...interaction,
+      instanceId: registration.instanceId,
+      machine: registration.machine,
+      project: registration.project,
+      directory: registration.directory,
+    };
+  }
+
+  private register(connection: ControlConnection, registration: RegisterMessage): void {
     const recordKey = this.recordKey(connection.auth.userId, registration.instanceId);
     const existing = this.records.get(recordKey);
     if (existing?.connection !== undefined && existing.connection !== connection) {
@@ -188,6 +331,13 @@ export class InstanceRegistry {
       return;
     }
     clearInterval(connection.heartbeat);
+    for (const [key, pending] of this.pendingRequests) {
+      if (pending.connection === connection) {
+        this.pendingRequests.delete(key);
+        clearTimeout(pending.timer);
+        pending.resolve([]);
+      }
+    }
     const instanceId = connection.instanceId;
     if (instanceId === undefined) {
       return;
@@ -278,7 +428,7 @@ export class InstanceRegistry {
     };
   }
 
-  private ownershipKey(userId: string, registration: PluginControlClientMessage): string {
+  private ownershipKey(userId: string, registration: RegisterMessage): string {
     const machine = registration.machine.trim().toLocaleLowerCase("en-US");
     let directory = registration.directory.trim().replaceAll("\\", "/").replace(/\/{2,}/g, "/");
     if (directory.length > 1) {
@@ -292,6 +442,10 @@ export class InstanceRegistry {
 
   private recordKey(userId: string, instanceId: string): string {
     return `${userId}\u0000${instanceId}`;
+  }
+
+  private pendingKey(connection: ControlConnection, requestId: string): string {
+    return `${connection.uid}\u0000${requestId}`;
   }
 
   private pruneOfflineOwnership(
@@ -321,6 +475,9 @@ export class InstanceRegistry {
             ? Buffer.from(raw).toString("utf8")
             : null;
     if (text === null) {
+      return null;
+    }
+    if (Buffer.byteLength(text, "utf8") > CONTROL_MAX_FRAME_BYTES) {
       return null;
     }
     try {

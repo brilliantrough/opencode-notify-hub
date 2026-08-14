@@ -35,6 +35,7 @@ import type {
   ingestKeyListItemSchema,
   ingestKeyListResponseSchema,
 } from "./schemas/ingest-keys.js";
+import type { pendingInteractionSchema, pendingSnapshotSchema } from "./schemas/pending.js";
 import type { wsServerMessageSchema } from "./schemas/ws.js";
 
 export type RegisterBody = FromSchema<typeof registerBodySchema>;
@@ -69,3 +70,6 @@ export type WsServerMessage = FromSchema<typeof wsServerMessageSchema>;
 export type InstancePresence = FromSchema<typeof instancePresenceSchema>;
 export type PluginControlClientMessage = FromSchema<typeof pluginControlClientMessageSchema>;
 export type PluginControlServerMessage = FromSchema<typeof pluginControlServerMessageSchema>;
+
+export type PendingInteraction = FromSchema<typeof pendingInteractionSchema>;
+export type PendingSnapshot = FromSchema<typeof pendingSnapshotSchema>;

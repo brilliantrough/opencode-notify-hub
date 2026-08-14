@@ -17,6 +17,7 @@ import 'firebase_options.dart';
 import 'notifications/android_notification_service.dart';
 import 'notifications/desktop_notification_service.dart';
 import 'notifications/notification_service.dart';
+import 'pending/pending_controller.dart';
 import 'realtime/realtime_controller.dart';
 import 'settings/settings_controller.dart';
 import 'tray/tray_controller.dart';
@@ -200,6 +201,11 @@ class AppBootstrap {
     _subscriptionClosers.add(
       container
           .listen(realtimeControllerProvider, fireImmediately: true, (_, _) {})
+          .close,
+    );
+    _subscriptionClosers.add(
+      container
+          .listen(pendingInteractionsProvider, fireImmediately: true, (_, _) {})
           .close,
     );
 
