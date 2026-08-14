@@ -1,9 +1,11 @@
 # Multi-Device Agent Workflow
 
-This workflow lets agents on Linux, Windows, and other trusted development
-machines collaborate through GitHub without sharing mutable checkouts or
-credentials. Branches and pull requests carry code and verification evidence;
-GitHub Issues define ownership when tasks cross machines or agents.
+This repository is maintained sequentially from trusted Linux and Windows
+development machines. `origin/main` is the shared development and handoff
+boundary: each machine starts from the latest main, reviews what the previous
+machine changed, continues the same codebase, and pushes the verified result
+back to main. Task branches are required only when the maintainer explicitly
+runs concurrent work or when an external contribution needs review.
 
 ## Repository setup per machine
 
@@ -31,9 +33,10 @@ git config user.email "<GitHub noreply address>"
 
 ## Task contract
 
-For solo maintainer work, define the task in the branch and pull request. Create
-or claim a GitHub Issue before editing when multiple machines or agents need to
-coordinate ownership or handoff. The task description must state:
+For normal sequential maintainer work, the current conversation and project
+memory define the task. Create or claim a GitHub Issue when work needs durable
+tracking, spans multiple agents concurrently, or will be submitted as a pull
+request. A coordinated task description should state:
 
 - problem and user-visible outcome;
 - files or component likely owned by the change;
@@ -43,9 +46,9 @@ coordinate ownership or handoff. The task description must state:
 - security, privacy, protocol, migration, and release impact;
 - dependencies on other Issues.
 
-For coordinated work, comment that the task is claimed, including the branch
-name and development-machine platform. Do not claim a task already assigned or
-actively claimed.
+For concurrent work, record the branch name, development-machine platform, and
+owned files or components. Do not start overlapping edits until the maintainer
+has assigned the merge boundary.
 
 Recommended labels:
 
@@ -54,19 +57,25 @@ Recommended labels:
 - kind: `bug`, `enhancement`, `testing`, `release`, `security`;
 - state: `blocked`, `needs-reproduction`, `needs-review`.
 
-## Branch and checkout isolation
+## Shared main and concurrent work
 
-Use a dedicated branch per task:
+Normal sequential work starts by synchronizing the shared main:
 
 ```bash
 git fetch origin
 git switch main
 git pull --ff-only
-git switch -c <platform-or-component>/<short-description>
+git status --short
+git log --oneline -10
 ```
 
-If multiple agents run on one machine, give each agent a separate clone or
-worktree:
+Before editing, inspect commits made by the other development machine and
+verify that its client, gateway, contract, deployment, and documentation
+changes are present locally. Do not treat Linux and Windows as independent
+products or overwrite platform-specific behavior with an older local copy.
+
+When the maintainer explicitly authorizes concurrent work, create a task branch
+from the current `origin/main` and use a separate clone or worktree:
 
 ```bash
 git fetch origin
@@ -77,8 +86,12 @@ git worktree add ../opencode-notify-<task> \
 Rules:
 
 - Never run two writing agents in the same worktree.
-- Never let two tasks share a branch.
-- Never commit directly to `main`.
+- The maintainer's sequential Linux and Windows agents may commit and push
+  directly to `main` after required verification.
+- Concurrent tasks must use separate branches and worktrees until the
+  maintainer requests integration.
+- Fetch immediately before integration or push; if main advanced, inspect and
+  merge the other machine's work before continuing.
 - Never force-push a shared branch.
 - Never use destructive reset/clean commands to handle changes from another
   agent; stop and inspect ownership instead.
@@ -91,10 +104,11 @@ Rules:
 2. Make the smallest change that satisfies the acceptance criteria.
 3. Add focused regression tests at the behavior boundary.
 4. Run focused tests while developing.
-5. Run the required component and platform gates before opening the PR.
+5. Run the required component and platform gates before commit and push.
 6. Update documentation when behavior, configuration, data, API, or operations
    change.
-7. Commit a coherent change and push only the issue branch.
+7. Re-fetch, inspect the final diff, commit a coherent change, and push the
+   current shared main or explicitly assigned task branch.
 
 Common repository gates:
 
@@ -114,8 +128,10 @@ require Docker. Never mark a platform verified from unit tests alone.
 
 ## Pull request contract
 
-Open a PR against `main`. Link a coordinated Issue with `Closes #<number>` when
-one exists. Include:
+Pull requests are used for external contributions, review-sensitive work, and
+explicitly concurrent tasks. They are not required for the maintainer's normal
+sequential cross-machine handoff. When a PR is used, link a coordinated Issue
+with `Closes #<number>` when one exists and include:
 
 - concise behavioral summary;
 - risk and compatibility notes;
@@ -132,10 +148,11 @@ repository's chosen merge policy consistently.
 
 ## Cross-machine handoff
 
-When an agent cannot finish on its current OS, push the branch and leave a
-handoff in the PR or coordinated Issue containing:
+At the end of work on one machine, push the verified commit to `origin/main`
+and update the ignored `docs/project_memory/current-state.md`. The handoff must
+contain:
 
-- branch and latest commit SHA;
+- pushed commit SHA and the confirmed `origin/main` SHA;
 - what is complete;
 - current failure or unanswered question;
 - exact next command;
@@ -144,17 +161,21 @@ handoff in the PR or coordinated Issue containing:
 - tests already run and tests still required;
 - confirmation that logs and artifacts are sanitized.
 
-The receiving agent fetches the existing branch rather than recreating the
-work:
+The receiving machine synchronizes main before making any edits:
 
 ```bash
 git fetch origin
-git switch --track origin/<branch-name>
+git switch main
+git pull --ff-only
+git status --short
+git log --oneline -10
 ```
 
-For example, a Linux agent can implement shared Dart tests and push the branch;
-a Windows agent then validates native tray, notification, packaging, and DPI
-behavior on the same commit.
+For example, Windows may update native tray behavior and Gateway logic in one
+turn and push main; Linux then fetches that exact revision, preserves both
+changes, adds Linux validation or follow-up work, and pushes the next main
+revision. If both machines work concurrently, the maintainer will explicitly
+request a branch merge before either side pushes the integrated result.
 
 ## Credentials and production access
 
@@ -175,11 +196,11 @@ an agent. Follow these constraints on every machine:
 
 ## Maintainer setup on GitHub
 
-Configure the repository before parallel agent work increases:
+Configure the repository for safe shared-main maintenance:
 
-1. Protect `main`; require pull requests and passing CI.
-2. Block force pushes and branch deletion on `main`.
-3. Require branches to be current before merge for release-critical changes.
+1. Block force pushes and branch deletion on `main`.
+2. Keep CI running on direct pushes and pull requests.
+3. Require concurrent branches to be current before release-critical merges.
 4. Enable private vulnerability reporting.
 5. Create the component/platform/state labels above.
 6. Create milestones matching the roadmap phases.
@@ -188,27 +209,23 @@ Configure the repository before parallel agent work increases:
 8. Limit Actions permissions to read-only by default and grant write access per
    job only when required.
 
-GitHub remains the coordination boundary: an agent may have repository access,
-but work is not considered integrated until it is reviewed, verified, and
-merged through a pull request.
+GitHub remains the coordination boundary: work is not handed off until it is
+reviewed, verified, and present on `origin/main` (or on an explicitly assigned
+concurrent branch awaiting integration).
 
-## First Windows agent brief
+## Machine handoff brief
 
-For solo work, create branch `windows/dev-node`. For coordinated work, create or
-claim a Roadmap P0 provisioning Issue and use an issue-numbered branch. Then
-give the Windows agent this repository-local assignment:
+Use this repository-local assignment when moving development to the other
+machine:
 
 ```text
-Work only on Windows development-node provisioning. Read ROADMAP.md,
-docs/agent-workflow.md, docs/client-setup.md, and CONTRIBUTING.md first. Create
-the task branch from origin/main. Verify the toolchain, bootstrap the repo, run
-analysis/tests, attempt a Windows release build with a staging gateway URL, and
-document every prerequisite or failure. Do not implement unrelated product
-features, use production credentials, commit generated build output, or push to
-main. Push the task branch and open a PR with sanitized command results and
-follow-up tasks for native Windows defects.
+Read docs/project_memory/current-state.md, docs/agent-workflow.md, the latest
+origin/main commits, and the relevant component documentation first. Fast-
+forward local main before editing. Treat changes from the previous Linux or
+Windows machine as part of the same product state, including shared server
+logic. Preserve them while continuing the requested work. Run the available
+cross-platform gates plus native checks for this machine, remove environment-
+only generated drift, update project memory, and push the verified commit to
+origin/main. Use a task branch only when the maintainer explicitly says work is
+concurrent and requests a later merge.
 ```
-
-This brief deliberately separates environment provisioning from tray,
-notification, DPI, autostart, and packaging fixes. That keeps the first Windows
-pull request reviewable and makes later Issues independently assignable.

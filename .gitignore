@@ -24,5 +24,8 @@ coverage/
 *.sql.gz
 backups/
 
-# Manually synchronized cross-machine agent memory. Keep credentials out.
+# Local agent configuration, state, memory, and indexes.
+.opencode/
+.omo/
+.codegraph/
 docs/project_memory/

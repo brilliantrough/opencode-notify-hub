@@ -1,10 +1,11 @@
 # Roadmap
 
-OpenCode Notify is pre-release. The roadmap prioritizes a reproducible Windows
-development node first, then closes desktop platform gaps before expanding the
-release surface. Branches and pull requests are the source of truth for work in
-progress; use GitHub Issues when work must be coordinated across machines or
-agents. This file records sequencing and exit criteria.
+OpenCode Notify is pre-release. The Windows development node and baseline parity
+work are complete; the roadmap now closes cross-platform verification and
+release gaps before expanding the product surface. `origin/main` is the source
+of truth for normal sequential Linux and Windows development. Use task branches,
+pull requests, and GitHub Issues when work is explicitly concurrent or needs
+external review. This file records sequencing and exit criteria.
 
 ## Working principles
 
@@ -13,34 +14,24 @@ agents. This file records sequencing and exit criteria.
 - Keep gateway, plugin, contracts, and shared Dart behavior platform-neutral.
 - Isolate platform-specific behavior behind the existing notification, tray,
   window, storage, and startup adapters.
-- One branch, worktree, and pull request per task. Use an Issue when multiple
-  machines or agents need ownership and handoff. Never let two agents write to
-  the same checkout or branch.
+- Sequential maintainer work continues from the latest `origin/main` and pushes
+  verified changes back to main. Explicitly concurrent work uses one branch and
+  worktree per task until the maintainer requests integration. Never let two
+  agents write to the same checkout or branch.
 - Merge only changes with reproducible verification and sanitized evidence.
 - Keep production credentials, signing keys, Firebase service accounts, and
   user notification content outside repositories, prompts, logs, and issues.
 
 ## Start here
 
-The next development session should run on the Windows machine and provision
-the development node. A solo maintainer can use branch `windows/dev-node`; use
-`issue-<number>-windows-dev-node` if the task is coordinated through an Issue.
-Follow
+Start every development session by fetching and fast-forwarding `main`, reading
+the latest cross-machine project memory, and inspecting the previous machine's
+commits. Continue with the first unmet exit criterion below. The current focus
+is reproducible desktop/mobile E2E evidence and release readiness; Windows node
+provisioning and baseline parity are already integrated. Follow
 [`docs/agent-workflow.md`](docs/agent-workflow.md).
 
-The first Windows agent should stop after producing these artifacts:
-
-- sanitized `flutter doctor -v`, `node --version`, `pnpm --version`, and
-  `git --version` output;
-- a documented, repeatable clone/bootstrap sequence;
-- results from `flutter analyze` and `flutter test`;
-- the first `flutter build windows --release` result;
-- the complete list of runtime files in the release directory;
-- a sanitized screenshot showing the unsigned client starts;
-- follow-up tasks or Issues for every native failure found, without expanding
-  the provisioning pull request into unrelated client fixes.
-
-Use a staging gateway URL at build time. The first task must not receive a
+Use staging services for verification. Development tasks must not receive a
 production ingest key, Firebase service account, signing certificate, or
 release-signing secret.
 
@@ -230,5 +221,5 @@ compatibility, and rollback implications before implementation begins.
 
 Update this roadmap only when priorities, phase scope, or exit criteria change.
 Use GitHub milestones for dates and Issues/Projects when live coordination is
-needed. Every completed task should have a pull request linked to the exact
-verification evidence required by the phase.
+needed. Every completed task should have a focused main commit or pull request
+linked to the exact verification evidence required by the phase.
