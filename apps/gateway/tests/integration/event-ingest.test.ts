@@ -4,12 +4,13 @@ import {
   validateErrorResponse,
   validateEventIngestResponse,
 } from "@notify/contracts";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { buildServer } from "../../src/app.js";
 import { createDb, type GatewayDatabase } from "../../src/db/client.js";
+import { ingestKeys } from "../../src/db/schema.js";
 import type { Clock } from "../../src/lib/clock.js";
 import type { EventDispatcher } from "../../src/modules/events/events.routes.js";
 import type { Mailer } from "../../src/modules/mail/mailer.js";
@@ -308,9 +309,10 @@ describe("event ingestion", () => {
       expect((dispatcher.calls[0].event.session as { id: string }).id).toBe("session-1");
 
       const keyId = currentCredential.slice(0, currentCredential.indexOf("."));
-      const keyRows = (await handle.db.execute<{ lastUsedAt: Date | null }>(
-        sql`select last_used_at as "lastUsedAt" from ingest_keys where key_id = ${keyId}`,
-      )) as { lastUsedAt: Date | null }[];
+      const keyRows = await handle.db
+        .select({ lastUsedAt: ingestKeys.lastUsedAt })
+        .from(ingestKeys)
+        .where(eq(ingestKeys.keyId, keyId));
       expect(keyRows[0].lastUsedAt).toEqual(clock.now());
 
       // No event persistence: the schema has no events table at all.

@@ -8,8 +8,9 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
+    "build:contracts": "pnpm --filter @notify/contracts build",
+    "typecheck": "pnpm build:contracts && pnpm -r typecheck",
+    "test": "pnpm build:contracts && pnpm -r test",
     "docs:check": "node scripts/check-markdown-links.mjs"
   }
 }

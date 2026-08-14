@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "pretest:integration": "pnpm --filter @notify/contracts build",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
