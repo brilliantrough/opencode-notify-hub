@@ -5,6 +5,7 @@ import { validateNotifyEvent } from "@notify/contracts";
 
 import { loadConfig } from "../src/config.js";
 import SessionNotifyPlugin, { createSessionNotifyHooks } from "../src/index.js";
+import type { PluginControl } from "../src/control-channel.js";
 import { createSafeLogger, type LogEntry } from "../src/log.js";
 import {
   devQuestionAsked,
@@ -48,6 +49,7 @@ interface LogBody {
 interface FakeClient {
   client: {
     app: { log: (options: { body: LogBody }) => unknown };
+    global: { health: () => Promise<{ data: { version: string } }> };
     session: { get: (options: { path: { id: string } }) => Promise<unknown> };
   };
   logBodies: LogBody[];
@@ -74,6 +76,9 @@ function makeClient(options: FakeClientOptions = {}): FakeClient {
           }
           return Promise.resolve({ data: true });
         },
+      },
+      global: {
+        health: async () => ({ data: { version: "1.18.18" } }),
       },
       session: {
         get: ({ path }: { path: { id: string } }) => {
@@ -181,6 +186,14 @@ describe("SessionNotifyPlugin", () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: FIXED_NOW });
     stubBaseEnv();
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        addEventListener(): void {}
+        send(): void {}
+        close(): void {}
+      },
+    );
   });
 
   afterEach(() => {
@@ -202,6 +215,36 @@ describe("SessionNotifyPlugin", () => {
     // The warning must not echo any environment value, above all the key.
     expect(JSON.stringify(logBodies)).not.toContain(SECRET);
     expect(JSON.stringify(logBodies)).not.toContain(KEY_ID);
+  });
+
+  it("starts control after hook construction and stops it during dispose", async () => {
+    const config = loadConfig({
+      NOTIFY_GATEWAY_URL: GATEWAY_URL,
+      NOTIFY_INGEST_KEY: `${KEY_ID}.${SECRET}`,
+      NOTIFY_MACHINE: "test-machine",
+    });
+    expect(config).not.toBeNull();
+    const starts: string[] = [];
+    const control: PluginControl = {
+      start: () => {
+        starts.push("start");
+      },
+      stop: () => {
+        starts.push("stop");
+      },
+    };
+    const { client } = makeClient();
+
+    const hooks = createSessionNotifyHooks(makeInput(client), config!, {
+      control,
+      pump: { enqueue: () => undefined, stop: async () => undefined },
+    });
+    expect(starts).toEqual([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(starts).toEqual(["start"]);
+
+    await hooks.dispose?.();
+    expect(starts).toEqual(["start", "stop"]);
   });
 
   it("ignores events for a child session without any SDK lookup", async () => {

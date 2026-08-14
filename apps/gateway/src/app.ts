@@ -23,6 +23,8 @@ import { ingestKeyRoutes } from "./modules/ingest-keys/ingest-keys.routes.js";
 import { IngestKeyService } from "./modules/ingest-keys/ingest-keys.service.js";
 import type { Mailer } from "./modules/mail/mailer.js";
 import { NodemailerMailer } from "./modules/mail/nodemailer.mailer.js";
+import { controlWsRoutes } from "./modules/control/control-ws.routes.js";
+import { InstanceRegistry } from "./modules/control/instance-registry.js";
 import {
   ConnectionRegistry,
   WS_CLOSE_SERVER_SHUTDOWN,
@@ -218,7 +220,7 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
     const deviceRepository = new DrizzleDeviceRepository(deps.db);
     await app.register(deviceRoutes(deviceRepository));
     const ingestKeyRepository = new DrizzleIngestKeyRepository(deps.db);
-    await app.register(ingestKeyRoutes(ingestKeyRepository));
+    const ingestKeys = new IngestKeyService(ingestKeyRepository);
     // Realtime: authenticated WebSocket routing. The registry is the
     // WebSocket leg of the composite ingest dispatcher composed below.
     const registry = new ConnectionRegistry({
@@ -227,6 +229,16 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
         ? { pingIntervalMs: deps.realtime.pingIntervalMs }
         : {}),
     });
+    const instances = new InstanceRegistry({
+      clock,
+      publish: (userId, message) => registry.send(userId, message),
+      ...(deps.realtime?.pingIntervalMs !== undefined
+        ? { pingIntervalMs: deps.realtime.pingIntervalMs }
+        : {}),
+    });
+    await app.register(
+      ingestKeyRoutes(ingestKeyRepository, { onRevoked: (id) => instances.revokeKey(id) }),
+    );
     // preClose (not onClose): the 1012 close frames must be flushed while
     // the sockets are still alive — by onClose the server has torn them
     // down. Registered BEFORE the websocket plugin so this hook runs first:
@@ -234,9 +246,18 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
     // later code-less close cannot overwrite our 1012.
     app.addHook("preClose", async () => {
       registry.closeAll(WS_CLOSE_SERVER_SHUTDOWN);
+      instances.closeAll();
     });
     await registerWebsocket(app);
-    await app.register(wsRoutes({ registry, accessTokens, allowedOrigins: config.allowedOrigins }));
+    await app.register(
+      wsRoutes({
+        registry,
+        accessTokens,
+        allowedOrigins: config.allowedOrigins,
+        onConnect: (userId) => instances.publishSnapshot(userId),
+      }),
+    );
+    await app.register(controlWsRoutes({ pluginKeys: ingestKeys, registry: instances }));
     // Production default fanout: WebSocket (registry) + Android push (FCM)
     // composed behind the ingest route's dispatcher seam. The Firebase app
     // is only initialized when the real sender is needed — an injected
@@ -255,7 +276,7 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
       });
     await app.register(
       eventRoutes({
-        ingestKeys: new IngestKeyService(ingestKeyRepository),
+        ingestKeys,
         clock,
         dispatcher,
       }),

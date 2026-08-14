@@ -1,4 +1,5 @@
 import 'package:client/realtime/active_sessions.dart';
+import 'package:client/realtime/instance_presence.dart';
 import 'package:client/realtime/ws_client.dart';
 import 'package:client/ui/home_page.dart';
 import 'package:flutter/material.dart';
@@ -14,17 +15,32 @@ class FakeActiveSessions extends ActiveSessions {
   Map<String, ActiveSession> build() => _initial;
 }
 
+class FakeInstancePresences extends InstancePresences {
+  FakeInstancePresences(this._initial);
+
+  final Map<String, OpenCodeInstancePresence> _initial;
+
+  @override
+  Map<String, OpenCodeInstancePresence> build() => _initial;
+}
+
 void main() {
   Future<void> pumpHome(
     WidgetTester tester, {
     WsStatus status = WsStatus.connected,
     Map<String, ActiveSession> sessions = const {},
+    Map<String, OpenCodeInstancePresence> instances = const {},
   }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           wsStatusProvider.overrideWith((ref) => Stream.value(status)),
-          activeSessionsProvider.overrideWith(() => FakeActiveSessions(sessions)),
+          activeSessionsProvider.overrideWith(
+            () => FakeActiveSessions(sessions),
+          ),
+          instancePresencesProvider.overrideWith(
+            () => FakeInstancePresences(instances),
+          ),
         ],
         child: const MaterialApp(home: HomePage()),
       ),
@@ -47,6 +63,20 @@ void main() {
     running: true,
     pendingRequestIds: pending,
   );
+
+  OpenCodeInstancePresence instance(String id, InstancePresenceState state) =>
+      OpenCodeInstancePresence(
+        instanceId: id,
+        machine: 'dev-box',
+        project: 'shop-api',
+        directory: '/work/shop-api',
+        openCodeVersion: state == InstancePresenceState.incompatible
+            ? '1.18.17'
+            : '1.18.18',
+        protocolVersion: 1,
+        state: state,
+        lastSeenAt: DateTime.now().subtract(const Duration(minutes: 2)),
+      );
 
   testWidgets('shows 已连接 when the socket is connected', (tester) async {
     await pumpHome(tester, status: WsStatus.connected);
@@ -71,10 +101,7 @@ void main() {
   testWidgets('session rows show machine, project, and elapsed time', (
     tester,
   ) async {
-    await pumpHome(
-      tester,
-      sessions: {'s1': session(id: 's1')},
-    );
+    await pumpHome(tester, sessions: {'s1': session(id: 's1')});
 
     expect(find.text('dev-box · shop-api'), findsOneWidget);
     expect(find.textContaining('Fix checkout bug'), findsOneWidget);
@@ -102,5 +129,24 @@ void main() {
     );
     // No badge for sessions without pending actions.
     expect(find.byKey(const ValueKey('pending-s2')), findsNothing);
+  });
+
+  testWidgets('renders every OpenCode instance presence state', (tester) async {
+    await pumpHome(
+      tester,
+      instances: {
+        'one': instance('one', InstancePresenceState.controllable),
+        'two': instance('two', InstancePresenceState.conflicting),
+        'three': instance('three', InstancePresenceState.incompatible),
+        'four': instance('four', InstancePresenceState.offline),
+      },
+    );
+
+    expect(find.text('OpenCode 实例'), findsOneWidget);
+    expect(find.text('可远程操作'), findsOneWidget);
+    expect(find.text('项目冲突'), findsOneWidget);
+    expect(find.text('版本不兼容'), findsOneWidget);
+    expect(find.text('离线'), findsOneWidget);
+    expect(find.byKey(const ValueKey('instance-one')), findsOneWidget);
   });
 }

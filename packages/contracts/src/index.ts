@@ -12,6 +12,10 @@ import {
 } from "./schemas/auth.js";
 import { errorResponseSchema, healthStatusSchema } from "./schemas/common.js";
 import {
+  pluginControlClientMessageSchema,
+  pluginControlServerMessageSchema,
+} from "./schemas/control.js";
+import {
   deviceListResponseSchema,
   deviceSchema,
   patchDeviceBodySchema,
@@ -57,9 +61,12 @@ export const validateHealthStatus = ajv.compile(healthStatusSchema);
 export const validateErrorResponse = ajv.compile(errorResponseSchema);
 
 export const validateWsServerMessage = ajv.compile(wsServerMessageSchema);
+export const validatePluginControlClientMessage = ajv.compile(pluginControlClientMessageSchema);
+export const validatePluginControlServerMessage = ajv.compile(pluginControlServerMessageSchema);
 
 export * from "./schemas/auth.js";
 export * from "./schemas/common.js";
+export * from "./schemas/control.js";
 export * from "./schemas/devices.js";
 export * from "./schemas/events.js";
 export * from "./schemas/ingest-keys.js";

@@ -20,6 +20,7 @@ export interface WsRouteDeps {
    * list; native clients that send no Origin header stay allowed.
    */
   allowedOrigins: string[];
+  onConnect?: (userId: string) => void;
 }
 
 /**
@@ -62,9 +63,11 @@ export function wsRoutes(deps: WsRouteDeps): FastifyPluginAsync {
         },
       },
       (socket, request) => {
-        deps.registry.add(request.userId as string, socket, {
+        const userId = request.userId as string;
+        deps.registry.add(userId, socket, {
           expiresAtMs: request.tokenExpiresAtMs as number,
         });
+        deps.onConnect?.(userId);
       },
     );
   };

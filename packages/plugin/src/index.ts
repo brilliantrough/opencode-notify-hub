@@ -29,10 +29,12 @@
  */
 
 import type { Hooks, Plugin, PluginInput } from "@opencode-ai/plugin";
+import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 import type { NotifyEvent } from "@notify/contracts";
 import { posix, win32 } from "node:path";
 
 import { loadConfig, type PluginConfig } from "./config.js";
+import { ControlChannel, type PluginControl } from "./control-channel.js";
 import {
   EnvelopeFactory,
   type EnvelopeSession,
@@ -72,6 +74,8 @@ export interface SessionNotifyDeps {
   fetch?: typeof fetch;
   /** Queue/pump seam; defaults to a real `QueuePump` over `GatewaySender`. */
   pump?: NotificationPump;
+  /** Outbound control seam; defaults to the production WSS channel. */
+  control?: PluginControl;
 }
 
 /** Contract sections require nonempty strings; fall back instead of dropping. */
@@ -125,12 +129,13 @@ export function createSessionNotifyHooks(
     deps.lookup ?? createSdkLookup(input.client.session),
   );
   const cache = new MessageCache();
+  const source = {
+    machine: config.machine,
+    project: projectLabel(input),
+    directory: safeNonEmpty(input.directory, safeNonEmpty(input.worktree, "unknown")),
+  };
   const envelopes = new EnvelopeFactory({
-    source: {
-      machine: config.machine,
-      project: projectLabel(input),
-      directory: safeNonEmpty(input.directory, safeNonEmpty(input.worktree, "unknown")),
-    },
+    source,
     includeSummary: config.includeSummary,
   });
   const pump =
@@ -146,6 +151,35 @@ export function createSessionNotifyHooks(
       logger,
       capacity: config.queueCapacity,
     });
+  const directory = source.directory;
+  const control =
+    deps.control ??
+    (input.serverUrl instanceof URL
+      ? new ControlChannel({
+          gatewayUrl: config.gatewayUrl,
+          credential: `${config.ingestKey.keyId}.${config.ingestKey.secret}`,
+          machine: source.machine,
+          project: source.project,
+          directory,
+          resolveOpenCodeVersion: async () => {
+            const hostGlobal = (
+              input.client as unknown as {
+                global?: { health?: () => Promise<{ data?: { version?: string } }> };
+              }
+            ).global;
+            if (hostGlobal?.health !== undefined) {
+              const result = await hostGlobal.health();
+              return result.data?.version ?? "unknown";
+            }
+            const client = createOpencodeClient({
+              baseUrl: input.serverUrl.toString(),
+              directory,
+            });
+            const result = await client.global.health();
+            return result.data?.version ?? "unknown";
+          },
+        })
+      : null);
 
   function sessionOf(sessionID: string): EnvelopeSession {
     return { id: sessionID, title: registry.title(sessionID) };
@@ -227,6 +261,16 @@ export function createSessionNotifyHooks(
       emit(() => envelopes.actionResolved(sessionOf(resolution.sessionID), resolution)),
   });
   let disposed = false;
+  const controlStart = setImmediate(() => {
+    if (disposed) {
+      return;
+    }
+    try {
+      control?.start();
+    } catch {
+      logger.error("notify: control channel failed to start");
+    }
+  });
 
   /** Route one normalized main-session event; never throws. */
   function dispatch(normalized: NormalizedEvent): void {
@@ -360,6 +404,12 @@ export function createSessionNotifyHooks(
     },
     dispose: async () => {
       disposed = true;
+      clearImmediate(controlStart);
+      try {
+        await control?.stop();
+      } catch {
+        logger.error("notify: control channel stop failed during dispose");
+      }
       try {
         machine.flushPendingCompletions();
       } catch {

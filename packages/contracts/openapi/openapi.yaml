@@ -166,6 +166,47 @@ components:
           - createdAt
         type: object
       type: array
+    InstancePresence:
+      additionalProperties: false
+      properties:
+        directory:
+          minLength: 1
+          type: string
+        instanceId:
+          format: uuid
+          type: string
+        lastSeenAt:
+          format: date-time
+          type: string
+        machine:
+          minLength: 1
+          type: string
+        openCodeVersion:
+          minLength: 1
+          type: string
+        project:
+          minLength: 1
+          type: string
+        protocolVersion:
+          minimum: 1
+          type: integer
+        state:
+          enum:
+            - controllable
+            - conflicting
+            - incompatible
+            - offline
+          type: string
+      required:
+        - instanceId
+        - machine
+        - project
+        - directory
+        - openCodeVersion
+        - protocolVersion
+        - state
+        - lastSeenAt
+      type: object
     LoginBody:
       additionalProperties: false
       properties:
@@ -544,6 +585,57 @@ components:
         soundEnabled:
           type: boolean
       type: object
+    PluginControlClientMessage:
+      additionalProperties: false
+      properties:
+        directory:
+          minLength: 1
+          type: string
+        instanceId:
+          format: uuid
+          type: string
+        machine:
+          minLength: 1
+          type: string
+        openCodeVersion:
+          minLength: 1
+          type: string
+        project:
+          minLength: 1
+          type: string
+        protocolVersion:
+          minimum: 1
+          type: integer
+        type:
+          const: register
+      required:
+        - type
+        - instanceId
+        - machine
+        - project
+        - directory
+        - openCodeVersion
+        - protocolVersion
+      type: object
+    PluginControlServerMessage:
+      additionalProperties: false
+      properties:
+        instanceId:
+          format: uuid
+          type: string
+        state:
+          enum:
+            - controllable
+            - conflicting
+            - incompatible
+          type: string
+        type:
+          const: registration
+      required:
+        - type
+        - instanceId
+        - state
+      type: object
     RefreshBody:
       additionalProperties: false
       properties:
@@ -646,361 +738,413 @@ components:
         - code
       type: object
     WsServerMessage:
-      additionalProperties: false
-      properties:
-        event:
-          oneOf:
-            - additionalProperties: false
-              properties:
-                eventId:
-                  format: uuid
-                  type: string
-                occurredAt:
-                  format: date-time
-                  type: string
-                payload:
-                  additionalProperties: false
+      oneOf:
+        - additionalProperties: false
+          properties:
+            event:
+              oneOf:
+                - additionalProperties: false
                   properties:
-                    elapsedSeconds:
-                      minimum: 0
-                      type: integer
-                    status:
-                      enum:
-                        - busy
-                        - retry
-                  required:
-                    - status
-                    - elapsedSeconds
-                  type: object
-                session:
-                  additionalProperties: false
-                  properties:
-                    id:
-                      minLength: 1
+                    eventId:
+                      format: uuid
                       type: string
-                    title:
+                    occurredAt:
+                      format: date-time
                       type: string
-                  required:
-                    - id
-                    - title
-                  type: object
-                source:
-                  additionalProperties: false
-                  properties:
-                    directory:
-                      minLength: 1
-                      type: string
-                    machine:
-                      minLength: 1
-                      type: string
-                    project:
-                      minLength: 1
-                      type: string
-                  required:
-                    - machine
-                    - project
-                    - directory
-                  type: object
-                type:
-                  const: heartbeat
-              required:
-                - eventId
-                - type
-                - occurredAt
-                - source
-                - session
-                - payload
-              type: object
-            - additionalProperties: false
-              properties:
-                eventId:
-                  format: uuid
-                  type: string
-                occurredAt:
-                  format: date-time
-                  type: string
-                payload:
-                  oneOf:
-                    - additionalProperties: false
+                    payload:
+                      additionalProperties: false
                       properties:
-                        kind:
-                          const: question
-                        questions:
-                          items:
-                            additionalProperties: false
-                            properties:
-                              multiple:
-                                type: boolean
-                              options:
-                                items:
-                                  additionalProperties: false
-                                  properties:
-                                    description:
-                                      type: string
-                                    label:
-                                      minLength: 1
-                                      type: string
-                                  required:
-                                    - label
-                                  type: object
-                                maxItems: 16
-                                type: array
-                              question:
-                                maxLength: 2000
-                                minLength: 1
-                                type: string
-                            required:
-                              - question
-                            type: object
-                          maxItems: 8
-                          minItems: 1
-                          type: array
-                        requestId:
+                        elapsedSeconds:
+                          minimum: 0
+                          type: integer
+                        status:
+                          enum:
+                            - busy
+                            - retry
+                      required:
+                        - status
+                        - elapsedSeconds
+                      type: object
+                    session:
+                      additionalProperties: false
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        title:
+                          type: string
+                      required:
+                        - id
+                        - title
+                      type: object
+                    source:
+                      additionalProperties: false
+                      properties:
+                        directory:
+                          minLength: 1
+                          type: string
+                        machine:
+                          minLength: 1
+                          type: string
+                        project:
                           minLength: 1
                           type: string
                       required:
-                        - requestId
-                        - kind
-                        - questions
+                        - machine
+                        - project
+                        - directory
                       type: object
-                    - additionalProperties: false
-                      properties:
-                        kind:
-                          const: permission
-                        permission:
-                          additionalProperties: false
+                    type:
+                      const: heartbeat
+                  required:
+                    - eventId
+                    - type
+                    - occurredAt
+                    - source
+                    - session
+                    - payload
+                  type: object
+                - additionalProperties: false
+                  properties:
+                    eventId:
+                      format: uuid
+                      type: string
+                    occurredAt:
+                      format: date-time
+                      type: string
+                    payload:
+                      oneOf:
+                        - additionalProperties: false
                           properties:
+                            kind:
+                              const: question
+                            questions:
+                              items:
+                                additionalProperties: false
+                                properties:
+                                  multiple:
+                                    type: boolean
+                                  options:
+                                    items:
+                                      additionalProperties: false
+                                      properties:
+                                        description:
+                                          type: string
+                                        label:
+                                          minLength: 1
+                                          type: string
+                                      required:
+                                        - label
+                                      type: object
+                                    maxItems: 16
+                                    type: array
+                                  question:
+                                    maxLength: 2000
+                                    minLength: 1
+                                    type: string
+                                required:
+                                  - question
+                                type: object
+                              maxItems: 8
+                              minItems: 1
+                              type: array
+                            requestId:
+                              minLength: 1
+                              type: string
+                          required:
+                            - requestId
+                            - kind
+                            - questions
+                          type: object
+                        - additionalProperties: false
+                          properties:
+                            kind:
+                              const: permission
                             permission:
-                              minLength: 1
-                              type: string
-                            summary:
-                              maxLength: 500
+                              additionalProperties: false
+                              properties:
+                                permission:
+                                  minLength: 1
+                                  type: string
+                                summary:
+                                  maxLength: 500
+                                  minLength: 1
+                                  type: string
+                              required:
+                                - permission
+                                - summary
+                              type: object
+                            requestId:
                               minLength: 1
                               type: string
                           required:
+                            - requestId
+                            - kind
                             - permission
-                            - summary
                           type: object
-                        requestId:
+                        - additionalProperties: false
+                          properties:
+                            kind:
+                              const: provider_action
+                            providerAction:
+                              additionalProperties: false
+                              properties:
+                                label:
+                                  maxLength: 120
+                                  minLength: 1
+                                  type: string
+                                link:
+                                  format: uri
+                                  maxLength: 2048
+                                  type: string
+                                message:
+                                  maxLength: 500
+                                  minLength: 1
+                                  type: string
+                                provider:
+                                  maxLength: 120
+                                  minLength: 1
+                                  type: string
+                                title:
+                                  maxLength: 120
+                                  minLength: 1
+                                  type: string
+                              required:
+                                - provider
+                                - title
+                                - message
+                                - label
+                              type: object
+                            requestId:
+                              minLength: 1
+                              type: string
+                          required:
+                            - requestId
+                            - kind
+                            - providerAction
+                          type: object
+                    session:
+                      additionalProperties: false
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        title:
+                          type: string
+                      required:
+                        - id
+                        - title
+                      type: object
+                    source:
+                      additionalProperties: false
+                      properties:
+                        directory:
+                          minLength: 1
+                          type: string
+                        machine:
+                          minLength: 1
+                          type: string
+                        project:
                           minLength: 1
                           type: string
                       required:
-                        - requestId
-                        - kind
-                        - permission
+                        - machine
+                        - project
+                        - directory
                       type: object
-                    - additionalProperties: false
+                    type:
+                      const: action_required
+                  required:
+                    - eventId
+                    - type
+                    - occurredAt
+                    - source
+                    - session
+                    - payload
+                  type: object
+                - additionalProperties: false
+                  properties:
+                    eventId:
+                      format: uuid
+                      type: string
+                    occurredAt:
+                      format: date-time
+                      type: string
+                    payload:
+                      additionalProperties: false
                       properties:
                         kind:
-                          const: provider_action
-                        providerAction:
-                          additionalProperties: false
-                          properties:
-                            label:
-                              maxLength: 120
-                              minLength: 1
-                              type: string
-                            link:
-                              format: uri
-                              maxLength: 2048
-                              type: string
-                            message:
-                              maxLength: 500
-                              minLength: 1
-                              type: string
-                            provider:
-                              maxLength: 120
-                              minLength: 1
-                              type: string
-                            title:
-                              maxLength: 120
-                              minLength: 1
-                              type: string
-                          required:
-                            - provider
-                            - title
-                            - message
-                            - label
-                          type: object
+                          enum:
+                            - question
+                            - permission
                         requestId:
                           minLength: 1
                           type: string
                       required:
                         - requestId
                         - kind
-                        - providerAction
                       type: object
-                session:
-                  additionalProperties: false
-                  properties:
-                    id:
-                      minLength: 1
-                      type: string
-                    title:
-                      type: string
+                    session:
+                      additionalProperties: false
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        title:
+                          type: string
+                      required:
+                        - id
+                        - title
+                      type: object
+                    source:
+                      additionalProperties: false
+                      properties:
+                        directory:
+                          minLength: 1
+                          type: string
+                        machine:
+                          minLength: 1
+                          type: string
+                        project:
+                          minLength: 1
+                          type: string
+                      required:
+                        - machine
+                        - project
+                        - directory
+                      type: object
+                    type:
+                      const: action_resolved
                   required:
-                    - id
-                    - title
+                    - eventId
+                    - type
+                    - occurredAt
+                    - source
+                    - session
+                    - payload
                   type: object
-                source:
-                  additionalProperties: false
+                - additionalProperties: false
                   properties:
-                    directory:
-                      minLength: 1
+                    eventId:
+                      format: uuid
                       type: string
-                    machine:
-                      minLength: 1
+                    occurredAt:
+                      format: date-time
                       type: string
-                    project:
-                      minLength: 1
-                      type: string
+                    payload:
+                      additionalProperties: false
+                      properties:
+                        elapsedSeconds:
+                          minimum: 0
+                          type: integer
+                        outcome:
+                          enum:
+                            - completed
+                            - failed
+                            - stopped
+                        summary:
+                          maxLength: 500
+                          type: string
+                      required:
+                        - outcome
+                        - elapsedSeconds
+                      type: object
+                    session:
+                      additionalProperties: false
+                      properties:
+                        id:
+                          minLength: 1
+                          type: string
+                        title:
+                          type: string
+                      required:
+                        - id
+                        - title
+                      type: object
+                    source:
+                      additionalProperties: false
+                      properties:
+                        directory:
+                          minLength: 1
+                          type: string
+                        machine:
+                          minLength: 1
+                          type: string
+                        project:
+                          minLength: 1
+                          type: string
+                      required:
+                        - machine
+                        - project
+                        - directory
+                      type: object
+                    type:
+                      const: terminal
                   required:
-                    - machine
-                    - project
-                    - directory
+                    - eventId
+                    - type
+                    - occurredAt
+                    - source
+                    - session
+                    - payload
                   type: object
-                type:
-                  const: action_required
-              required:
-                - eventId
-                - type
-                - occurredAt
-                - source
-                - session
-                - payload
-              type: object
-            - additionalProperties: false
-              properties:
-                eventId:
-                  format: uuid
-                  type: string
-                occurredAt:
-                  format: date-time
-                  type: string
-                payload:
-                  additionalProperties: false
-                  properties:
-                    kind:
-                      enum:
-                        - question
-                        - permission
-                    requestId:
-                      minLength: 1
-                      type: string
-                  required:
-                    - requestId
-                    - kind
-                  type: object
-                session:
-                  additionalProperties: false
-                  properties:
-                    id:
-                      minLength: 1
-                      type: string
-                    title:
-                      type: string
-                  required:
-                    - id
-                    - title
-                  type: object
-                source:
-                  additionalProperties: false
-                  properties:
-                    directory:
-                      minLength: 1
-                      type: string
-                    machine:
-                      minLength: 1
-                      type: string
-                    project:
-                      minLength: 1
-                      type: string
-                  required:
-                    - machine
-                    - project
-                    - directory
-                  type: object
-                type:
-                  const: action_resolved
-              required:
-                - eventId
-                - type
-                - occurredAt
-                - source
-                - session
-                - payload
-              type: object
-            - additionalProperties: false
-              properties:
-                eventId:
-                  format: uuid
-                  type: string
-                occurredAt:
-                  format: date-time
-                  type: string
-                payload:
-                  additionalProperties: false
-                  properties:
-                    elapsedSeconds:
-                      minimum: 0
-                      type: integer
-                    outcome:
-                      enum:
-                        - completed
-                        - failed
-                        - stopped
-                    summary:
-                      maxLength: 500
-                      type: string
-                  required:
-                    - outcome
-                    - elapsedSeconds
-                  type: object
-                session:
-                  additionalProperties: false
-                  properties:
-                    id:
-                      minLength: 1
-                      type: string
-                    title:
-                      type: string
-                  required:
-                    - id
-                    - title
-                  type: object
-                source:
-                  additionalProperties: false
-                  properties:
-                    directory:
-                      minLength: 1
-                      type: string
-                    machine:
-                      minLength: 1
-                      type: string
-                    project:
-                      minLength: 1
-                      type: string
-                  required:
-                    - machine
-                    - project
-                    - directory
-                  type: object
-                type:
-                  const: terminal
-              required:
-                - eventId
-                - type
-                - occurredAt
-                - source
-                - session
-                - payload
-              type: object
-        type:
-          const: event
-      required:
-        - type
-        - event
-      type: object
+            type:
+              const: event
+          required:
+            - type
+            - event
+          type: object
+        - additionalProperties: false
+          properties:
+            instances:
+              items:
+                additionalProperties: false
+                properties:
+                  directory:
+                    minLength: 1
+                    type: string
+                  instanceId:
+                    format: uuid
+                    type: string
+                  lastSeenAt:
+                    format: date-time
+                    type: string
+                  machine:
+                    minLength: 1
+                    type: string
+                  openCodeVersion:
+                    minLength: 1
+                    type: string
+                  project:
+                    minLength: 1
+                    type: string
+                  protocolVersion:
+                    minimum: 1
+                    type: integer
+                  state:
+                    enum:
+                      - controllable
+                      - conflicting
+                      - incompatible
+                      - offline
+                    type: string
+                required:
+                  - instanceId
+                  - machine
+                  - project
+                  - directory
+                  - openCodeVersion
+                  - protocolVersion
+                  - state
+                  - lastSeenAt
+                type: object
+              type: array
+            type:
+              const: instance_presence
+          required:
+            - type
+            - instances
+          type: object
   securitySchemes:
     bearerAuth:
       bearerFormat: JWT
@@ -1009,6 +1153,10 @@ components:
       type: http
     ingestKeyAuth:
       description: Ingest credentials `keyId.secret`; every request must also carry valid X-Notify-Timestamp and X-Notify-Signature HMAC headers.
+      scheme: bearer
+      type: http
+    pluginKeyAuth:
+      description: Plugin credential `keyId.secret`; the control WebSocket does not use the event-ingest HMAC headers.
       scheme: bearer
       type: http
 info:
@@ -1580,6 +1728,24 @@ paths:
       summary: Revoke an ingest key.
       tags:
         - ingest-keys
+  /v1/plugin/ws:
+    get:
+      description: The HTTP Upgrade authenticates with the existing Plugin key. The Plugin sends one PluginControlClientMessage registration and receives a PluginControlServerMessage result. Notification ingestion remains available when control is conflicting or incompatible.
+      operationId: connectPluginControl
+      responses:
+        "101":
+          description: WebSocket upgrade accepted for Plugin control frames.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Missing, unknown, or revoked Plugin key.
+      security:
+        - pluginKeyAuth: []
+      summary: Upgrade an OpenCode Plugin to its control WebSocket.
+      tags:
+        - realtime
   /v1/ws:
     get:
       description: The HTTP Upgrade request authenticates with the bearer access token. After the upgrade the server sends WsServerMessage frames; there is no client-to-server message protocol and incoming frames are ignored. The socket closes with code 4401 when the access token expires; reconnect with a fresh token. Events missed while disconnected are not replayed.

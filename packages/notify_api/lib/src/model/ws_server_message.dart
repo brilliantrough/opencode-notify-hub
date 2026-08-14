@@ -3,10 +3,14 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:notify_api/src/model/ws_server_message_one_of.dart';
+import 'package:notify_api/src/model/ws_server_message_one_of1_instances_inner.dart';
 import 'package:built_collection/built_collection.dart';
-import 'package:notify_api/src/model/ws_server_message_event.dart';
+import 'package:notify_api/src/model/ws_server_message_one_of_event.dart';
+import 'package:notify_api/src/model/ws_server_message_one_of1.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
+import 'package:one_of/one_of.dart';
 
 part 'ws_server_message.g.dart';
 
@@ -15,15 +19,12 @@ part 'ws_server_message.g.dart';
 /// Properties:
 /// * [event]
 /// * [type]
+/// * [instances]
 @BuiltValue()
 abstract class WsServerMessage
     implements Built<WsServerMessage, WsServerMessageBuilder> {
-  @BuiltValueField(wireName: r'event')
-  WsServerMessageEvent get event;
-
-  @BuiltValueField(wireName: r'type')
-  WsServerMessageTypeEnum get type;
-  // enum typeEnum {  event,  };
+  /// One Of [WsServerMessageOneOf], [WsServerMessageOneOf1]
+  OneOf get oneOf;
 
   WsServerMessage._();
 
@@ -50,18 +51,7 @@ class _$WsServerMessageSerializer
     Serializers serializers,
     WsServerMessage object, {
     FullType specifiedType = FullType.unspecified,
-  }) sync* {
-    yield r'event';
-    yield serializers.serialize(
-      object.event,
-      specifiedType: const FullType(WsServerMessageEvent),
-    );
-    yield r'type';
-    yield serializers.serialize(
-      object.type,
-      specifiedType: const FullType(WsServerMessageTypeEnum),
-    );
-  }
+  }) sync* {}
 
   @override
   Object serialize(
@@ -69,49 +59,11 @@ class _$WsServerMessageSerializer
     WsServerMessage object, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    return _serializeProperties(
-      serializers,
-      object,
-      specifiedType: specifiedType,
-    ).toList();
-  }
-
-  void _deserializeProperties(
-    Serializers serializers,
-    Object serialized, {
-    FullType specifiedType = FullType.unspecified,
-    required List<Object?> serializedList,
-    required WsServerMessageBuilder result,
-    required List<Object?> unhandled,
-  }) {
-    for (var i = 0; i < serializedList.length; i += 2) {
-      final key = serializedList[i] as String;
-      final value = serializedList[i + 1];
-      switch (key) {
-        case r'event':
-          final valueDes =
-              serializers.deserialize(
-                    value,
-                    specifiedType: const FullType(WsServerMessageEvent),
-                  )
-                  as WsServerMessageEvent;
-          result.event.replace(valueDes);
-          break;
-        case r'type':
-          final valueDes =
-              serializers.deserialize(
-                    value,
-                    specifiedType: const FullType(WsServerMessageTypeEnum),
-                  )
-                  as WsServerMessageTypeEnum;
-          result.type = valueDes;
-          break;
-        default:
-          unhandled.add(key);
-          unhandled.add(value);
-          break;
-      }
-    }
+    final oneOf = object.oneOf;
+    return serializers.serialize(
+      oneOf.value,
+      specifiedType: FullType(oneOf.valueType),
+    )!;
   }
 
   @override
@@ -121,16 +73,15 @@ class _$WsServerMessageSerializer
     FullType specifiedType = FullType.unspecified,
   }) {
     final result = WsServerMessageBuilder();
-    final serializedList = (serialized as Iterable<Object?>).toList();
-    final unhandled = <Object?>[];
-    _deserializeProperties(
-      serializers,
-      serialized,
-      specifiedType: specifiedType,
-      serializedList: serializedList,
-      unhandled: unhandled,
-      result: result,
-    );
+    Object? oneOfDataSrc;
+    final targetType = const FullType(OneOf, [
+      FullType(WsServerMessageOneOf),
+      FullType(WsServerMessageOneOf1),
+    ]);
+    oneOfDataSrc = serialized;
+    result.oneOf =
+        serializers.deserialize(oneOfDataSrc, specifiedType: targetType)
+            as OneOf;
     return result.build();
   }
 }
@@ -138,6 +89,9 @@ class _$WsServerMessageSerializer
 class WsServerMessageTypeEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'event')
   static const WsServerMessageTypeEnum event = _$wsServerMessageTypeEnum_event;
+  @BuiltValueEnumConst(wireName: r'instance_presence')
+  static const WsServerMessageTypeEnum instancePresence =
+      _$wsServerMessageTypeEnum_instancePresence;
 
   static Serializer<WsServerMessageTypeEnum> get serializer =>
       _$wsServerMessageTypeEnumSerializer;

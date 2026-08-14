@@ -229,12 +229,48 @@ void main() {
         frame,
       )!;
 
-      expect(message.type, WsServerMessageTypeEnum.event);
-      final terminal = message.event.oneOf.value as NotifyEventOneOf3;
+      final eventMessage = message.oneOf.value as WsServerMessageOneOf;
+      expect(eventMessage.type, WsServerMessageOneOfTypeEnum.event);
+      final terminal = eventMessage.event.oneOf.value as NotifyEventOneOf3;
       expect(terminal.eventId, eventId);
       expect(terminal.payload.outcome,
           NotifyEventOneOf3PayloadOutcomeEnum.completed);
 
+      final out = standardSerializers.serializeWith(
+        WsServerMessage.serializer,
+        message,
+      );
+      expect(jsonDecode(jsonEncode(out)), frame);
+    });
+
+    test('round-trips an instance presence snapshot', () {
+      final frame = {
+        'type': 'instance_presence',
+        'instances': [
+          {
+            'instanceId': '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+            'machine': 'devbox',
+            'project': 'notify',
+            'directory': '/work/notify',
+            'openCodeVersion': '1.18.18',
+            'protocolVersion': 1,
+            'state': 'controllable',
+            'lastSeenAt': '2026-08-14T09:00:00.000Z',
+          },
+        ],
+      };
+      final message = standardSerializers.deserializeWith(
+        WsServerMessage.serializer,
+        frame,
+      )!;
+      final presence = message.oneOf.value as WsServerMessageOneOf1;
+
+      expect(presence.type, WsServerMessageOneOf1TypeEnum.instancePresence);
+      expect(presence.instances.single.machine, 'devbox');
+      expect(
+        presence.instances.single.state,
+        WsServerMessageOneOf1InstancesInnerStateEnum.controllable,
+      );
       final out = standardSerializers.serializeWith(
         WsServerMessage.serializer,
         message,

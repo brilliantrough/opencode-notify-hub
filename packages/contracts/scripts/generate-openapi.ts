@@ -15,6 +15,11 @@ import {
 } from "../src/schemas/auth.js";
 import { errorResponseSchema, healthStatusSchema } from "../src/schemas/common.js";
 import {
+  instancePresenceSchema,
+  pluginControlClientMessageSchema,
+  pluginControlServerMessageSchema,
+} from "../src/schemas/control.js";
+import {
   deviceListResponseSchema,
   deviceSchema,
   patchDeviceBodySchema,
@@ -79,6 +84,7 @@ const ingestSignatureParameters = [
 
 const bearerSecurity = [{ bearerAuth: [] }];
 const ingestSecurity = [{ ingestKeyAuth: [] }];
+const pluginKeySecurity = [{ pluginKeyAuth: [] }];
 
 const document = {
   openapi: "3.1.0",
@@ -361,6 +367,23 @@ const document = {
         },
       },
     },
+    "/v1/plugin/ws": {
+      get: {
+        operationId: "connectPluginControl",
+        tags: ["realtime"],
+        security: pluginKeySecurity,
+        summary: "Upgrade an OpenCode Plugin to its control WebSocket.",
+        description:
+          "The HTTP Upgrade authenticates with the existing Plugin key. The " +
+          "Plugin sends one PluginControlClientMessage registration and receives " +
+          "a PluginControlServerMessage result. Notification ingestion remains " +
+          "available when control is conflicting or incompatible.",
+        responses: {
+          "101": emptyResponse("WebSocket upgrade accepted for Plugin control frames."),
+          "401": errorResponse("Missing, unknown, or revoked Plugin key."),
+        },
+      },
+    },
     "/health/live": {
       get: {
         operationId: "checkLiveness",
@@ -402,6 +425,13 @@ const document = {
           "Ingest credentials `keyId.secret`; every request must also carry valid " +
           "X-Notify-Timestamp and X-Notify-Signature HMAC headers.",
       },
+      pluginKeyAuth: {
+        type: "http",
+        scheme: "bearer",
+        description:
+          "Plugin credential `keyId.secret`; the control WebSocket does not use " +
+          "the event-ingest HMAC headers.",
+      },
     },
     schemas: {
       CreateIngestKeyBody: createIngestKeyBodySchema,
@@ -413,8 +443,11 @@ const document = {
       EventIngestResponse: eventIngestResponseSchema,
       HealthStatus: healthStatusSchema,
       IngestKeyListResponse: ingestKeyListResponseSchema,
+      InstancePresence: instancePresenceSchema,
       LoginBody: loginBodySchema,
       NotifyEvent: notifyEventSchema,
+      PluginControlClientMessage: pluginControlClientMessageSchema,
+      PluginControlServerMessage: pluginControlServerMessageSchema,
       PatchDeviceBody: patchDeviceBodySchema,
       RefreshBody: refreshBodySchema,
       RegisterBody: registerBodySchema,

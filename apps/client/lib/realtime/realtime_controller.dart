@@ -11,12 +11,11 @@ import '../notifications/notification_service.dart';
 import '../settings/settings_controller.dart';
 import 'active_sessions.dart';
 import 'event_deduper.dart';
+import 'instance_presence.dart';
 import 'notify_event.dart';
 import 'ws_client.dart';
 
-final eventDeduperProvider = Provider<EventDeduper>(
-  (ref) => EventDeduper(),
-);
+final eventDeduperProvider = Provider<EventDeduper>((ref) => EventDeduper());
 
 /// Whether the app UI is in the foreground for realtime purposes. Driven by
 /// the bootstrap's `WidgetsBinding` lifecycle observer; defaults to `true`
@@ -87,6 +86,9 @@ final realtimeControllerProvider = Provider<RealtimeController?>((ref) {
   final controller = RealtimeController(
     client: ref.watch(wsClientProvider),
     router: ref.watch(notificationRouterProvider),
+    onInstancePresences: ref
+        .watch(instancePresencesProvider.notifier)
+        .replaceAll,
   );
   ref.onDispose(controller.stop);
   if (foreground) {
@@ -101,16 +103,22 @@ final realtimeControllerProvider = Provider<RealtimeController?>((ref) {
 /// [start]/[stop] are idempotent and may be interleaved freely; [start]
 /// after [stop] re-subscribes and reconnects.
 class RealtimeController {
-  RealtimeController({required WsClient client, required NotificationRouter router})
-    : _client = client,
-      _router = router;
+  RealtimeController({
+    required WsClient client,
+    required NotificationRouter router,
+    required void Function(List<OpenCodeInstancePresence>) onInstancePresences,
+  }) : _client = client,
+       _router = router,
+       _onInstancePresences = onInstancePresences;
 
   final WsClient _client;
   final NotificationRouter _router;
+  final void Function(List<OpenCodeInstancePresence>) _onInstancePresences;
 
-  StreamSubscription<NotifyEvent>? _subscription;
+  StreamSubscription<NotifyEvent>? _eventSubscription;
+  StreamSubscription<List<OpenCodeInstancePresence>>? _presenceSubscription;
 
-  bool get _started => _subscription != null;
+  bool get _started => _eventSubscription != null;
 
   /// Subscribes to the event stream and connects the client. No-op when
   /// already started.
@@ -118,7 +126,10 @@ class RealtimeController {
     if (_started) {
       return;
     }
-    _subscription = _client.events.listen(_route);
+    _eventSubscription = _client.events.listen(_route);
+    _presenceSubscription = _client.instancePresences.listen(
+      _onInstancePresences,
+    );
     _client.connect();
   }
 
@@ -148,9 +159,14 @@ class RealtimeController {
     if (!_started) {
       return;
     }
-    final subscription = _subscription!;
-    _subscription = null;
-    unawaited(subscription.cancel());
+    final eventSubscription = _eventSubscription!;
+    final presenceSubscription = _presenceSubscription;
+    _eventSubscription = null;
+    _presenceSubscription = null;
+    unawaited(eventSubscription.cancel());
+    if (presenceSubscription != null) {
+      unawaited(presenceSubscription.cancel());
+    }
     _client.disconnect();
   }
 }

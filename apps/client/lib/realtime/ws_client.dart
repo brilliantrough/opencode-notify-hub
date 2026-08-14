@@ -9,6 +9,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../api/auth_interceptor.dart';
 import '../auth/token_refresher.dart';
 import '../config/app_config.dart';
+import 'instance_presence.dart';
 import 'notify_event.dart';
 
 /// Connection state of a [WsClient].
@@ -21,6 +22,9 @@ enum WsStatus { disconnected, connecting, connected }
 abstract class WsClient {
   /// Parsed events; malformed frames are skipped, never emitted here.
   Stream<NotifyEvent> get events;
+
+  /// Authoritative full snapshots of the account's OpenCode instances.
+  Stream<List<OpenCodeInstancePresence>> get instancePresences;
 
   /// Status transitions, emitted on change only.
   Stream<WsStatus> get status;
@@ -86,6 +90,8 @@ class GatewayWsClient implements WsClient {
       StreamController<NotifyEvent>.broadcast();
   final StreamController<WsStatus> _status =
       StreamController<WsStatus>.broadcast();
+  final StreamController<List<OpenCodeInstancePresence>> _instancePresences =
+      StreamController<List<OpenCodeInstancePresence>>.broadcast();
 
   bool _running = false;
 
@@ -101,6 +107,10 @@ class GatewayWsClient implements WsClient {
 
   @override
   Stream<NotifyEvent> get events => _events.stream;
+
+  @override
+  Stream<List<OpenCodeInstancePresence>> get instancePresences =>
+      _instancePresences.stream;
 
   @override
   Stream<WsStatus> get status => _status.stream;
@@ -333,7 +343,29 @@ class GatewayWsClient implements WsClient {
     } on FormatException {
       return;
     }
-    if (decoded is! Map<String, dynamic> || decoded['type'] != 'event') {
+    if (decoded is! Map<String, dynamic>) {
+      return;
+    }
+    if (decoded['type'] == 'instance_presence') {
+      final rawInstances = decoded['instances'];
+      if (rawInstances is! List) {
+        return;
+      }
+      try {
+        final instances = rawInstances
+            .map(
+              (item) => OpenCodeInstancePresence.parse(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .toList(growable: false);
+        _instancePresences.add(instances);
+      } catch (_) {
+        // One invalid item invalidates the authoritative snapshot.
+      }
+      return;
+    }
+    if (decoded['type'] != 'event') {
       return;
     }
     final payload = decoded['event'];

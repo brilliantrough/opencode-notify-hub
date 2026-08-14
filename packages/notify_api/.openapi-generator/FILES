@@ -24,6 +24,7 @@ lib/src/model/error_response_error.dart
 lib/src/model/event_ingest_response.dart
 lib/src/model/health_status.dart
 lib/src/model/ingest_key_list_response_inner.dart
+lib/src/model/instance_presence.dart
 lib/src/model/login_body.dart
 lib/src/model/notify_event.dart
 lib/src/model/notify_event_one_of.dart
@@ -44,6 +45,8 @@ lib/src/model/notify_event_one_of_payload.dart
 lib/src/model/notify_event_one_of_session.dart
 lib/src/model/notify_event_one_of_source.dart
 lib/src/model/patch_device_body.dart
+lib/src/model/plugin_control_client_message.dart
+lib/src/model/plugin_control_server_message.dart
 lib/src/model/refresh_body.dart
 lib/src/model/register_body.dart
 lib/src/model/register_device_body.dart
@@ -51,5 +54,8 @@ lib/src/model/reset_password_body.dart
 lib/src/model/token_pair.dart
 lib/src/model/verify_email_body.dart
 lib/src/model/ws_server_message.dart
-lib/src/model/ws_server_message_event.dart
+lib/src/model/ws_server_message_one_of.dart
+lib/src/model/ws_server_message_one_of1.dart
+lib/src/model/ws_server_message_one_of1_instances_inner.dart
+lib/src/model/ws_server_message_one_of_event.dart
 lib/src/serializers.dart

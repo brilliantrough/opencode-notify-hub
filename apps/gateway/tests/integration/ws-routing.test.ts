@@ -1,6 +1,10 @@
 import { createHmac, randomUUID } from "node:crypto";
 
-import { validateErrorResponse, validateWsServerMessage } from "@notify/contracts";
+import {
+  validateErrorResponse,
+  validatePluginControlServerMessage,
+  validateWsServerMessage,
+} from "@notify/contracts";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -167,6 +171,18 @@ describe("WebSocket routing", () => {
     return created.json().secret as string;
   }
 
+  async function createPluginKey(token: string): Promise<{ id: string; credential: string }> {
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/ingest-keys",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: "control" },
+    });
+    expect(created.statusCode).toBe(201);
+    const body = created.json() as { id: string; secret: string };
+    return { id: body.id, credential: body.secret };
+  }
+
   /** POST a schema-valid heartbeat event through the signed ingest endpoint. */
   async function postEvent(credential: string, eventId: string): Promise<void> {
     const body = JSON.stringify(heartbeatEvent(eventId));
@@ -213,6 +229,33 @@ describe("WebSocket routing", () => {
       });
       ws.once("error", reject);
     });
+  }
+
+  function connectPlugin(credential: string): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/plugin/ws`, {
+        headers: { authorization: `Bearer ${credential}` },
+      });
+      clients.push(ws);
+      ws.once("open", () => resolve(ws));
+      ws.once("unexpected-response", (_request, response) => {
+        reject(Object.assign(new Error("unexpected response"), { response }));
+      });
+      ws.once("error", reject);
+    });
+  }
+
+  async function pluginUpgradeFailure(credential: string): Promise<number> {
+    try {
+      await connectPlugin(credential);
+    } catch (error) {
+      const response = (error as { response?: { statusCode?: number } }).response;
+      if (response !== undefined) {
+        return response.statusCode ?? 0;
+      }
+      throw error;
+    }
+    throw new Error("expected the Plugin upgrade to be rejected");
   }
 
   /** The rejected upgrade's HTTP response: status and parsed body. */
@@ -348,6 +391,262 @@ describe("WebSocket routing", () => {
       await postEvent(aliceCredential, randomUUID());
       await aliceDelivery;
       await bobSilence;
+    });
+  });
+
+  describe("OpenCode instance presence", () => {
+    it("registers a Plugin instance and publishes controllable presence to its owner", async () => {
+      const alice = await createUser("presence@example.com");
+      const credential = await createIngestCredential(alice.token);
+      const desktop = await connect(`Bearer ${alice.token}`);
+      const plugin = await connectPlugin(credential);
+      const instanceId = randomUUID();
+
+      const registrationResult = nextMessage(plugin);
+      const presenceDelivery = nextMessage(desktop);
+      plugin.send(
+        JSON.stringify({
+          type: "register",
+          instanceId,
+          machine: "devbox",
+          project: "notify",
+          directory: "/work/notify",
+          openCodeVersion: "1.18.18",
+          protocolVersion: 1,
+        }),
+      );
+
+      const result = await registrationResult;
+      expect(validatePluginControlServerMessage(result)).toBe(true);
+      expect(result).toEqual({ type: "registration", instanceId, state: "controllable" });
+
+      const message = await presenceDelivery;
+      expect(validateWsServerMessage(message)).toBe(true);
+      expect(message).toMatchObject({
+        type: "instance_presence",
+        instances: [
+          {
+            instanceId,
+            machine: "devbox",
+            project: "notify",
+            directory: "/work/notify",
+            openCodeVersion: "1.18.18",
+            protocolVersion: 1,
+            state: "controllable",
+          },
+        ],
+      });
+    });
+
+    it("isolates owners while allowing two projects on one machine", async () => {
+      const alice = await createUser("presence-owner@example.com");
+      const bob = await createUser("presence-other@example.com");
+      const credential = await createIngestCredential(alice.token);
+      const aliceDesktop = await connect(`Bearer ${alice.token}`);
+      const bobDesktop = await connect(`Bearer ${bob.token}`);
+      const bobSilence = expectSilence(bobDesktop, 500);
+
+      for (const [project, directory] of [
+        ["api", "/work/api"],
+        ["web", "/work/web"],
+      ]) {
+        const plugin = await connectPlugin(credential);
+        const registered = nextMessage(plugin);
+        const delivered = nextMessage(aliceDesktop);
+        plugin.send(
+          JSON.stringify({
+            type: "register",
+            instanceId: randomUUID(),
+            machine: "devbox",
+            project,
+            directory,
+            openCodeVersion: "1.18.18",
+            protocolVersion: 1,
+          }),
+        );
+        expect(await registered).toMatchObject({ state: "controllable" });
+        const snapshot = (await delivered) as { instances: { project: string; state: string }[] };
+        expect(snapshot.instances.at(-1)).toMatchObject({ project, state: "controllable" });
+      }
+
+      await bobSilence;
+    });
+
+    it("scopes identical runtime instance ids to their Plugin-key owners", async () => {
+      const alice = await createUser("presence-collision-a@example.com");
+      const bob = await createUser("presence-collision-b@example.com");
+      const aliceKey = await createIngestCredential(alice.token);
+      const bobKey = await createIngestCredential(bob.token);
+      const aliceDesktop = await connect(`Bearer ${alice.token}`);
+      const bobDesktop = await connect(`Bearer ${bob.token}`);
+      const instanceId = randomUUID();
+
+      for (const [credential, desktop, project] of [
+        [aliceKey, aliceDesktop, "alice-project"],
+        [bobKey, bobDesktop, "bob-project"],
+      ] as const) {
+        const plugin = await connectPlugin(credential);
+        const result = nextMessage(plugin);
+        const snapshot = nextMessage(desktop);
+        plugin.send(
+          JSON.stringify({
+            type: "register",
+            instanceId,
+            machine: "shared-name",
+            project,
+            directory: "/work/shared",
+            openCodeVersion: "1.18.18",
+            protocolVersion: 1,
+          }),
+        );
+        expect(await result).toMatchObject({ state: "controllable" });
+        expect(await snapshot).toMatchObject({
+          instances: [{ instanceId, project, state: "controllable" }],
+        });
+      }
+    });
+
+    it("keeps the first machine/project owner and promotes a connected conflict", async () => {
+      const alice = await createUser("presence-conflict@example.com");
+      const credential = await createIngestCredential(alice.token);
+      const desktop = await connect(`Bearer ${alice.token}`);
+      const first = await connectPlugin(credential);
+      const firstId = randomUUID();
+      const firstResult = nextMessage(first);
+      const firstSnapshot = nextMessage(desktop);
+      first.send(
+        JSON.stringify({
+          type: "register",
+          instanceId: firstId,
+          machine: "DEVBOX",
+          project: "notify",
+          directory: "/work/notify",
+          openCodeVersion: "1.18.18",
+          protocolVersion: 1,
+        }),
+      );
+      await firstResult;
+      await firstSnapshot;
+
+      const second = await connectPlugin(credential);
+      const secondId = randomUUID();
+      const secondResult = nextMessage(second);
+      const conflictSnapshot = nextMessage(desktop);
+      second.send(
+        JSON.stringify({
+          type: "register",
+          instanceId: secondId,
+          machine: "devbox",
+          project: "notify-copy",
+          directory: "/work/notify/",
+          openCodeVersion: "1.18.18",
+          protocolVersion: 1,
+        }),
+      );
+      expect(await secondResult).toEqual({
+        type: "registration",
+        instanceId: secondId,
+        state: "conflicting",
+      });
+      expect(await conflictSnapshot).toMatchObject({
+        instances: [
+          { instanceId: firstId, state: "controllable" },
+          { instanceId: secondId, state: "conflicting" },
+        ],
+      });
+
+      const notification = nextMessage(desktop);
+      await postEvent(credential, randomUUID());
+      expect(await notification).toMatchObject({ type: "event" });
+
+      const promoted = nextMessage(second);
+      const promotedSnapshot = nextMessage(desktop);
+      first.close();
+      expect(await promoted).toEqual({
+        type: "registration",
+        instanceId: secondId,
+        state: "controllable",
+      });
+      expect(await promotedSnapshot).toMatchObject({
+        instances: [
+          { instanceId: firstId, state: "offline" },
+          { instanceId: secondId, state: "controllable" },
+        ],
+      });
+    });
+
+    it.each([
+      ["1.18.17", 1],
+      ["1.18.18", 2],
+    ])(
+      "reports OpenCode %s / protocol %i as incompatible without breaking notification ingest",
+      async (openCodeVersion, protocolVersion) => {
+        const alice = await createUser(`incompatible-${protocolVersion}@example.com`);
+        const credential = await createIngestCredential(alice.token);
+        const desktop = await connect(`Bearer ${alice.token}`);
+        const plugin = await connectPlugin(credential);
+        const instanceId = randomUUID();
+        const registered = nextMessage(plugin);
+        const delivered = nextMessage(desktop);
+        plugin.send(
+          JSON.stringify({
+            type: "register",
+            instanceId,
+            machine: "devbox",
+            project: "notify",
+            directory: `/work/incompatible-${protocolVersion}`,
+            openCodeVersion,
+            protocolVersion,
+          }),
+        );
+
+        expect(await registered).toEqual({
+          type: "registration",
+          instanceId,
+          state: "incompatible",
+        });
+        expect(await delivered).toMatchObject({
+          instances: [{ instanceId, state: "incompatible", openCodeVersion, protocolVersion }],
+        });
+        await postEvent(credential, randomUUID());
+      },
+    );
+
+    it("closes control and publishes offline presence when the Plugin key is revoked", async () => {
+      const alice = await createUser("presence-revoked@example.com");
+      const key = await createPluginKey(alice.token);
+      const desktop = await connect(`Bearer ${alice.token}`);
+      const plugin = await connectPlugin(key.credential);
+      const instanceId = randomUUID();
+      const registered = nextMessage(plugin);
+      const online = nextMessage(desktop);
+      plugin.send(
+        JSON.stringify({
+          type: "register",
+          instanceId,
+          machine: "devbox",
+          project: "notify",
+          directory: "/work/revoked",
+          openCodeVersion: "1.18.18",
+          protocolVersion: 1,
+        }),
+      );
+      await registered;
+      await online;
+
+      const closed = nextClose(plugin);
+      const offline = nextMessage(desktop);
+      const revoked = await app.inject({
+        method: "DELETE",
+        url: `/v1/ingest-keys/${key.id}`,
+        headers: { authorization: `Bearer ${alice.token}` },
+      });
+      expect(revoked.statusCode).toBe(204);
+      expect(await closed).toBe(4403);
+      expect(await offline).toMatchObject({
+        instances: [{ instanceId, state: "offline" }],
+      });
+      expect(await pluginUpgradeFailure(key.credential)).toBe(401);
     });
   });
 

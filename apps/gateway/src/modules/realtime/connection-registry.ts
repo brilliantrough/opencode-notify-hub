@@ -1,4 +1,4 @@
-import type { NotifyEvent } from "@notify/contracts";
+import type { NotifyEvent, WsServerMessage } from "@notify/contracts";
 
 import type { Clock } from "../../lib/clock.js";
 import type { EventDispatcher } from "../events/events.routes.js";
@@ -160,31 +160,36 @@ export class ConnectionRegistry implements EventDispatcher {
    * throws are pruned. The promise always resolves.
    */
   async dispatch(input: { userId: string; event: NotifyEvent }): Promise<void> {
-    const sockets = this.byUser.get(input.userId);
+    this.send(input.userId, { type: "event", event: input.event });
+  }
+
+  /** Best-effort fanout of any server-to-desktop contract frame. */
+  send(userId: string, message: WsServerMessage): void {
+    const sockets = this.byUser.get(userId);
     if (sockets === undefined) {
       return;
     }
-    const payload = JSON.stringify({ type: "event", event: input.event });
+    const payload = JSON.stringify(message);
     for (const connection of [...sockets]) {
       if (connection.socket.readyState !== READY_OPEN) {
-        this.remove(input.userId, connection);
+        this.remove(userId, connection);
         continue;
       }
       if (connection.socket.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
         // Hopelessly slow reader: cut the connection (a close frame would
         // itself sit behind the unflushed backlog) and drop it.
-        this.remove(input.userId, connection);
+        this.remove(userId, connection);
         connection.socket.terminate();
         continue;
       }
       try {
         connection.socket.send(payload, (err?: Error | null) => {
           if (err != null) {
-            this.remove(input.userId, connection);
+            this.remove(userId, connection);
           }
         });
       } catch {
-        this.remove(input.userId, connection);
+        this.remove(userId, connection);
       }
     }
   }

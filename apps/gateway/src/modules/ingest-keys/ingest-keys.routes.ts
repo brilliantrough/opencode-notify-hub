@@ -32,7 +32,10 @@ function sendNotFound(reply: FastifyReply): FastifyReply {
  * secret is returned exactly once, in the creation response; the list
  * contract omits it by construction (additionalProperties: false).
  */
-export function ingestKeyRoutes(repository: IngestKeyRepository): FastifyPluginAsync {
+export function ingestKeyRoutes(
+  repository: IngestKeyRepository,
+  options: { onRevoked?: (id: string) => void } = {},
+): FastifyPluginAsync {
   const service = new IngestKeyService(repository);
   return async (app) => {
     app.get(
@@ -77,6 +80,7 @@ export function ingestKeyRoutes(repository: IngestKeyRepository): FastifyPluginA
         if (!revoked) {
           return sendNotFound(reply);
         }
+        options.onRevoked?.(id);
         return reply.status(204).send();
       },
     );

@@ -21,6 +21,8 @@ Serializers _$serializers =
           ..add(HealthStatus.serializer)
           ..add(HealthStatusStatusEnum.serializer)
           ..add(IngestKeyListResponseInner.serializer)
+          ..add(InstancePresence.serializer)
+          ..add(InstancePresenceStateEnum.serializer)
           ..add(LoginBody.serializer)
           ..add(NotifyEvent.serializer)
           ..add(NotifyEventOneOf.serializer)
@@ -53,6 +55,11 @@ Serializers _$serializers =
           ..add(NotifyEventOneOfSource.serializer)
           ..add(NotifyEventOneOfTypeEnum.serializer)
           ..add(PatchDeviceBody.serializer)
+          ..add(PluginControlClientMessage.serializer)
+          ..add(PluginControlClientMessageTypeEnum.serializer)
+          ..add(PluginControlServerMessage.serializer)
+          ..add(PluginControlServerMessageStateEnum.serializer)
+          ..add(PluginControlServerMessageTypeEnum.serializer)
           ..add(RefreshBody.serializer)
           ..add(RegisterBody.serializer)
           ..add(RegisterDeviceBody.serializer)
@@ -61,8 +68,13 @@ Serializers _$serializers =
           ..add(TokenPair.serializer)
           ..add(VerifyEmailBody.serializer)
           ..add(WsServerMessage.serializer)
-          ..add(WsServerMessageEvent.serializer)
-          ..add(WsServerMessageTypeEnum.serializer)
+          ..add(WsServerMessageOneOf.serializer)
+          ..add(WsServerMessageOneOf1.serializer)
+          ..add(WsServerMessageOneOf1InstancesInner.serializer)
+          ..add(WsServerMessageOneOf1InstancesInnerStateEnum.serializer)
+          ..add(WsServerMessageOneOf1TypeEnum.serializer)
+          ..add(WsServerMessageOneOfEvent.serializer)
+          ..add(WsServerMessageOneOfTypeEnum.serializer)
           ..addBuilderFactory(
             const FullType(BuiltList, const [
               const FullType(NotifyEventOneOf1PayloadOneOfQuestionsInner),
@@ -79,6 +91,12 @@ Serializers _$serializers =
                 ListBuilder<
                   NotifyEventOneOf1PayloadOneOfQuestionsInnerOptionsInner
                 >(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [
+              const FullType(WsServerMessageOneOf1InstancesInner),
+            ]),
+            () => ListBuilder<WsServerMessageOneOf1InstancesInner>(),
           ))
         .build();
 

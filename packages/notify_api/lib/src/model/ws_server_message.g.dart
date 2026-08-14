@@ -8,11 +8,15 @@ part of 'ws_server_message.dart';
 
 const WsServerMessageTypeEnum _$wsServerMessageTypeEnum_event =
     const WsServerMessageTypeEnum._('event');
+const WsServerMessageTypeEnum _$wsServerMessageTypeEnum_instancePresence =
+    const WsServerMessageTypeEnum._('instancePresence');
 
 WsServerMessageTypeEnum _$wsServerMessageTypeEnumValueOf(String name) {
   switch (name) {
     case 'event':
       return _$wsServerMessageTypeEnum_event;
+    case 'instancePresence':
+      return _$wsServerMessageTypeEnum_instancePresence;
     default:
       throw ArgumentError(name);
   }
@@ -21,6 +25,7 @@ WsServerMessageTypeEnum _$wsServerMessageTypeEnumValueOf(String name) {
 final BuiltSet<WsServerMessageTypeEnum> _$wsServerMessageTypeEnumValues =
     BuiltSet<WsServerMessageTypeEnum>(const <WsServerMessageTypeEnum>[
       _$wsServerMessageTypeEnum_event,
+      _$wsServerMessageTypeEnum_instancePresence,
     ]);
 
 Serializer<WsServerMessageTypeEnum> _$wsServerMessageTypeEnumSerializer =
@@ -30,9 +35,11 @@ class _$WsServerMessageTypeEnumSerializer
     implements PrimitiveSerializer<WsServerMessageTypeEnum> {
   static const Map<String, Object> _toWire = const <String, Object>{
     'event': 'event',
+    'instancePresence': 'instance_presence',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'event': 'event',
+    'instance_presence': 'instancePresence',
   };
 
   @override
@@ -59,14 +66,12 @@ class _$WsServerMessageTypeEnumSerializer
 
 class _$WsServerMessage extends WsServerMessage {
   @override
-  final WsServerMessageEvent event;
-  @override
-  final WsServerMessageTypeEnum type;
+  final OneOf oneOf;
 
   factory _$WsServerMessage([void Function(WsServerMessageBuilder)? updates]) =>
       (WsServerMessageBuilder()..update(updates))._build();
 
-  _$WsServerMessage._({required this.event, required this.type}) : super._();
+  _$WsServerMessage._({required this.oneOf}) : super._();
   @override
   WsServerMessage rebuild(void Function(WsServerMessageBuilder) updates) =>
       (toBuilder()..update(updates)).build();
@@ -77,26 +82,22 @@ class _$WsServerMessage extends WsServerMessage {
   @override
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
-    return other is WsServerMessage &&
-        event == other.event &&
-        type == other.type;
+    return other is WsServerMessage && oneOf == other.oneOf;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
-    _$hash = $jc(_$hash, event.hashCode);
-    _$hash = $jc(_$hash, type.hashCode);
+    _$hash = $jc(_$hash, oneOf.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
 
   @override
   String toString() {
-    return (newBuiltValueToStringHelper(r'WsServerMessage')
-          ..add('event', event)
-          ..add('type', type))
-        .toString();
+    return (newBuiltValueToStringHelper(
+      r'WsServerMessage',
+    )..add('oneOf', oneOf)).toString();
   }
 }
 
@@ -104,14 +105,9 @@ class WsServerMessageBuilder
     implements Builder<WsServerMessage, WsServerMessageBuilder> {
   _$WsServerMessage? _$v;
 
-  WsServerMessageEventBuilder? _event;
-  WsServerMessageEventBuilder get event =>
-      _$this._event ??= WsServerMessageEventBuilder();
-  set event(WsServerMessageEventBuilder? event) => _$this._event = event;
-
-  WsServerMessageTypeEnum? _type;
-  WsServerMessageTypeEnum? get type => _$this._type;
-  set type(WsServerMessageTypeEnum? type) => _$this._type = type;
+  OneOf? _oneOf;
+  OneOf? get oneOf => _$this._oneOf;
+  set oneOf(OneOf? oneOf) => _$this._oneOf = oneOf;
 
   WsServerMessageBuilder() {
     WsServerMessage._defaults(this);
@@ -120,8 +116,7 @@ class WsServerMessageBuilder
   WsServerMessageBuilder get _$this {
     final $v = _$v;
     if ($v != null) {
-      _event = $v.event.toBuilder();
-      _type = $v.type;
+      _oneOf = $v.oneOf;
       _$v = null;
     }
     return this;
@@ -141,32 +136,15 @@ class WsServerMessageBuilder
   WsServerMessage build() => _build();
 
   _$WsServerMessage _build() {
-    _$WsServerMessage _$result;
-    try {
-      _$result =
-          _$v ??
-          _$WsServerMessage._(
-            event: event.build(),
-            type: BuiltValueNullFieldError.checkNotNull(
-              type,
-              r'WsServerMessage',
-              'type',
-            ),
-          );
-    } catch (_) {
-      late String _$failedField;
-      try {
-        _$failedField = 'event';
-        event.build();
-      } catch (e) {
-        throw BuiltValueNestedFieldError(
-          r'WsServerMessage',
-          _$failedField,
-          e.toString(),
+    final _$result =
+        _$v ??
+        _$WsServerMessage._(
+          oneOf: BuiltValueNullFieldError.checkNotNull(
+            oneOf,
+            r'WsServerMessage',
+            'oneOf',
+          ),
         );
-      }
-      rethrow;
-    }
     replace(_$result);
     return _$result;
   }

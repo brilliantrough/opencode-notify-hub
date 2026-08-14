@@ -24,6 +24,7 @@ import 'package:notify_api/src/model/error_response_error.dart';
 import 'package:notify_api/src/model/event_ingest_response.dart';
 import 'package:notify_api/src/model/health_status.dart';
 import 'package:notify_api/src/model/ingest_key_list_response_inner.dart';
+import 'package:notify_api/src/model/instance_presence.dart';
 import 'package:notify_api/src/model/login_body.dart';
 import 'package:notify_api/src/model/notify_event.dart';
 import 'package:notify_api/src/model/notify_event_one_of.dart';
@@ -44,6 +45,8 @@ import 'package:notify_api/src/model/notify_event_one_of_payload.dart';
 import 'package:notify_api/src/model/notify_event_one_of_session.dart';
 import 'package:notify_api/src/model/notify_event_one_of_source.dart';
 import 'package:notify_api/src/model/patch_device_body.dart';
+import 'package:notify_api/src/model/plugin_control_client_message.dart';
+import 'package:notify_api/src/model/plugin_control_server_message.dart';
 import 'package:notify_api/src/model/refresh_body.dart';
 import 'package:notify_api/src/model/register_body.dart';
 import 'package:notify_api/src/model/register_device_body.dart';
@@ -51,7 +54,10 @@ import 'package:notify_api/src/model/reset_password_body.dart';
 import 'package:notify_api/src/model/token_pair.dart';
 import 'package:notify_api/src/model/verify_email_body.dart';
 import 'package:notify_api/src/model/ws_server_message.dart';
-import 'package:notify_api/src/model/ws_server_message_event.dart';
+import 'package:notify_api/src/model/ws_server_message_one_of.dart';
+import 'package:notify_api/src/model/ws_server_message_one_of1.dart';
+import 'package:notify_api/src/model/ws_server_message_one_of1_instances_inner.dart';
+import 'package:notify_api/src/model/ws_server_message_one_of_event.dart';
 
 part 'serializers.g.dart';
 
@@ -66,6 +72,7 @@ part 'serializers.g.dart';
   EventIngestResponse,
   HealthStatus,
   IngestKeyListResponseInner,
+  InstancePresence,
   LoginBody,
   NotifyEvent,
   NotifyEventOneOf,
@@ -86,6 +93,8 @@ part 'serializers.g.dart';
   NotifyEventOneOfSession,
   NotifyEventOneOfSource,
   PatchDeviceBody,
+  PluginControlClientMessage,
+  PluginControlServerMessage,
   RefreshBody,
   RegisterBody,
   RegisterDeviceBody,
@@ -93,7 +102,10 @@ part 'serializers.g.dart';
   TokenPair,
   VerifyEmailBody,
   WsServerMessage,
-  WsServerMessageEvent,
+  WsServerMessageOneOf,
+  WsServerMessageOneOf1,
+  WsServerMessageOneOf1InstancesInner,
+  WsServerMessageOneOfEvent,
 ])
 Serializers serializers =
     (_$serializers.toBuilder()

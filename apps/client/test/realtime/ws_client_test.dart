@@ -7,6 +7,7 @@ import 'package:client/api/auth_interceptor.dart';
 import 'package:client/auth/token_refresher.dart';
 import 'package:client/config/app_config.dart';
 import 'package:client/realtime/notify_event.dart';
+import 'package:client/realtime/instance_presence.dart';
 import 'package:client/realtime/ws_client.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -169,6 +170,7 @@ void main() {
   late FakeConnector connector;
   late List<WsStatus> statuses;
   late List<NotifyEvent> events;
+  late List<List<OpenCodeInstancePresence>> presences;
 
   GatewayWsClient buildClient({double jitter = 0.5}) {
     final client = GatewayWsClient(
@@ -180,6 +182,7 @@ void main() {
     );
     client.status.listen(statuses.add);
     client.events.listen(events.add);
+    client.instancePresences.listen(presences.add);
     return client;
   }
 
@@ -189,6 +192,7 @@ void main() {
     connector = FakeConnector();
     statuses = [];
     events = [];
+    presences = [];
   });
 
   group('GatewayWsClient', () {
@@ -292,6 +296,43 @@ void main() {
         channel.serverAdd(eventFrame());
         async.flushMicrotasks();
         expect(events, hasLength(2), reason: 'stream stays alive');
+      });
+    });
+
+    test('emits authoritative instance presence snapshots', () {
+      fakeAsync((async) {
+        holder.accessToken = 'tok-1';
+        final client = buildClient();
+        client.connect();
+        async.flushMicrotasks();
+        final channel = connector.channels.single;
+
+        channel.serverAdd(
+          jsonEncode({
+            'type': 'instance_presence',
+            'instances': [
+              {
+                'instanceId': '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+                'machine': 'devbox',
+                'project': 'notify',
+                'directory': '/work/notify',
+                'openCodeVersion': '1.18.18',
+                'protocolVersion': 1,
+                'state': 'controllable',
+                'lastSeenAt': '2026-08-14T09:00:00.000Z',
+              },
+            ],
+          }),
+        );
+        async.flushMicrotasks();
+
+        expect(presences, hasLength(1));
+        expect(presences.single.single.machine, 'devbox');
+        expect(
+          presences.single.single.state,
+          InstancePresenceState.controllable,
+        );
+        expect(events, isEmpty);
       });
     });
 

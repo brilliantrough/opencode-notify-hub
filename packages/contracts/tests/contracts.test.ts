@@ -22,6 +22,8 @@ import {
   validateEventIngestResponse,
   validateHealthStatus,
   validateErrorResponse,
+  validatePluginControlClientMessage,
+  validatePluginControlServerMessage,
   validateWsServerMessage,
 } from "../src/index.js";
 
@@ -697,6 +699,17 @@ describe("ingest-key schemas", () => {
 });
 
 describe("WebSocket messages", () => {
+  const presence = {
+    instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+    machine: "devbox",
+    project: "api",
+    directory: "/work/api",
+    openCodeVersion: "1.18.18",
+    protocolVersion: 1,
+    state: "controllable",
+    lastSeenAt: "2026-08-14T09:00:00.000Z",
+  };
+
   it("wraps events as { type: 'event', event }", () => {
     expect(validateWsServerMessage({ type: "event", event: validTerminal })).toBe(true);
     expect(validateWsServerMessage({ type: "event", event: validHeartbeat })).toBe(true);
@@ -712,6 +725,34 @@ describe("WebSocket messages", () => {
     ).toBe(false);
   });
 
+  it("accepts an authoritative instance presence snapshot", () => {
+    expect(
+      validateWsServerMessage({ type: "instance_presence", instances: [presence] }),
+    ).toBe(true);
+    expect(
+      validateWsServerMessage({
+        type: "instance_presence",
+        instances: [
+          { ...presence, state: "conflicting" },
+          { ...presence, instanceId: "4604c02c-9298-4b82-bf3a-372493361b99", state: "incompatible" },
+          { ...presence, instanceId: "49c93966-9ff7-455c-8a22-83e8ef3c55c5", state: "offline" },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects malformed or extended presence snapshots", () => {
+    expect(
+      validateWsServerMessage({
+        type: "instance_presence",
+        instances: [{ ...presence, state: "online" }],
+      }),
+    ).toBe(false);
+    expect(
+      validateWsServerMessage({ type: "instance_presence", instances: [presence], cursor: 1 }),
+    ).toBe(false);
+  });
+
   it("has no client-to-server message schema: the socket is receive-ignored", () => {
     // The server never reads client frames (no message protocol), so the
     // contract must not define question-reply/permission-reply client
@@ -720,6 +761,44 @@ describe("WebSocket messages", () => {
     expect(yaml).not.toContain("WsClientMessage");
     expect(yaml).not.toContain("question-reply");
     expect(yaml).not.toContain("permission-reply");
+  });
+});
+
+describe("Plugin control WebSocket messages", () => {
+  const registration = {
+    type: "register",
+    instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+    machine: "devbox",
+    project: "api",
+    directory: "/work/api",
+    openCodeVersion: "1.18.18",
+    protocolVersion: 1,
+  };
+
+  it("accepts a strict Plugin instance registration", () => {
+    expect(validatePluginControlClientMessage(registration)).toBe(true);
+    expect(validatePluginControlClientMessage({ ...registration, extra: true })).toBe(false);
+    expect(validatePluginControlClientMessage({ ...registration, instanceId: "runtime-1" })).toBe(
+      false,
+    );
+  });
+
+  it.each(["controllable", "conflicting", "incompatible"])(
+    "accepts a %s registration result",
+    (state) => {
+      expect(
+        validatePluginControlServerMessage({
+          type: "registration",
+          instanceId: registration.instanceId,
+          state,
+        }),
+      ).toBe(true);
+    },
+  );
+
+  it("carries unsupported control protocol versions for a diagnosable result", () => {
+    expect(validatePluginControlClientMessage({ ...registration, protocolVersion: 2 })).toBe(true);
+    expect(validatePluginControlClientMessage({ ...registration, protocolVersion: 0 })).toBe(false);
   });
 });
 

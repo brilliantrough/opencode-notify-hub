@@ -11,6 +11,11 @@ import type {
 } from "./schemas/auth.js";
 import type { errorResponseSchema, healthStatusSchema } from "./schemas/common.js";
 import type {
+  instancePresenceSchema,
+  pluginControlClientMessageSchema,
+  pluginControlServerMessageSchema,
+} from "./schemas/control.js";
+import type {
   deviceListResponseSchema,
   deviceSchema,
   patchDeviceBodySchema,
@@ -61,3 +66,6 @@ export type HealthStatus = FromSchema<typeof healthStatusSchema>;
 export type ErrorResponse = FromSchema<typeof errorResponseSchema>;
 
 export type WsServerMessage = FromSchema<typeof wsServerMessageSchema>;
+export type InstancePresence = FromSchema<typeof instancePresenceSchema>;
+export type PluginControlClientMessage = FromSchema<typeof pluginControlClientMessageSchema>;
+export type PluginControlServerMessage = FromSchema<typeof pluginControlServerMessageSchema>;
