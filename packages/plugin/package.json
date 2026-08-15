@@ -16,7 +16,8 @@
     "build": "tsup && node scripts/smoke-dist.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "smoke:dist": "node scripts/smoke-dist.mjs"
+    "smoke:dist": "node scripts/smoke-dist.mjs",
+    "smoke:opencode": "node scripts/opencode-smoke.mjs"
   },
   "dependencies": {
     "@notify/contracts": "workspace:*",
