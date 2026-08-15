@@ -47,6 +47,27 @@ environment is a Linux OpenCode host and Linux desktop client.
   instance keeps notification delivery but its control registration is rejected.
 - OpenCode loads the project Plugin lazily on the first directory-scoped request,
   not merely when the HTTP listener starts.
+- **Launch-mode matrix (1.18.18, verified 2026-08-15):** the interactive
+  plugin-hosting modes are the supported ones — the TUI (`opencode` in a pty)
+  and `opencode attach` invoke the Plugin factory and its event hook (so
+  notifications work); `opencode run` invokes it but denies the question tool
+  headless (notifications only); `opencode serve` and `opencode web` import
+  the plugin module lazily but never invoke the factory (verified with marker
+  probes). In the standalone TUI, `input.serverUrl` (`http://localhost:4096/`)
+  has no reachable listener (verified with `NO_PROXY` + direct `node:http` →
+  `ECONNREFUSED`; the TUI process has no LISTEN socket), so the control channel
+  registers `incompatible(unknown)`. In `serve + attach`, the factory is
+  invoked in the attach process, the event hook works, and the ControlChannel
+  registers CONTROLLABLE — but the attached session's state (sessions,
+  messages, pending questions) lives in the attach process's private store,
+  not in the reachable serve listener the plugin is told about (the serve
+  reports an empty question list and empty session messages for the attached
+  session), so the plugin's pending/reply adapters never see the question and
+  the answer round-trip cannot complete. Plugin version resolution and
+  adapters must not assume `input.client.global.health` exists, that the
+  embedded server serves the API on 1.18.18, or that `input.serverUrl` holds
+  the pending store. Plugin→OpenCode loopback traffic must bypass host proxies
+  (`direct-fetch.ts`). See docs/beta-evidence/README.md.
 
 ## Architecture
 
@@ -80,10 +101,17 @@ server-to-client only.
 
 ## State Authority
 
-OpenCode `/question` and `/permission` are authoritative. Gateway notification
-events and client state are projections only.
+OpenCode is authoritative. On `1.18.18` the working read path is the **V2
+location-scoped pending lists** — `v2.question.request.list` and
+`v2.permission.request.list`, both called with `location.directory` — and the
+working reply path is the **V2 session-scoped replies** —
+`v2.session.question.reply` and `v2.session.permission.reply`. The V1 global
+`/question` and `/permission` lists and replies do **not** see natural pending
+state on this build (empty lists, `404` replies) and are not used. Gateway
+notification events and client state are projections only.
 
-- Online: synchronize pending requests from the Plugin/OpenCode instance.
+- Online: synchronize pending requests from the Plugin/OpenCode V2 pending
+  lists.
 - Offline: retain the last-known request as read-only and label its state
   unknown with the instance's last-online time.
 - Reconnected: replace projections with a fresh authoritative snapshot.
@@ -164,8 +192,10 @@ loaded a probe Plugin in each. It established all of the following on version
 `1.18.18`:
 
 - Plugin input exposes the instance-specific `serverUrl`;
-- a Plugin-created `@opencode-ai/sdk/v2` client exposes question and permission
-  list/reply APIs;
+- a Plugin-created `@opencode-ai/sdk/v2` client exposes the question and
+  permission V2 list/reply APIs (`v2.question.request.list`,
+  `v2.permission.request.list`, `v2.session.question.reply`,
+  `v2.session.permission.reply`);
 - a pending two-question request is recoverable from a newly created SDK client;
 - arbitrary custom text and a multi-select plus custom answer are accepted;
 - the second Server does not see the first Server's pending request;
@@ -176,6 +206,16 @@ loaded a probe Plugin in each. It established all of the following on version
 
 The prototype sessions, fixture directories, processes, package script, and
 harness source were removed after recording these results.
+
+> **Historical note (superseded).** The original prototype conclusion treated
+> OpenCode's V1 global `/question` and `/permission` paths as authoritative.
+> That conclusion was superseded by the release smoke finding against a real
+> `1.18.18` server: the V1 global lists/replies do **not** see natural pending
+> state (empty lists, `404` replies), while the V2 location-scoped lists and
+> V2 session-scoped replies above are the working authoritative APIs. The
+> finding is the hard Proof 8 (P8, gates the exit code) in
+> `packages/plugin/scripts/opencode-smoke.mjs`, which exercises exactly those
+> V2 paths against natural model-turn state.
 
 ## Beta Acceptance Matrix
 
