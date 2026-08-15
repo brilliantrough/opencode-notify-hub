@@ -10,7 +10,10 @@ import 'package:client/bootstrap.dart';
 import 'package:client/config/app_config.dart';
 import 'package:client/history/notification_history.dart';
 import 'package:client/notifications/notification_service.dart';
+import 'package:client/realtime/instance_presence.dart';
 import 'package:client/realtime/realtime_controller.dart';
+import 'package:client/ui/pending_interaction_page.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -26,6 +29,11 @@ class FakeGateway {
   final List<Map<String, dynamic>> registeredDevices = [];
   var refreshCalls = 0;
   var logoutCalls = 0;
+
+  /// The pending-interactions snapshot served by `GET /v1/pending-interactions`.
+  List<Map<String, Object?>> pendingInteractions = [];
+  var answerCalls = 0;
+  var decisionCalls = 0;
 
   WebSocket? _socket;
   final Completer<void> _socketClosed = Completer<void>();
@@ -57,6 +65,27 @@ class FakeGateway {
       );
       return;
     }
+    final path = request.uri.path;
+    if (request.method == 'POST' &&
+        path.startsWith('/v1/pending-interactions/') &&
+        path.endsWith('/answer')) {
+      answerCalls++;
+      _json(request, 200, {
+        'commandId': 'cmd-answer-$answerCalls',
+        'status': 'confirmed',
+      });
+      return;
+    }
+    if (request.method == 'POST' &&
+        path.startsWith('/v1/pending-interactions/') &&
+        path.endsWith('/decision')) {
+      decisionCalls++;
+      _json(request, 200, {
+        'commandId': 'cmd-decision-$decisionCalls',
+        'status': 'confirmed',
+      });
+      return;
+    }
     switch ((request.method, request.uri.path)) {
       case ('POST', '/v1/auth/refresh'):
         refreshCalls++;
@@ -81,6 +110,11 @@ class FakeGateway {
         };
         registeredDevices.add(device);
         _json(request, 200, device);
+      case ('GET', '/v1/pending-interactions'):
+        _json(request, 200, {
+          'generatedAt': '2026-08-14T10:00:00.000Z',
+          'interactions': pendingInteractions,
+        });
       default:
         request.response.statusCode = 404;
         await request.response.close();
@@ -102,6 +136,13 @@ class FakeGateway {
   /// Pushes one realtime event frame to the connected client.
   void sendEvent(Map<String, Object?> envelope) {
     _socket!.add(jsonEncode({'type': 'event', 'event': envelope}));
+  }
+
+  /// Pushes one authoritative instance-presence snapshot to the client.
+  void sendPresence(List<Map<String, Object?>> instances) {
+    _socket!.add(
+      jsonEncode({'type': 'instance_presence', 'instances': instances}),
+    );
   }
 
   Future<void> stop() async {
@@ -139,6 +180,159 @@ Map<String, Object?> terminalEnvelope(String eventId) => {
   'payload': {'outcome': 'completed', 'elapsedSeconds': 42},
 };
 
+/// One `action_required` question envelope matching the pending-snapshot
+/// shape the fake gateway serves.
+Map<String, Object?> actionRequiredQuestionEnvelope({
+  required String eventId,
+  required String machine,
+  required String project,
+  required String directory,
+  required String sessionId,
+  required String sessionTitle,
+  required String requestId,
+}) => {
+  'eventId': eventId,
+  'type': 'action_required',
+  'occurredAt': '2026-08-14T09:00:00.000Z',
+  'source': {'machine': machine, 'project': project, 'directory': directory},
+  'session': {'id': sessionId, 'title': sessionTitle},
+  'payload': {
+    'requestId': requestId,
+    'kind': 'question',
+    'questions': [
+      {
+        'question': 'Which database?',
+        'multiple': false,
+        'options': [
+          {'label': 'PostgreSQL', 'description': 'Production parity'},
+        ],
+      },
+    ],
+  },
+};
+
+/// One question interaction for the fake gateway's pending snapshot.
+Map<String, Object?> pendingQuestionInteraction({
+  required String instanceId,
+  required String machine,
+  required String project,
+  required String directory,
+  required String sessionId,
+  required String sessionTitle,
+  required String requestId,
+}) => {
+  'instanceId': instanceId,
+  'kind': 'question',
+  'machine': machine,
+  'project': project,
+  'directory': directory,
+  'sessionId': sessionId,
+  'sessionTitle': sessionTitle,
+  'requestId': requestId,
+  'occurredAt': '2026-08-14T09:00:00.000Z',
+  'questions': [
+    {
+      'header': 'Database',
+      'question': 'Which database?',
+      'options': [
+        {'label': 'PostgreSQL', 'description': 'Production parity'},
+      ],
+      'multiple': false,
+      'custom': true,
+    },
+  ],
+};
+
+/// A controllable presence entry for the fake gateway's instance snapshots.
+Map<String, Object?> controllablePresence({
+  required String instanceId,
+  required String machine,
+  required String project,
+  required String directory,
+}) => {
+  'instanceId': instanceId,
+  'machine': machine,
+  'project': project,
+  'directory': directory,
+  'openCodeVersion': '1.18.18',
+  'protocolVersion': 1,
+  'state': 'controllable',
+  'lastSeenAt': '2026-08-14T10:00:00.000Z',
+};
+
+/// An offline presence entry for the fake gateway's instance snapshots.
+Map<String, Object?> offlinePresence({
+  required String instanceId,
+  required String machine,
+  required String project,
+  required String directory,
+}) => {
+  'instanceId': instanceId,
+  'machine': machine,
+  'project': project,
+  'directory': directory,
+  'openCodeVersion': '1.18.18',
+  'protocolVersion': 1,
+  'state': 'offline',
+  'lastSeenAt': '2026-08-14T09:55:00.000Z',
+};
+
+/// Boots the app against a fresh [FakeGateway] with stored credentials and
+/// waits until the session is authenticated, the device registered, and the
+/// realtime socket connected.
+Future<
+  ({
+    FakeGateway gateway,
+    RecordingNotificationService notifications,
+    ProviderContainer container,
+    InMemoryCredentialsStore store,
+  })
+>
+bootApp(WidgetTester tester) async {
+  final gateway = await FakeGateway.start();
+  addTearDown(gateway.stop);
+
+  final store = InMemoryCredentialsStore();
+  await store.save(refreshToken: 'rt-1', accountEmail: 'user@example.com');
+  final notifications = RecordingNotificationService();
+
+  final bootstrap = await AppBootstrap.initialize(
+    notificationService: notifications,
+    initDesktopWindowing: false,
+    extraOverrides: [
+      appConfigProvider.overrideWithValue(
+        AppConfig(gatewayHttpBase: gateway.httpBase),
+      ),
+      credentialsStoreProvider.overrideWithValue(store),
+      notificationHistoryProvider.overrideWithValue(
+        InMemoryNotificationHistory(),
+      ),
+    ],
+  );
+  final container = ProviderContainer(overrides: bootstrap.overrides);
+  // bootstrap.shutdown() disposes the container; no extra dispose here.
+  addTearDown(bootstrap.shutdown);
+  bootstrap.attach(container);
+
+  await tester.pumpWidget(
+    UncontrolledProviderScope(container: container, child: const NotifyApp()),
+  );
+  await tester.pump();
+
+  await pumpUntil(
+    tester,
+    () => container.read(authControllerProvider) is Authenticated,
+  );
+  await pumpUntil(tester, () => gateway.registeredDevices.isNotEmpty);
+  await pumpUntil(tester, () => gateway.socketConnected);
+  return (
+    gateway: gateway,
+    notifications: notifications,
+    container: container,
+    store: store,
+  );
+}
+
 Future<void> pumpUntil(
   WidgetTester tester,
   bool Function() condition, {
@@ -162,57 +356,13 @@ void main() {
     'stored login boots authenticated, registers the device, routes one '
     'terminal event to notification + history, and logout tears down',
     (tester) async {
-      final gateway = await FakeGateway.start();
-      addTearDown(gateway.stop);
+      final boot = await bootApp(tester);
+      final gateway = boot.gateway;
+      final notifications = boot.notifications;
+      final container = boot.container;
 
-      // Stored login: credentials exist before the app boots.
-      final store = InMemoryCredentialsStore();
-      await store.save(
-        refreshToken: 'rt-1',
-        accountEmail: 'user@example.com',
-      );
-      final notifications = RecordingNotificationService();
-
-      final bootstrap = await AppBootstrap.initialize(
-        notificationService: notifications,
-        initDesktopWindowing: false,
-        extraOverrides: [
-          appConfigProvider.overrideWithValue(
-            AppConfig(gatewayHttpBase: gateway.httpBase),
-          ),
-          credentialsStoreProvider.overrideWithValue(store),
-          notificationHistoryProvider.overrideWithValue(
-            InMemoryNotificationHistory(),
-          ),
-        ],
-      );
-      final container = ProviderContainer(overrides: bootstrap.overrides);
-      // bootstrap.shutdown() disposes the container; no extra dispose here.
-      addTearDown(bootstrap.shutdown);
-      bootstrap.attach(container);
-
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: const NotifyApp(),
-        ),
-      );
-      await tester.pump();
-
-      // Stored credentials restore the session via the fake gateway.
-      await pumpUntil(
-        tester,
-        () => container.read(authControllerProvider) is Authenticated,
-      );
       expect(gateway.refreshCalls, 1);
-
-      // Bootstrap registers the current device with the gateway.
-      await pumpUntil(tester, () => gateway.registeredDevices.isNotEmpty);
-
-      // The realtime controller connects the WebSocket while authenticated.
-      await pumpUntil(tester, () => gateway.socketConnected);
       expect(container.read(realtimeControllerProvider), isNotNull);
-
       // A terminal event produces exactly one alert and one history row.
       gateway.sendEvent(terminalEnvelope('evt-terminal-1'));
       await pumpUntil(tester, () => notifications.shown.isNotEmpty);
@@ -228,7 +378,171 @@ void main() {
       await pumpUntil(tester, () => gateway.socketClosed);
       expect(container.read(realtimeControllerProvider), isNull);
       expect(container.read(authControllerProvider), isA<Unauthenticated>());
-      expect(await store.read(), isNull);
+      expect(await boot.store.read(), isNull);
+    },
+  );
+
+  testWidgets(
+    'clicking a question notification opens the focused request page',
+    (tester) async {
+      const instanceId = 'inst-1';
+      const machine = 'devbox';
+      const project = 'api';
+      const directory = '/work/api';
+      const requestId = 'req-1';
+
+      final boot = await bootApp(tester);
+      final gateway = boot.gateway;
+      final notifications = boot.notifications;
+      final container = boot.container;
+
+      // The gateway serves the authoritative pending request for the click.
+      gateway.pendingInteractions = [
+        pendingQuestionInteraction(
+          instanceId: instanceId,
+          machine: machine,
+          project: project,
+          directory: directory,
+          sessionId: 'ses-1',
+          sessionTitle: 'Implement API',
+          requestId: requestId,
+        ),
+      ];
+      gateway.sendPresence([
+        controllablePresence(
+          instanceId: instanceId,
+          machine: machine,
+          project: project,
+          directory: directory,
+        ),
+      ]);
+      await pumpUntil(
+        tester,
+        () => container.read(instancePresencesProvider).isNotEmpty,
+      );
+
+      gateway.sendEvent(
+        actionRequiredQuestionEnvelope(
+          eventId: 'evt-click-1',
+          machine: machine,
+          project: project,
+          directory: directory,
+          sessionId: 'ses-1',
+          sessionTitle: 'Implement API',
+          requestId: requestId,
+        ),
+      );
+      await pumpUntil(tester, () => notifications.shown.isNotEmpty);
+      expect(notifications.shown.single.eventId, 'evt-click-1');
+      expect(notifications.shown.single.onClick, isNotNull);
+
+      // Clicking the alert deep-links into the interactive request page.
+      notifications.shown.single.onClick!();
+      await pumpUntil(
+        tester,
+        () => find.byType(PendingInteractionPage).evaluate().isNotEmpty,
+      );
+      expect(find.text('待处理问题'), findsOneWidget);
+      expect(find.text('Which database?'), findsOneWidget);
+      expect(find.byKey(const ValueKey('submit-answer')), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'clicking a notification whose request was handled elsewhere reports '
+    'and stays on the workbench',
+    (tester) async {
+      const machine = 'devbox';
+      const project = 'api';
+      const directory = '/work/api';
+
+      final boot = await bootApp(tester);
+      final gateway = boot.gateway;
+      final notifications = boot.notifications;
+
+      // The snapshot is empty: the request never reached the gateway.
+      gateway.sendEvent(
+        actionRequiredQuestionEnvelope(
+          eventId: 'evt-gone-1',
+          machine: machine,
+          project: project,
+          directory: directory,
+          sessionId: 'ses-1',
+          sessionTitle: 'Implement API',
+          requestId: 'req-gone',
+        ),
+      );
+      await pumpUntil(tester, () => notifications.shown.isNotEmpty);
+      expect(notifications.shown.single.onClick, isNotNull);
+
+      notifications.shown.single.onClick!();
+      await pumpUntil(
+        tester,
+        () => find.text('该请求已被处理或不可用').evaluate().isNotEmpty,
+      );
+      expect(find.byType(PendingInteractionPage), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'clicking a notification whose owning instance is offline opens the '
+    'read-only page',
+    (tester) async {
+      const instanceId = 'inst-1';
+      const machine = 'devbox';
+      const project = 'api';
+      const directory = '/work/api';
+      const requestId = 'req-1';
+
+      final boot = await bootApp(tester);
+      final gateway = boot.gateway;
+      final notifications = boot.notifications;
+      final container = boot.container;
+
+      gateway.pendingInteractions = [
+        pendingQuestionInteraction(
+          instanceId: instanceId,
+          machine: machine,
+          project: project,
+          directory: directory,
+          sessionId: 'ses-1',
+          sessionTitle: 'Implement API',
+          requestId: requestId,
+        ),
+      ];
+      gateway.sendPresence([
+        offlinePresence(
+          instanceId: instanceId,
+          machine: machine,
+          project: project,
+          directory: directory,
+        ),
+      ]);
+      await pumpUntil(
+        tester,
+        () => container.read(instancePresencesProvider).isNotEmpty,
+      );
+
+      gateway.sendEvent(
+        actionRequiredQuestionEnvelope(
+          eventId: 'evt-offline-1',
+          machine: machine,
+          project: project,
+          directory: directory,
+          sessionId: 'ses-1',
+          sessionTitle: 'Implement API',
+          requestId: requestId,
+        ),
+      );
+      await pumpUntil(tester, () => notifications.shown.isNotEmpty);
+
+      notifications.shown.single.onClick!();
+      await pumpUntil(
+        tester,
+        () => find.byType(PendingInteractionPage).evaluate().isNotEmpty,
+      );
+      expect(find.textContaining('实例离线'), findsOneWidget);
+      expect(find.byKey(const ValueKey('submit-answer')), findsNothing);
     },
   );
 }

@@ -87,6 +87,54 @@ void main() {
       expect(broughtToFront, 1);
     });
 
+    test('clicking composes bring-to-front then the request onClick', () async {
+      final order = <String>[];
+      var requestClicks = 0;
+      await service(bringWindowToFront: () async => order.add('front')).show(
+        NotifyRequest(
+          eventId: 'evt-click',
+          title: '需要回答',
+          body: 'Which database?',
+          playSound: false,
+          onClick: () {
+            order.add('click');
+            requestClicks++;
+          },
+        ),
+      );
+
+      notifier.shown.single.onClick!();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(order, ['front', 'click']);
+      expect(requestClicks, 1);
+    });
+
+    test(
+      'a failing window manager never swallows the deep-link click',
+      () async {
+        var clicks = 0;
+        await service(
+          bringWindowToFront: () async => throw StateError('wm gone'),
+        ).show(
+          NotifyRequest(
+            eventId: 'evt-click',
+            title: '需要回答',
+            body: 'Which database?',
+            playSound: false,
+            onClick: () => clicks++,
+          ),
+        );
+
+        notifier.shown.single.onClick!();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(clicks, 1);
+      },
+    );
+
     test('desktop requires no runtime notification permission', () async {
       expect(await service().permissionGranted(), isTrue);
     });

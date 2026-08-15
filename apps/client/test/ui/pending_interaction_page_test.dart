@@ -144,11 +144,22 @@ class ScriptedDecisionSender {
   }
 }
 
+class SeededSubmissionStates extends QuestionSubmissionStates {
+  SeededSubmissionStates(this._initial);
+
+  final Map<String, QuestionSubmissionState> _initial;
+
+  @override
+  Map<String, QuestionSubmissionState> build() => _initial;
+}
+
 Future<void> pumpPage(
   WidgetTester tester, {
   required PendingInteraction interaction,
   required QuestionAnswerSender sender,
   PermissionDecisionSender? decisionSender,
+  bool readOnly = false,
+  DateTime? lastSeenAt,
 }) async {
   tester.view.physicalSize = const Size(1200, 2400);
   tester.view.devicePixelRatio = 1.0;
@@ -180,8 +191,11 @@ Future<void> pumpPage(
               child: TextButton(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (_) =>
-                        PendingInteractionPage(interaction: interaction),
+                    builder: (_) => PendingInteractionPage(
+                      interaction: interaction,
+                      readOnly: readOnly,
+                      lastSeenAt: lastSeenAt,
+                    ),
                   ),
                 ),
                 child: const Text('open'),
@@ -661,5 +675,120 @@ void main() {
 
     expect(sender.calls, 0);
     expect(find.byType(PendingInteractionPage), findsNothing);
+  });
+
+  group('read-only page', () {
+    testWidgets(
+      'question requests render plain text with an offline banner and no '
+      'inputs or actions',
+      (tester) async {
+        await pumpPage(
+          tester,
+          interaction: question(),
+          sender: ScriptedAnswerSender().call,
+          readOnly: true,
+          lastSeenAt: DateTime.utc(2026, 8, 14, 8, 58),
+        );
+
+        expect(find.text('待处理问题'), findsOneWidget);
+        expect(find.textContaining('实例离线'), findsOneWidget);
+        expect(
+          find.text('Which database should the migration target?'),
+          findsOneWidget,
+        );
+        expect(find.text('What else should the migration do?'), findsOneWidget);
+        expect(find.text('PostgreSQL'), findsOneWidget);
+        expect(find.text('Production parity'), findsOneWidget);
+        expect(find.byKey(const ValueKey('submit-answer')), findsNothing);
+        expect(find.byType(RadioGroup<String>), findsNothing);
+        expect(find.byType(CheckboxListTile), findsNothing);
+        expect(find.byType(TextField), findsNothing);
+        expect(find.byKey(const ValueKey('question-0-custom')), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'permission requests render the details without decision actions',
+      (tester) async {
+        await pumpPage(
+          tester,
+          interaction: permission(),
+          sender: ScriptedAnswerSender().call,
+          decisionSender: ScriptedDecisionSender().call,
+          readOnly: true,
+          lastSeenAt: DateTime.utc(2026, 8, 14, 8, 58),
+        );
+
+        expect(find.text('待处理权限'), findsOneWidget);
+        expect(find.textContaining('实例离线'), findsOneWidget);
+        expect(find.text('bash'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('permission-allow-once')),
+          findsNothing,
+        );
+        expect(find.byKey(const ValueKey('permission-reject')), findsNothing);
+        expect(find.text('允许一次'), findsNothing);
+        expect(find.text('拒绝'), findsNothing);
+      },
+    );
+
+    testWidgets('opening read-only never resets submission states', (
+      tester,
+    ) async {
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(
+            () => FakeAuthController(
+              const Authenticated(
+                accessToken: 'token',
+                email: 'user@example.com',
+              ),
+            ),
+          ),
+          pendingInteractionLoaderProvider.overrideWithValue(() async {
+            return [question()];
+          }),
+          questionSubmissionStatesProvider.overrideWith(
+            () => SeededSubmissionStates({
+              'question-1': QuestionSubmissionState.confirmed,
+            }),
+          ),
+          commandIdGeneratorProvider.overrideWithValue(() => 'cmd-1'),
+        ],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => Center(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => PendingInteractionPage(
+                          interaction: question(),
+                          readOnly: true,
+                          lastSeenAt: DateTime.utc(2026, 8, 14, 9),
+                        ),
+                      ),
+                    ),
+                    child: const Text('open'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.confirmed,
+      );
+    });
   });
 }

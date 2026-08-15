@@ -16,6 +16,8 @@ import 'fcm/fcm_service.dart';
 import 'firebase_options.dart';
 import 'notifications/android_notification_service.dart';
 import 'notifications/desktop_notification_service.dart';
+import 'notifications/notification_intent.dart';
+import 'notifications/notification_navigation.dart';
 import 'notifications/notification_service.dart';
 import 'pending/pending_controller.dart';
 import 'realtime/realtime_controller.dart';
@@ -189,8 +191,18 @@ class AppBootstrap {
       ) {
         if (next is Authenticated && previous is! Authenticated) {
           unawaited(_onLogin(container));
+          // A notification clicked while unauthenticated is carried in the
+          // in-memory intent slot; replay it now that a session exists.
+          unawaited(
+            container
+                .read(notificationNavigationProvider)
+                .processStoredIntent(),
+          );
         }
         if (next is! Authenticated && previous is Authenticated) {
+          // A stored deep-link intent belongs to the account that clicked
+          // it; never replay it into a later, possibly different, session.
+          container.read(notificationIntentProvider.notifier).clear();
           unawaited(_onLogout(container));
         }
       }).close,

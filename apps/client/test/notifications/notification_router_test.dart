@@ -30,18 +30,20 @@ class FakeNotificationService implements NotificationService {
   Future<void> openPermissionSettings() async {}
 }
 
-NotifyEvent _heartbeat({String eventId = 'evt-hb', String sessionId = 'sess-1'}) =>
-    NotifyEvent(
-      eventId: eventId,
-      occurredAt: DateTime.utc(2026, 1, 1, 12),
-      machine: 'macbook',
-      project: 'linewrite',
-      directory: '/repo',
-      sessionId: sessionId,
-      sessionTitle: 'Fix login',
-      type: NotifyEventType.heartbeat,
-      elapsedSeconds: 42,
-    );
+NotifyEvent _heartbeat({
+  String eventId = 'evt-hb',
+  String sessionId = 'sess-1',
+}) => NotifyEvent(
+  eventId: eventId,
+  occurredAt: DateTime.utc(2026, 1, 1, 12),
+  machine: 'macbook',
+  project: 'linewrite',
+  directory: '/repo',
+  sessionId: sessionId,
+  sessionTitle: 'Fix login',
+  type: NotifyEventType.heartbeat,
+  elapsedSeconds: 42,
+);
 
 NotifyEvent _actionRequired({
   String eventId = 'evt-act',
@@ -61,20 +63,68 @@ NotifyEvent _actionRequired({
   permissionType: 'filesystem',
 );
 
-NotifyEvent _terminal({String eventId = 'evt-term', String sessionId = 'sess-1'}) =>
-    NotifyEvent(
-      eventId: eventId,
-      occurredAt: DateTime.utc(2026, 1, 1, 12, 5),
-      machine: 'macbook',
-      project: 'linewrite',
-      directory: '/repo',
-      sessionId: sessionId,
-      sessionTitle: 'Fix login',
-      type: NotifyEventType.terminal,
-      outcome: TerminalOutcome.completed,
-      elapsedSeconds: 300,
-      summary: 'All done',
-    );
+NotifyEvent _terminal({
+  String eventId = 'evt-term',
+  String sessionId = 'sess-1',
+}) => NotifyEvent(
+  eventId: eventId,
+  occurredAt: DateTime.utc(2026, 1, 1, 12, 5),
+  machine: 'macbook',
+  project: 'linewrite',
+  directory: '/repo',
+  sessionId: sessionId,
+  sessionTitle: 'Fix login',
+  type: NotifyEventType.terminal,
+  outcome: TerminalOutcome.completed,
+  elapsedSeconds: 300,
+  summary: 'All done',
+);
+
+NotifyEvent _questionAction({String eventId = 'evt-q'}) => NotifyEvent(
+  eventId: eventId,
+  occurredAt: DateTime.utc(2026, 1, 1, 12, 1),
+  machine: 'macbook',
+  project: 'linewrite',
+  directory: '/repo',
+  sessionId: 'sess-1',
+  sessionTitle: 'Fix login',
+  type: NotifyEventType.actionRequired,
+  requestId: 'req-q',
+  actionKind: ActionKind.question,
+  questions: const [
+    QuestionPrompt(
+      text: 'Which database?',
+      options: [QuestionOption(label: 'PostgreSQL')],
+    ),
+  ],
+);
+
+NotifyEvent _providerAction({String eventId = 'evt-pa'}) => NotifyEvent(
+  eventId: eventId,
+  occurredAt: DateTime.utc(2026, 1, 1, 12, 1),
+  machine: 'macbook',
+  project: 'linewrite',
+  directory: '/repo',
+  sessionId: 'sess-1',
+  sessionTitle: 'Fix login',
+  type: NotifyEventType.actionRequired,
+  requestId: 'req-pa',
+  actionKind: ActionKind.providerAction,
+  providerActionMessage: '完成浏览器操作',
+);
+
+NotifyEvent _permissionWithoutRequestId() => NotifyEvent(
+  eventId: 'evt-no-req',
+  occurredAt: DateTime.utc(2026, 1, 1, 12, 1),
+  machine: 'macbook',
+  project: 'linewrite',
+  directory: '/repo',
+  sessionId: 'sess-1',
+  sessionTitle: 'Fix login',
+  type: NotifyEventType.actionRequired,
+  actionKind: ActionKind.permission,
+  permissionType: 'filesystem',
+);
 
 NotifyEvent _actionResolved({
   String eventId = 'evt-res',
@@ -127,15 +177,18 @@ void main() {
   });
 
   group('NotificationRouter heartbeat', () {
-    test('upserts the active session without history, popup, or sound', () async {
-      await router.handle(_heartbeat());
+    test(
+      'upserts the active session without history, popup, or sound',
+      () async {
+        await router.handle(_heartbeat());
 
-      final session = sessionsState['sess-1']!;
-      expect(session.running, isTrue);
-      expect(session.lastHeartbeatAt, DateTime.utc(2026, 1, 1, 12));
-      expect(history.entries, isEmpty);
-      expect(service.shown, isEmpty);
-    });
+        final session = sessionsState['sess-1']!;
+        expect(session.running, isTrue);
+        expect(session.lastHeartbeatAt, DateTime.utc(2026, 1, 1, 12));
+        expect(history.entries, isEmpty);
+        expect(service.shown, isEmpty);
+      },
+    );
   });
 
   group('NotificationRouter actionRequired', () {
@@ -283,6 +336,70 @@ void main() {
 
       expect(service.shown, hasLength(1));
       expect(service.shown.single.playSound, isFalse);
+    });
+  });
+
+  group('NotificationRouter onActionRequiredClick', () {
+    final clickedEvents = <NotifyEvent>[];
+    late NotificationRouter clickRouter;
+
+    setUp(() {
+      clickedEvents.clear();
+      clickRouter = NotificationRouter(
+        service: service,
+        activeSessions: sessions,
+        deduper: EventDeduper(),
+        history: history,
+        readSettings: () => const NotificationSettings(),
+        onActionRequiredClick: (event) => clickedEvents.add(event),
+      );
+    });
+
+    test('a question alert carries a click that forwards its event', () async {
+      await clickRouter.handle(_questionAction());
+
+      final request = service.shown.single;
+      expect(request.onClick, isNotNull);
+      request.onClick!();
+      expect(clickedEvents.single.eventId, 'evt-q');
+    });
+
+    test('a permission alert carries a click', () async {
+      await clickRouter.handle(_actionRequired());
+
+      expect(service.shown.single.onClick, isNotNull);
+    });
+
+    test('a provider-action alert never carries a click', () async {
+      await clickRouter.handle(_providerAction());
+
+      expect(service.shown.single.onClick, isNull);
+      expect(clickedEvents, isEmpty);
+    });
+
+    test('a terminal alert never carries a click', () async {
+      await clickRouter.handle(_actionRequired());
+      await clickRouter.handle(_terminal());
+
+      expect(service.shown.last.onClick, isNull);
+    });
+
+    test(
+      'an action_required without a request id never carries a click',
+      () async {
+        await clickRouter.handle(_permissionWithoutRequestId());
+
+        expect(service.shown.single.onClick, isNull);
+      },
+    );
+
+    test('action_resolved never alerts or carries a click', () async {
+      await clickRouter.handle(_actionRequired());
+      await clickRouter.handle(_actionResolved());
+
+      expect(service.shown, hasLength(1));
+      expect(service.shown.single.onClick, isNotNull);
+      expect(clickedEvents, isEmpty);
     });
   });
 }

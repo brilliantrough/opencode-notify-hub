@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_state.dart';
 import '../history/notification_history.dart';
+import '../notifications/notification_navigation.dart';
 import '../notifications/notification_router.dart';
 import '../notifications/notification_service.dart';
 import '../settings/settings_controller.dart';
@@ -56,6 +57,11 @@ final notificationRouterProvider = Provider<NotificationRouter>(
         soundEnabled: settings.soundEnabled,
       );
     },
+    // Question/permission alerts deep-link into the focused request page via
+    // the navigation layer; the target is built from the event there.
+    onActionRequiredClick: ref
+        .watch(notificationNavigationProvider)
+        .onActionRequiredClick,
   ),
 );
 

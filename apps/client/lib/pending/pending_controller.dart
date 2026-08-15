@@ -44,6 +44,60 @@ final pendingInteractionsProvider =
       List<PendingInteraction>
     >(PendingInteractionsController.new);
 
+/// One last-known pending interaction of an offline instance, wrapped with
+/// the instance's last-online time for read-only display.
+class OfflinePendingInteraction {
+  const OfflinePendingInteraction({
+    required this.interaction,
+    required this.lastSeenAt,
+  });
+
+  final PendingInteraction interaction;
+  final DateTime lastSeenAt;
+}
+
+/// Read-only last-known requests of instances that are currently offline.
+///
+/// Watches the presence projection and the pending snapshot: for every
+/// instance whose presence state is [InstancePresenceState.offline], the
+/// current snapshot's items are merged with the controller's retained
+/// last-known (which survives the instance leaving a snapshot), deduplicated
+/// by request id, and wrapped with the instance's last-online time.
+final offlineLastKnownProvider = Provider<List<OfflinePendingInteraction>>((
+  ref,
+) {
+  final instances = ref.watch(instancePresencesProvider);
+  final snapshot = ref.watch(pendingInteractionsProvider);
+  final lastKnown = ref
+      .watch(pendingInteractionsProvider.notifier)
+      .lastKnownByInstance;
+  final offline = <OfflinePendingInteraction>[];
+  for (final presence in instances.values) {
+    if (presence.state != InstancePresenceState.offline) {
+      continue;
+    }
+    final seen = <String>{};
+    final items = [
+      ...?snapshot.value?.where(
+        (item) => item.instanceId == presence.instanceId,
+      ),
+      ...?lastKnown[presence.instanceId],
+    ];
+    for (final interaction in items) {
+      if (!seen.add(interaction.requestId)) {
+        continue;
+      }
+      offline.add(
+        OfflinePendingInteraction(
+          interaction: interaction,
+          lastSeenAt: presence.lastSeenAt,
+        ),
+      );
+    }
+  }
+  return offline;
+});
+
 /// Per-request submission lifecycle for answering a pending question. The
 /// workbench and the focused page read this to show submitting and result
 /// states without sending or rejecting anything on navigation.
@@ -198,6 +252,35 @@ class PendingInteractionsController
   Future<void>? _activeRefresh;
   int _epoch = 0;
 
+  /// Last-known interactions per instance, kept in memory only. Updated on
+  /// every successful fetch; instances absent from a new snapshot keep their
+  /// previous last-known requests so offline read-only views still work.
+  /// Cleared on logout.
+  final Map<String, List<PendingInteraction>> _lastKnownByInstance = {};
+
+  /// Unmodifiable view of the per-instance last-known retention.
+  Map<String, List<PendingInteraction>> get lastKnownByInstance =>
+      Map.unmodifiable(_lastKnownByInstance);
+
+  /// The current authoritative snapshot value. Public read access to the
+  /// notifier state for consumers (e.g. the notification navigation) that
+  /// hold the controller directly instead of watching the provider.
+  AsyncValue<List<PendingInteraction>> get current => state;
+
+  void _retain(List<PendingInteraction> interactions) {
+    final byInstance = <String, List<PendingInteraction>>{};
+    for (final interaction in interactions) {
+      (byInstance[interaction.instanceId] ??= []).add(interaction);
+    }
+    for (final entry in byInstance.entries) {
+      _lastKnownByInstance[entry.key] = entry.value;
+    }
+  }
+
+  void _clearRetention() {
+    _lastKnownByInstance.clear();
+  }
+
   @override
   Future<List<PendingInteraction>> build() async {
     _epoch++;
@@ -215,6 +298,7 @@ class PendingInteractionsController
     });
     if (auth is! Authenticated) {
       _building = false;
+      _clearRetention();
       return const [];
     }
     try {
@@ -250,6 +334,7 @@ class PendingInteractionsController
   Future<void> _runRefreshLoop() async {
     final epoch = _epoch;
     if (ref.read(authControllerProvider) is! Authenticated) {
+      _clearRetention();
       state = const AsyncData([]);
       return;
     }
@@ -277,6 +362,7 @@ class PendingInteractionsController
       if (byInstance != 0) return byInstance;
       return left.requestId.compareTo(right.requestId);
     });
+    _retain(interactions);
     return interactions;
   }
 
@@ -408,6 +494,7 @@ class PendingInteractionsController
     }
     final epoch = _epoch;
     if (ref.read(authControllerProvider) is! Authenticated) {
+      _clearRetention();
       state = const AsyncData([]);
       return;
     }

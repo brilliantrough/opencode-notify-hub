@@ -248,6 +248,43 @@ void main() {
         metadata: const {'command': 'docker build .'},
       );
 
+  PendingQuestion offlinePendingQuestion(
+    String instanceId,
+    String id,
+    DateTime occurredAt,
+  ) => PendingQuestion(
+    instanceId: instanceId,
+    machine: 'dev-box',
+    project: 'shop-api',
+    directory: '/work/shop-api',
+    sessionId: 'ses-$id',
+    sessionTitle: 'Fix checkout bug',
+    requestId: id,
+    occurredAt: occurredAt,
+    tool: null,
+    questions: const [
+      PendingQuestionItem(
+        header: 'Database',
+        question: 'Which database?',
+        options: [PendingOption(label: 'Postgres', description: 'Production')],
+        multiple: false,
+        custom: true,
+      ),
+    ],
+  );
+
+  OpenCodeInstancePresence offlinePresence(String id) =>
+      OpenCodeInstancePresence(
+        instanceId: id,
+        machine: 'dev-box',
+        project: 'shop-api',
+        directory: '/work/shop-api',
+        openCodeVersion: '1.18.18',
+        protocolVersion: 1,
+        state: InstancePresenceState.offline,
+        lastSeenAt: DateTime.now().subtract(const Duration(minutes: 2)),
+      );
+
   testWidgets('shows 已连接 when the socket is connected', (tester) async {
     await pumpHome(tester, status: WsStatus.connected);
     expect(find.text('已连接'), findsOneWidget);
@@ -353,6 +390,67 @@ void main() {
     expect(find.text('版本不兼容'), findsOneWidget);
     expect(find.text('离线'), findsOneWidget);
     expect(find.byKey(const ValueKey('instance-one')), findsOneWidget);
+  });
+
+  testWidgets(
+    'offline requests render in the read-only section between pending and '
+    'instances and open the read-only page',
+    (tester) async {
+      const offlineId = 'off-1';
+      final actionable = pendingQuestion(
+        'question-1',
+        DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+      final offline = offlinePendingQuestion(
+        offlineId,
+        'req-offline',
+        DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+      await pumpHome(
+        tester,
+        interactions: [actionable, offline],
+        instances: {offlineId: offlinePresence(offlineId)},
+      );
+
+      expect(find.text('离线请求（只读）'), findsOneWidget);
+      final pendingY = tester.getTopLeft(find.text('待处理请求')).dy;
+      final offlineY = tester.getTopLeft(find.text('离线请求（只读）')).dy;
+      final instancesY = tester.getTopLeft(find.text('OpenCode 实例')).dy;
+      expect(pendingY, lessThan(offlineY));
+      expect(offlineY, lessThan(instancesY));
+      expect(
+        find.byKey(const ValueKey('offline-off-1-req-offline')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('offline-off-1-req-offline')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('实例离线'), findsOneWidget);
+      expect(find.byKey(const ValueKey('submit-answer')), findsNothing);
+    },
+  );
+
+  testWidgets('a lone offline request avoids the empty state', (tester) async {
+    const offlineId = 'off-1';
+    await pumpHome(
+      tester,
+      interactions: [
+        offlinePendingQuestion(
+          offlineId,
+          'req-offline',
+          DateTime.now().subtract(const Duration(minutes: 10)),
+        ),
+      ],
+      instances: {offlineId: offlinePresence(offlineId)},
+    );
+
+    expect(find.text('暂无活动会话'), findsNothing);
+    expect(find.text('离线请求（只读）'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('offline-off-1-req-offline')),
+      findsOneWidget,
+    );
   });
 
   testWidgets(

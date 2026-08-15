@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Platform notification service. Must be overridden per platform
@@ -13,19 +14,25 @@ final notificationServiceProvider = Provider<NotificationService>(
 /// One alert to present to the user.
 ///
 /// [playSound] is `false` when the device settings disabled notification
-/// sounds; the platform service maps it to its silent channel.
+/// sounds; the platform service maps it to its silent channel. [onClick]
+/// fires when the user activates the alert (clicking the popup, tapping the
+/// push). It is deliberately excluded from [operator ==], [hashCode], and
+/// [toString]: the click is behavior, not identity, so equality-comparing
+/// shown requests (tests, history) never depends on it.
 class NotifyRequest {
   const NotifyRequest({
     required this.eventId,
     required this.title,
     required this.body,
     required this.playSound,
+    this.onClick,
   });
 
   final String eventId;
   final String title;
   final String body;
   final bool playSound;
+  final VoidCallback? onClick;
 
   @override
   bool operator ==(Object other) =>
@@ -39,8 +46,7 @@ class NotifyRequest {
   int get hashCode => Object.hash(eventId, title, body, playSound);
 
   @override
-  String toString() =>
-      'NotifyRequest($eventId, $title, playSound: $playSound)';
+  String toString() => 'NotifyRequest($eventId, $title, playSound: $playSound)';
 }
 
 /// Abstraction over the platform's notification surface, so the

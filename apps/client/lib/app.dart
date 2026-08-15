@@ -28,6 +28,12 @@ final isAndroidProvider = Provider<bool>((ref) {
   }
 });
 
+/// The root app navigator. Notification deep links push their focused pages
+/// through this key so navigation works regardless of the current shell tab.
+final appNavigatorKeyProvider = Provider<GlobalKey<NavigatorState>>(
+  (ref) => GlobalKey<NavigatorState>(),
+);
+
 /// Builds the app theme while preserving native typography off Windows.
 ThemeData notifyThemeFor(TargetPlatform platform) {
   return ThemeData(
@@ -53,6 +59,7 @@ class NotifyApp extends ConsumerWidget {
     final settingsController = ref.read(settingsControllerProvider.notifier);
     return MaterialApp(
       title: 'OpenCode Notify',
+      navigatorKey: ref.watch(appNavigatorKeyProvider),
       theme: notifyThemeFor(defaultTargetPlatform),
       builder: (context, child) {
         if (child == null || isAndroid) {

@@ -9,9 +9,22 @@ import '../pending/pending_interaction.dart';
 import '../pending/pending_permission.dart';
 
 class PendingInteractionPage extends ConsumerStatefulWidget {
-  const PendingInteractionPage({super.key, required this.interaction});
+  const PendingInteractionPage({
+    super.key,
+    required this.interaction,
+    this.readOnly = false,
+    this.lastSeenAt,
+  });
 
   final PendingInteraction interaction;
+
+  /// Read-only view of a request whose owning instance is offline: questions
+  /// render as plain text (no inputs) and all submission actions are hidden.
+  /// No submission state is written on open.
+  final bool readOnly;
+
+  /// The owning instance's last-online time, shown on the offline banner.
+  final DateTime? lastSeenAt;
 
   @override
   ConsumerState<PendingInteractionPage> createState() =>
@@ -38,7 +51,7 @@ class _PendingInteractionPageState
   void initState() {
     super.initState();
     final question = _question;
-    if (question != null) {
+    if (question != null && !widget.readOnly) {
       final count = question.questions.length;
       for (var index = 0; index < count; index++) {
         _singleChoice.add(null);
@@ -48,6 +61,10 @@ class _PendingInteractionPageState
     }
     // Reopening the page starts a fresh submission attempt. Deferred so the
     // provider write never happens while the widget tree is building.
+    // Read-only pages never touch submission state.
+    if (widget.readOnly) {
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (question != null) {
@@ -139,7 +156,8 @@ class _PendingInteractionPageState
     final locked =
         submission == QuestionSubmissionState.submitting ||
         submission == QuestionSubmissionState.confirmed;
-    final answers = question == null ? null : _answers(question);
+    final readOnly = widget.readOnly;
+    final answers = question == null || readOnly ? null : _answers(question);
     final permission = _permission;
     final permissionState = permission == null
         ? PermissionDecisionState.idle
@@ -152,6 +170,8 @@ class _PendingInteractionPageState
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
+          if (readOnly && widget.lastSeenAt != null)
+            _OfflineBanner(lastSeenAt: widget.lastSeenAt!),
           _DetailSection(
             title: '来源',
             children: [
@@ -166,7 +186,13 @@ class _PendingInteractionPageState
               ),
             ],
           ),
-          if (question != null) ...[
+          if (question != null && readOnly)
+            for (var index = 0; index < question.questions.length; index++)
+              _ReadOnlyQuestion(
+                index: index,
+                question: question.questions[index],
+              ),
+          if (question != null && !readOnly) ...[
             for (var index = 0; index < question.questions.length; index++)
               _QuestionForm(
                 index: index,
@@ -202,19 +228,21 @@ class _PendingInteractionPageState
           ],
           if (permission != null) ...[
             _PermissionDetails(permission: permission),
-            _PermissionActions(
-              state: permissionState,
-              onAllowOnce: () => _decide(permission, PermissionDecision.once),
-              onReject: () => _decide(permission, PermissionDecision.reject),
-            ),
-            if (permissionSubmitting)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: LinearProgressIndicator(
-                  key: ValueKey('permission-submitting'),
-                ),
+            if (!readOnly) ...[
+              _PermissionActions(
+                state: permissionState,
+                onAllowOnce: () => _decide(permission, PermissionDecision.once),
+                onReject: () => _decide(permission, PermissionDecision.reject),
               ),
-            _PermissionDecisionBanner(state: permissionState),
+              if (permissionSubmitting)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: LinearProgressIndicator(
+                    key: ValueKey('permission-submitting'),
+                  ),
+                ),
+              _PermissionDecisionBanner(state: permissionState),
+            ],
           ],
           if (interaction.tool case final tool?)
             _DetailSection(
@@ -326,6 +354,74 @@ class _QuestionForm extends StatelessWidget {
       ],
     );
   }
+}
+
+class _ReadOnlyQuestion extends StatelessWidget {
+  const _ReadOnlyQuestion({required this.index, required this.question});
+
+  final int index;
+  final PendingQuestionItem question;
+
+  @override
+  Widget build(BuildContext context) {
+    return _DetailSection(
+      title: question.header,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Text(
+            question.question,
+            key: ValueKey('question-$index'),
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+        ),
+        for (
+          var optionIndex = 0;
+          optionIndex < question.options.length;
+          optionIndex++
+        )
+          _DetailRow(
+            key: ValueKey('readonly-question-$index-option-$optionIndex'),
+            label: question.options[optionIndex].label,
+            value: question.options[optionIndex].description,
+          ),
+      ],
+    );
+  }
+}
+
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner({required this.lastSeenAt});
+
+  final DateTime lastSeenAt;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Row(
+        key: const ValueKey('offline-banner'),
+        children: [
+          Icon(
+            Icons.cloud_off_outlined,
+            size: 18,
+            color: Theme.of(context).colorScheme.outline,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('实例离线 · 状态未知 · 最后在线 ${_offlineElapsed(lastSeenAt)}'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _offlineElapsed(DateTime lastSeenAt) {
+  final elapsed = DateTime.now().difference(lastSeenAt);
+  if (elapsed.inSeconds < 60) return '刚刚在线';
+  if (elapsed.inMinutes < 60) return '${elapsed.inMinutes}分钟前在线';
+  return '${elapsed.inHours}小时前在线';
 }
 
 class _SubmissionBanner extends StatelessWidget {

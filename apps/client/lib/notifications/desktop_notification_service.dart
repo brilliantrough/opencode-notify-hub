@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:local_notifier/local_notifier.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -46,8 +48,7 @@ class DesktopNotificationService implements NotificationService {
     Future<void> Function()? bringWindowToFront,
   }) : _notifier = notifier ?? LocalNotifierAdapter(),
        _soundPlayer = soundPlayer ?? SoundPlayer(),
-       _bringWindowToFront =
-           bringWindowToFront ?? _defaultBringWindowToFront;
+       _bringWindowToFront = bringWindowToFront ?? _defaultBringWindowToFront;
 
   final DesktopNotifier _notifier;
   final SoundPlayer _soundPlayer;
@@ -66,7 +67,19 @@ class DesktopNotificationService implements NotificationService {
     await _notifier.show(
       title: request.title,
       body: request.body,
-      onClick: () => _bringWindowToFront(),
+      onClick: () {
+        // Bring the app window to the front first, then hand the click to
+        // the router's deep-link handler so the target opens on top. A
+        // failing window manager must never swallow the deep link.
+        unawaited(() async {
+          try {
+            await _bringWindowToFront();
+          } on Object {
+            // Window activation is best-effort; the deep link still runs.
+          }
+          request.onClick?.call();
+        }());
+      },
     );
     if (request.playSound) {
       await _soundPlayer.playAlert();

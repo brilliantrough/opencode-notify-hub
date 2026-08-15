@@ -43,6 +43,31 @@ PendingQuestion interaction(String id, DateTime occurredAt) => PendingQuestion(
   ],
 );
 
+PendingQuestion interactionOn({
+  required String instanceId,
+  required String id,
+  required DateTime occurredAt,
+}) => PendingQuestion(
+  instanceId: instanceId,
+  machine: 'dev-box',
+  project: 'api',
+  directory: '/work/api',
+  sessionId: 'ses-$id',
+  sessionTitle: 'Session $id',
+  requestId: id,
+  occurredAt: occurredAt,
+  tool: null,
+  questions: const [
+    PendingQuestionItem(
+      header: 'Database',
+      question: 'Which database?',
+      options: [],
+      multiple: false,
+      custom: true,
+    ),
+  ],
+);
+
 PendingQuestion multiQuestion(String id, DateTime occurredAt) =>
     PendingQuestion(
       instanceId: '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
@@ -1162,5 +1187,208 @@ void main() {
         );
       },
     );
+  });
+
+  group('last-known retention', () {
+    test('retains last-known interactions for instances absent from a newer '
+        'snapshot', () async {
+      var calls = 0;
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(
+            () => MutableAuthController(authenticated),
+          ),
+          pendingInteractionLoaderProvider.overrideWithValue(() async {
+            calls++;
+            if (calls == 1) {
+              return [
+                interactionOn(
+                  instanceId: 'inst-a',
+                  id: 'a',
+                  occurredAt: DateTime.utc(2026, 8, 14, 9),
+                ),
+                interactionOn(
+                  instanceId: 'inst-b',
+                  id: 'b',
+                  occurredAt: DateTime.utc(2026, 8, 14, 9, 1),
+                ),
+              ];
+            }
+            return [
+              interactionOn(
+                instanceId: 'inst-a',
+                id: 'a2',
+                occurredAt: DateTime.utc(2026, 8, 14, 9, 2),
+              ),
+            ];
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(pendingInteractionsProvider.future);
+      final controller = container.read(pendingInteractionsProvider.notifier);
+      expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a');
+      expect(controller.lastKnownByInstance['inst-b']!.single.requestId, 'b');
+
+      await controller.refresh();
+      // inst-a refreshes; inst-b is absent but its last-known survives.
+      expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a2');
+      expect(controller.lastKnownByInstance['inst-b']!.single.requestId, 'b');
+    });
+
+    test('clears the retained last-known on logout', () async {
+      final auth = MutableAuthController(authenticated);
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(() => auth),
+          pendingInteractionLoaderProvider.overrideWithValue(() async {
+            return [
+              interactionOn(
+                instanceId: 'inst-a',
+                id: 'a',
+                occurredAt: DateTime.utc(2026, 8, 14, 9),
+              ),
+            ];
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(pendingInteractionsProvider.future);
+      expect(
+        container
+            .read(pendingInteractionsProvider.notifier)
+            .lastKnownByInstance,
+        isNotEmpty,
+      );
+
+      auth.replace(const Unauthenticated());
+      await container.read(pendingInteractionsProvider.future);
+
+      expect(
+        container
+            .read(pendingInteractionsProvider.notifier)
+            .lastKnownByInstance,
+        isEmpty,
+      );
+    });
+  });
+
+  group('offlineLastKnownProvider', () {
+    OpenCodeInstancePresence presence(String id, InstancePresenceState state) =>
+        OpenCodeInstancePresence(
+          instanceId: id,
+          machine: 'dev-box',
+          project: 'api',
+          directory: '/work/api',
+          openCodeVersion: '1.18.18',
+          protocolVersion: 1,
+          state: state,
+          lastSeenAt: DateTime.utc(2026, 8, 14, 10),
+        );
+
+    test(
+      'wraps retained requests of offline instances with lastSeenAt',
+      () async {
+        final container = ProviderContainer(
+          overrides: [
+            authControllerProvider.overrideWith(
+              () => MutableAuthController(authenticated),
+            ),
+            pendingInteractionLoaderProvider.overrideWithValue(() async {
+              return [
+                interactionOn(
+                  instanceId: 'inst-a',
+                  id: 'a',
+                  occurredAt: DateTime.utc(2026, 8, 14, 9),
+                ),
+              ];
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        container.read(instancePresencesProvider.notifier).replaceAll([
+          presence('inst-a', InstancePresenceState.offline),
+          presence('inst-b', InstancePresenceState.controllable),
+        ]);
+
+        final offline = container.read(offlineLastKnownProvider);
+        expect(offline, hasLength(1));
+        expect(offline.single.interaction.requestId, 'a');
+        expect(offline.single.lastSeenAt, DateTime.utc(2026, 8, 14, 10));
+      },
+    );
+
+    test(
+      'keeps retained requests when the instance leaves the snapshot',
+      () async {
+        var calls = 0;
+        final container = ProviderContainer(
+          overrides: [
+            authControllerProvider.overrideWith(
+              () => MutableAuthController(authenticated),
+            ),
+            pendingInteractionLoaderProvider.overrideWithValue(() async {
+              calls++;
+              return calls == 1
+                  ? [
+                      interactionOn(
+                        instanceId: 'inst-a',
+                        id: 'a',
+                        occurredAt: DateTime.utc(2026, 8, 14, 9),
+                      ),
+                    ]
+                  : const <PendingInteraction>[];
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        container.read(instancePresencesProvider.notifier).replaceAll([
+          presence('inst-a', InstancePresenceState.offline),
+        ]);
+
+        // A later fetch drops the instance; the offline view still shows it.
+        await container.read(pendingInteractionsProvider.notifier).refresh();
+        expect(
+          container.read(pendingInteractionsProvider).requireValue,
+          isEmpty,
+        );
+        final offline = container.read(offlineLastKnownProvider);
+        expect(offline.single.interaction.requestId, 'a');
+        expect(offline.single.lastSeenAt, DateTime.utc(2026, 8, 14, 10));
+      },
+    );
+
+    test('excludes requests of online instances', () async {
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(
+            () => MutableAuthController(authenticated),
+          ),
+          pendingInteractionLoaderProvider.overrideWithValue(() async {
+            return [
+              interactionOn(
+                instanceId: 'inst-a',
+                id: 'a',
+                occurredAt: DateTime.utc(2026, 8, 14, 9),
+              ),
+            ];
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      container.read(instancePresencesProvider.notifier).replaceAll([
+        presence('inst-a', InstancePresenceState.controllable),
+      ]);
+
+      expect(container.read(offlineLastKnownProvider), isEmpty);
+    });
   });
 }

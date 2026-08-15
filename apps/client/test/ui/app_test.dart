@@ -52,6 +52,7 @@ void main() {
     bool? isAndroid,
     bool settle = true,
     Map<String, Object> settings = const {},
+    GlobalKey<NavigatorState>? navigatorKey,
   }) async {
     SharedPreferences.setMockInitialValues(settings);
     final prefs = await SharedPreferences.getInstance();
@@ -67,6 +68,8 @@ void main() {
           ),
           sharedPreferencesProvider.overrideWithValue(Future.value(prefs)),
           if (isAndroid != null) isAndroidProvider.overrideWithValue(isAndroid),
+          if (navigatorKey != null)
+            appNavigatorKeyProvider.overrideWithValue(navigatorKey),
         ],
         child: const NotifyApp(),
       ),
@@ -88,6 +91,17 @@ void main() {
   testWidgets('Unauthenticated routes to the login page', (tester) async {
     auth = FakeAuthController(const Unauthenticated());
     await pumpApp(tester);
+    expect(find.byType(LoginPage), findsOneWidget);
+  });
+
+  testWidgets('MaterialApp attaches the app navigator key provider', (
+    tester,
+  ) async {
+    auth = FakeAuthController(const Unauthenticated());
+    final navigatorKey = GlobalKey<NavigatorState>();
+    await pumpApp(tester, navigatorKey: navigatorKey);
+
+    expect(navigatorKey.currentState, isNotNull);
     expect(find.byType(LoginPage), findsOneWidget);
   });
 

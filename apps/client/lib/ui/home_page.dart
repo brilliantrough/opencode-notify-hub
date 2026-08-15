@@ -33,6 +33,7 @@ class HomePage extends ConsumerWidget {
     final instances = ref.watch(instancePresencesProvider);
     final pending = ref.watch(pendingInteractionsProvider);
     final interactions = pending.value ?? const <PendingInteraction>[];
+    final offline = ref.watch(offlineLastKnownProvider);
     final ordered = sessions.values.toList()
       ..sort((a, b) => b.lastHeartbeatAt.compareTo(a.lastHeartbeatAt));
     return Scaffold(
@@ -57,6 +58,7 @@ class HomePage extends ConsumerWidget {
           ordered.isEmpty &&
               instances.isEmpty &&
               interactions.isEmpty &&
+              offline.isEmpty &&
               !pending.isLoading &&
               !pending.hasError
           ? const Center(child: Text('暂无活动会话'))
@@ -86,7 +88,11 @@ class HomePage extends ConsumerWidget {
                   for (final interaction in interactions)
                     _PendingTile(interaction: interaction),
                 ],
-                if (interactions.isNotEmpty &&
+                if (offline.isNotEmpty) ...[
+                  const _SectionHeader('离线请求（只读）'),
+                  for (final item in offline) _OfflineTile(item: item),
+                ],
+                if ((interactions.isNotEmpty || offline.isNotEmpty) &&
                     (instances.isNotEmpty || ordered.isNotEmpty))
                   const Divider(height: 24),
                 if (instances.isNotEmpty) ...[
@@ -139,6 +145,41 @@ String _waitingText(DateTime occurredAt) {
   if (elapsed.inSeconds < 60) return '等待不到1分钟';
   if (elapsed.inMinutes < 60) return '等待${elapsed.inMinutes}分钟';
   return '等待${elapsed.inHours}小时';
+}
+
+class _OfflineTile extends StatelessWidget {
+  const _OfflineTile({required this.item});
+
+  final OfflinePendingInteraction item;
+
+  @override
+  Widget build(BuildContext context) {
+    final interaction = item.interaction;
+    final isQuestion = interaction is PendingQuestion;
+    return ListTile(
+      key: ValueKey(
+        'offline-${interaction.instanceId}-${interaction.requestId}',
+      ),
+      leading: Icon(isQuestion ? Icons.help_outline : Icons.shield_outlined),
+      title: Text('${interaction.machine} · ${interaction.project}'),
+      subtitle: Text(
+        '${interaction.sessionTitle.isEmpty ? interaction.sessionId : interaction.sessionTitle} · ${_elapsedText(item.lastSeenAt)}',
+      ),
+      trailing: Chip(
+        label: Text(isQuestion ? '待回答' : '待授权'),
+        visualDensity: VisualDensity.compact,
+      ),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PendingInteractionPage(
+            interaction: interaction,
+            readOnly: true,
+            lastSeenAt: item.lastSeenAt,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _SectionHeader extends StatelessWidget {
