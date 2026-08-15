@@ -1,8 +1,183 @@
+import 'package:client/pending/pending_answer.dart';
 import 'package:client/pending/pending_interaction.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:notify_api/notify_api.dart' show PendingSnapshot, standardSerializers;
+import 'package:notify_api/notify_api.dart'
+    show PendingSnapshot, QuestionCommandResultStatusEnum, standardSerializers;
+
+const orderedQuestions = [
+  PendingQuestionItem(
+    header: 'Database',
+    question: 'Which database?',
+    options: [
+      PendingOption(label: 'PostgreSQL', description: 'Production parity'),
+      PendingOption(label: 'SQLite', description: 'Fast local runs'),
+    ],
+    multiple: false,
+    custom: true,
+  ),
+  PendingQuestionItem(
+    header: 'Migration',
+    question: 'What else should the migration do?',
+    options: [
+      PendingOption(label: 'Migrate data', description: 'Copy rows'),
+      PendingOption(label: 'Add indexes', description: 'Speed queries'),
+      PendingOption(label: 'Update docs', description: 'Refresh guides'),
+    ],
+    multiple: true,
+    custom: true,
+  ),
+];
 
 void main() {
+  test('maps question answer outcomes from the generated statuses', () {
+    expect(
+      questionAnswerOutcomeFromStatus(
+        QuestionCommandResultStatusEnum.confirmed,
+      ),
+      QuestionAnswerOutcome.confirmed,
+    );
+    expect(
+      questionAnswerOutcomeFromStatus(QuestionCommandResultStatusEnum.stale),
+      QuestionAnswerOutcome.stale,
+    );
+    expect(
+      questionAnswerOutcomeFromStatus(
+        QuestionCommandResultStatusEnum.upstreamError,
+      ),
+      QuestionAnswerOutcome.upstreamError,
+    );
+    expect(
+      questionAnswerOutcomeFromStatus(
+        QuestionCommandResultStatusEnum.resultUnknown,
+      ),
+      QuestionAnswerOutcome.resultUnknown,
+    );
+  });
+
+  group('composeQuestionAnswers', () {
+    test('builds an ordered answer set for every question', () {
+      final answers = composeQuestionAnswers(
+        questions: orderedQuestions,
+        singleChoice: const ['PostgreSQL', null],
+        multiChoice: const [
+          <String>{},
+          <String>{'Add indexes', 'Migrate data'},
+        ],
+        custom: const ['', 'Use read replicas'],
+      );
+
+      expect(answers, [
+        ['PostgreSQL'],
+        ['Migrate data', 'Add indexes', 'Use read replicas'],
+      ]);
+    });
+
+    test('keeps multi-select options in upstream option order', () {
+      final answers = composeQuestionAnswers(
+        questions: orderedQuestions,
+        singleChoice: const ['SQLite', null],
+        multiChoice: const [
+          <String>{},
+          <String>{'Update docs', 'Migrate data'},
+        ],
+        custom: const ['', ''],
+      );
+
+      expect(answers, [
+        ['SQLite'],
+        ['Migrate data', 'Update docs'],
+      ]);
+    });
+
+    test('a single custom answer is exclusive with option selection', () {
+      final withCustom = composeQuestionAnswers(
+        questions: orderedQuestions,
+        singleChoice: const ['PostgreSQL', null],
+        multiChoice: const [
+          <String>{},
+          <String>{'Migrate data'},
+        ],
+        custom: const ['MongoDB', ''],
+      );
+
+      expect(withCustom!.first, ['MongoDB']);
+      expect(withCustom, [
+        ['MongoDB'],
+        ['Migrate data'],
+      ]);
+    });
+
+    test('multi custom text accompanies the selected options', () {
+      final answers = composeQuestionAnswers(
+        questions: orderedQuestions,
+        singleChoice: const ['PostgreSQL', null],
+        multiChoice: const [
+          <String>{},
+          <String>{'Migrate data', 'Add indexes'},
+        ],
+        custom: const ['', 'Also refresh the seed script'],
+      );
+
+      expect(answers, [
+        ['PostgreSQL'],
+        ['Migrate data', 'Add indexes', 'Also refresh the seed script'],
+      ]);
+    });
+
+    test('multi custom text alone is a valid answer', () {
+      final answers = composeQuestionAnswers(
+        questions: orderedQuestions,
+        singleChoice: const ['PostgreSQL', null],
+        multiChoice: const [<String>{}, <String>{}],
+        custom: const ['', 'Just use the default migration'],
+      );
+
+      expect(answers, [
+        ['PostgreSQL'],
+        ['Just use the default migration'],
+      ]);
+    });
+
+    test('returns null when any question is unanswered', () {
+      expect(
+        composeQuestionAnswers(
+          questions: orderedQuestions,
+          singleChoice: const ['PostgreSQL', null],
+          multiChoice: const [<String>{}, <String>{}],
+          custom: const ['', ''],
+        ),
+        isNull,
+      );
+      expect(
+        composeQuestionAnswers(
+          questions: orderedQuestions,
+          singleChoice: const [null, null],
+          multiChoice: const [
+            <String>{},
+            <String>{'Migrate data'},
+          ],
+          custom: const ['', ''],
+        ),
+        isNull,
+      );
+    });
+
+    test('treats whitespace-only custom text as unanswered', () {
+      expect(
+        composeQuestionAnswers(
+          questions: orderedQuestions,
+          singleChoice: const [null, null],
+          multiChoice: const [
+            <String>{},
+            <String>{'Migrate data'},
+          ],
+          custom: const ['   ', ''],
+        ),
+        isNull,
+      );
+    });
+  });
+
   test(
     'maps generated question and permission variants without dropping context',
     () {

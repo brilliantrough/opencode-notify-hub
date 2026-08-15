@@ -1,20 +1,124 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../pending/pending_answer.dart';
+import '../pending/pending_controller.dart';
 import '../pending/pending_interaction.dart';
 
-class PendingInteractionPage extends StatelessWidget {
+class PendingInteractionPage extends ConsumerStatefulWidget {
   const PendingInteractionPage({super.key, required this.interaction});
 
   final PendingInteraction interaction;
 
   @override
+  ConsumerState<PendingInteractionPage> createState() =>
+      _PendingInteractionPageState();
+}
+
+class _PendingInteractionPageState
+    extends ConsumerState<PendingInteractionPage> {
+  final List<String?> _singleChoice = [];
+  final List<Set<String>> _multiChoice = [];
+  final List<TextEditingController> _customControllers = [];
+
+  PendingQuestion? get _question {
+    final interaction = widget.interaction;
+    return interaction is PendingQuestion ? interaction : null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final question = _question;
+    if (question != null) {
+      final count = question.questions.length;
+      for (var index = 0; index < count; index++) {
+        _singleChoice.add(null);
+        _multiChoice.add(<String>{});
+        _customControllers.add(TextEditingController());
+      }
+      // Reopening the page starts a fresh submission attempt. Deferred so the
+      // provider write never happens while the widget tree is building.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref
+            .read(questionSubmissionStatesProvider.notifier)
+            .reset(question.requestId);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _customControllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  List<List<String>>? _answers(PendingQuestion question) =>
+      composeQuestionAnswers(
+        questions: question.questions,
+        singleChoice: _singleChoice,
+        multiChoice: _multiChoice,
+        custom: [for (final controller in _customControllers) controller.text],
+      );
+
+  void _onSingleChanged(int index, String? value) {
+    setState(() {
+      _singleChoice[index] = value;
+      if (value != null) {
+        _customControllers[index].clear();
+      }
+    });
+  }
+
+  void _onMultiChanged(int index, String label, bool checked) {
+    setState(() {
+      final selected = _multiChoice[index];
+      if (checked) {
+        selected.add(label);
+      } else {
+        selected.remove(label);
+      }
+    });
+  }
+
+  void _onCustomChanged(int index) {
+    setState(() {
+      // Single-select custom text is exclusive with option selection.
+      if (!_question!.questions[index].multiple &&
+          _customControllers[index].text.trim().isNotEmpty) {
+        _singleChoice[index] = null;
+      }
+    });
+  }
+
+  Future<void> _submit(PendingQuestion question) async {
+    final answers = _answers(question);
+    if (answers == null) return;
+    await ref
+        .read(pendingInteractionsProvider.notifier)
+        .answerQuestion(question: question, answers: answers);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final interaction = widget.interaction;
+    final question = _question;
+    final submission = question == null
+        ? QuestionSubmissionState.idle
+        : ref.watch(questionSubmissionStatesProvider)[question.requestId] ??
+              QuestionSubmissionState.idle;
+    final submitting = submission == QuestionSubmissionState.submitting;
+    final locked =
+        submission == QuestionSubmissionState.submitting ||
+        submission == QuestionSubmissionState.confirmed;
+    final answers = question == null ? null : _answers(question);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(interaction is PendingQuestion ? '待处理问题' : '待处理权限'),
-      ),
+      appBar: AppBar(title: Text(question != null ? '待处理问题' : '待处理权限')),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
@@ -32,12 +136,40 @@ class PendingInteractionPage extends StatelessWidget {
               ),
             ],
           ),
-          if (interaction case final PendingQuestion question)
+          if (question != null) ...[
             for (var index = 0; index < question.questions.length; index++)
-              _QuestionSection(
+              _QuestionForm(
                 index: index,
                 question: question.questions[index],
+                locked: locked,
+                singleChoice: _singleChoice[index],
+                multiChoice: _multiChoice[index],
+                customController: _customControllers[index],
+                onSingleChanged: (value) => _onSingleChanged(index, value),
+                onMultiChanged: (label, checked) =>
+                    _onMultiChanged(index, label, checked),
+                onCustomChanged: () => _onCustomChanged(index),
               ),
+            if (submitting)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: LinearProgressIndicator(
+                  key: ValueKey('answer-submitting'),
+                ),
+              ),
+            _SubmissionBanner(state: submission),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: FilledButton.icon(
+                key: const ValueKey('submit-answer'),
+                onPressed: (answers != null && !locked)
+                    ? () => _submit(question)
+                    : null,
+                icon: const Icon(Icons.send_outlined),
+                label: const Text('提交回答'),
+              ),
+            ),
+          ],
           if (interaction case final PendingPermission permission)
             _PermissionDetails(permission: permission),
           if (interaction.tool case final tool?)
@@ -54,14 +186,32 @@ class PendingInteractionPage extends StatelessWidget {
   }
 }
 
-class _QuestionSection extends StatelessWidget {
-  const _QuestionSection({required this.index, required this.question});
+class _QuestionForm extends StatelessWidget {
+  const _QuestionForm({
+    required this.index,
+    required this.question,
+    required this.locked,
+    required this.singleChoice,
+    required this.multiChoice,
+    required this.customController,
+    required this.onSingleChanged,
+    required this.onMultiChanged,
+    required this.onCustomChanged,
+  });
 
   final int index;
   final PendingQuestionItem question;
+  final bool locked;
+  final String? singleChoice;
+  final Set<String> multiChoice;
+  final TextEditingController customController;
+  final ValueChanged<String?> onSingleChanged;
+  final void Function(String label, bool checked) onMultiChanged;
+  final VoidCallback onCustomChanged;
 
   @override
   Widget build(BuildContext context) {
+    final hasCustom = customController.text.trim().isNotEmpty;
     return _DetailSection(
       title: question.header,
       children: [
@@ -73,27 +223,106 @@ class _QuestionSection extends StatelessWidget {
             style: Theme.of(context).textTheme.bodyLarge,
           ),
         ),
+        if (question.multiple)
+          for (
+            var optionIndex = 0;
+            optionIndex < question.options.length;
+            optionIndex++
+          )
+            CheckboxListTile(
+              key: ValueKey('question-$index-option-$optionIndex'),
+              value: multiChoice.contains(question.options[optionIndex].label),
+              onChanged: locked
+                  ? null
+                  : (checked) => onMultiChanged(
+                      question.options[optionIndex].label,
+                      checked ?? false,
+                    ),
+              title: Text(question.options[optionIndex].label),
+              subtitle: Text(question.options[optionIndex].description),
+              controlAffinity: ListTileControlAffinity.leading,
+            )
+        else
+          RadioGroup<String>(
+            groupValue: hasCustom ? null : singleChoice,
+            onChanged: (value) {
+              if (!locked) onSingleChanged(value);
+            },
+            child: Column(
+              children: [
+                for (
+                  var optionIndex = 0;
+                  optionIndex < question.options.length;
+                  optionIndex++
+                )
+                  RadioListTile<String>(
+                    key: ValueKey('question-$index-option-$optionIndex'),
+                    value: question.options[optionIndex].label,
+                    title: Text(question.options[optionIndex].label),
+                    subtitle: Text(question.options[optionIndex].description),
+                  ),
+              ],
+            ),
+          ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: Wrap(
-            spacing: 8,
-            children: [
-              Chip(label: Text(question.multiple ? '可多选' : '单选')),
-              if (question.custom) const Chip(label: Text('可自定义回答')),
-            ],
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: TextField(
+            key: ValueKey('question-$index-custom'),
+            controller: customController,
+            enabled: !locked,
+            onChanged: (_) => onCustomChanged(),
+            decoration: InputDecoration(
+              labelText: '自定义回答',
+              helperText: question.multiple ? '附加在所选选项之后' : '选择选项或输入自定义回答',
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
           ),
         ),
-        for (
-          var optionIndex = 0;
-          optionIndex < question.options.length;
-          optionIndex++
-        )
-          ListTile(
-            key: ValueKey('question-$index-option-$optionIndex'),
-            title: Text(question.options[optionIndex].label),
-            subtitle: Text(question.options[optionIndex].description),
-          ),
       ],
+    );
+  }
+}
+
+class _SubmissionBanner extends StatelessWidget {
+  const _SubmissionBanner({required this.state});
+
+  final QuestionSubmissionState state;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state == QuestionSubmissionState.idle) {
+      return const SizedBox.shrink();
+    }
+    final (text, icon) = switch (state) {
+      QuestionSubmissionState.idle => (null, null),
+      QuestionSubmissionState.submitting => ('正在提交回答…', Icons.hourglass_top),
+      QuestionSubmissionState.confirmed => (
+        'OpenCode 已确认回答，请求已解除。',
+        Icons.check_circle_outline,
+      ),
+      QuestionSubmissionState.stale => (
+        '该问题已失效，可能已在其他设备处理。',
+        Icons.history_toggle_off,
+      ),
+      QuestionSubmissionState.upstreamError => (
+        '上游 OpenCode 返回错误，回答未被应用。',
+        Icons.error_outline,
+      ),
+      QuestionSubmissionState.resultUnknown => (
+        '结果未知，问题仍在等待回答。',
+        Icons.help_outline,
+      ),
+      QuestionSubmissionState.rejected => (
+        '网关拒绝了该回答，请求可能已失效。',
+        Icons.block_outlined,
+      ),
+    };
+    return ListTile(
+      key: const ValueKey('submission-result'),
+      dense: true,
+      leading: Icon(icon),
+      title: Text(text!, textAlign: TextAlign.center),
     );
   }
 }

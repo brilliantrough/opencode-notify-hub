@@ -3,6 +3,8 @@ import { randomUUID as nodeRandomUUID } from "node:crypto";
 import type {
   PendingInteraction,
   PluginControlClientMessage,
+  QuestionAnswers,
+  QuestionCommandStatus,
 } from "@notify/contracts";
 
 import type { PendingSource } from "./pending-adapter.js";
@@ -43,11 +45,35 @@ export interface ControlChannelOptions {
   ) => Promise<PendingInteraction[]>;
   /** Bounded time to wait for the injected seam; defaults to 2 seconds. */
   pendingSnapshotTimeoutMs?: number;
+  /**
+   * Injected question-answer seam. When set, a `question_answer_command`
+   * server frame (after registration) is answered with a
+   * `question_answer_result` carrying the channel's stable instanceId and
+   * the seam's mapped terminal status. The seam receives the exact ordered
+   * answer set and the channel's bounded abort signal; it must never
+   * throw, so its failures also map to `result_unknown`.
+   */
+  answerQuestion?: (
+    requestId: string,
+    directory: string,
+    answers: QuestionAnswers,
+    signal: AbortSignal,
+  ) => Promise<QuestionCommandStatus>;
+  /** Bounded time to wait for the injected seam; defaults to 10 seconds. */
+  answerTimeoutMs?: number;
 }
 
 const BASE_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 30_000;
 const DEFAULT_PENDING_SNAPSHOT_TIMEOUT_MS = 2_000;
+
+/**
+ * Bounded wait for one question answer command. Deliberately shorter than
+ * the Gateway's `ANSWER_TIMEOUT_MS` (10 seconds, issue #9) so the Plugin
+ * aborts its upstream OpenCode reply and reports `result_unknown` before
+ * the Gateway gives up and reports a timeout of its own.
+ */
+const QUESTION_ANSWER_TIMEOUT_MS = 8_000;
 
 /** Never-throw outbound Plugin control connection. */
 export class ControlChannel implements PluginControl {
@@ -160,11 +186,12 @@ export class ControlChannel implements PluginControl {
   }
 
   /**
-   * Handle one server frame. Only a `pending_snapshot_request` received
-   * after the Gateway confirmed registration produces a reply; every other
-   * frame — registration results, unknown types, malformed JSON, non-string
-   * payloads — is ignored without ever throwing, so notification behavior
-   * is unaffected.
+   * Handle one server frame. Only a `pending_snapshot_request` or a
+   * `question_answer_command` received after the Gateway confirmed
+   * registration produces a reply; every other frame — registration
+   * results, unknown types, malformed JSON, non-string payloads, and
+   * either request type before registration — is ignored without ever
+   * throwing, so notification behavior is unaffected.
    */
   private onServerFrame(socket: ControlSocket, event: unknown): void {
     const data = messageData(event);
@@ -185,13 +212,23 @@ export class ControlChannel implements PluginControl {
       this.registered = true;
       return;
     }
-    if (frame.type !== "pending_snapshot_request" || !this.registered) {
-      return; // unknown frame or snapshot request before registration
+    if (!this.registered) {
+      return; // commands and requests before registration are ignored
     }
-    if (typeof frame.requestId !== "string" || frame.requestId.length === 0) {
+    if (frame.type === "pending_snapshot_request") {
+      if (typeof frame.requestId !== "string" || frame.requestId.length === 0) {
+        return;
+      }
+      void this.answerSnapshot(socket, frame.requestId);
       return;
     }
-    void this.answerSnapshot(socket, frame.requestId);
+    if (frame.type === "question_answer_command") {
+      const command = parseAnswerCommand(frame);
+      if (command === null) {
+        return; // malformed answer command: ignore and keep the channel alive
+      }
+      void this.answerCommand(socket, command);
+    }
   }
 
   /**
@@ -214,6 +251,62 @@ export class ControlChannel implements PluginControl {
       socket.send(JSON.stringify(response));
     } catch {
       // A failed reply must never affect notification behavior.
+    }
+  }
+
+  /**
+   * Answer an answer command with the channel's stable instanceId and the
+   * seam's terminal status. Every command runs independently (different
+   * commandIds are never coalesced onto one upstream call). Never throws:
+   * a missing seam, seam failure, or timeout all report `result_unknown`,
+   * and a socket that vanished mid-reply is left alone.
+   */
+  private async answerCommand(socket: ControlSocket, command: AnswerCommand): Promise<void> {
+    const status = await this.runAnswer(command);
+    if (!this.running || this.socket !== socket) {
+      return;
+    }
+    const result: PluginControlClientMessage = {
+      type: "question_answer_result",
+      commandId: command.commandId,
+      instanceId: this.instanceId,
+      status,
+    };
+    try {
+      socket.send(JSON.stringify(result));
+    } catch {
+      // A failed reply must never affect notification behavior.
+    }
+  }
+
+  /** Run the injected answer seam under a bounded abort timeout. */
+  private async runAnswer(command: AnswerCommand): Promise<QuestionCommandStatus> {
+    if (this.options.answerQuestion === undefined) {
+      return "result_unknown";
+    }
+    const abort = new AbortController();
+    let timeout: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        this.options.answerQuestion(
+          command.requestId,
+          this.options.directory,
+          command.answers,
+          abort.signal,
+        ),
+        new Promise<QuestionCommandStatus>((resolve) => {
+          timeout = setTimeout(() => {
+            abort.abort();
+            resolve("result_unknown");
+          }, this.options.answerTimeoutMs ?? QUESTION_ANSWER_TIMEOUT_MS);
+        }),
+      ]);
+    } catch {
+      return "result_unknown";
+    } finally {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+      }
     }
   }
 
@@ -317,6 +410,61 @@ function controlUrl(gatewayUrl: string): string {
   const url = new URL(`${gatewayUrl}/v1/plugin/ws`);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
+}
+
+/** One validated `question_answer_command` server frame. */
+interface AnswerCommand {
+  commandId: string;
+  requestId: string;
+  answers: QuestionAnswers;
+}
+
+/**
+ * Structurally validate a `question_answer_command` frame against the
+ * contract's shape (uuid commandId, nonempty requestId, non-empty ordered
+ * `string[][]` answers). Returns null for anything malformed so the
+ * channel ignores it without a reply.
+ */
+function parseAnswerCommand(frame: Record<string, unknown>): AnswerCommand | null {
+  if (!isUuid(frame.commandId)) {
+    return null;
+  }
+  if (typeof frame.requestId !== "string" || frame.requestId.length === 0) {
+    return null;
+  }
+  if (!isQuestionAnswers(frame.answers)) {
+    return null;
+  }
+  return {
+    commandId: frame.commandId,
+    requestId: frame.requestId,
+    answers: frame.answers,
+  };
+}
+
+/** Contract `format: "uuid"` (same charset ajv-formats accepts). */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+/** Contract `QuestionAnswers` check: non-empty array of non-empty strings. */
+function isQuestionAnswers(value: unknown): value is QuestionAnswers {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false;
+  }
+  for (const outer of value) {
+    if (!Array.isArray(outer) || outer.length === 0) {
+      return false;
+    }
+    for (const answer of outer) {
+      if (typeof answer !== "string" || answer.length === 0) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function defaultSocketFactory(url: string, authorization: string): ControlSocket {

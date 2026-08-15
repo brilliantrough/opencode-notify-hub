@@ -485,4 +485,407 @@ describe("ControlChannel", () => {
       interactions: [],
     });
   });
+
+  const answerCommandId = "7f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
+
+  /** Drive an open socket into the post-registration state. */
+  function registeredChannel(socket: FakeSocket): void {
+    socket.emit("open");
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "registration",
+        instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+        state: "controllable",
+      }),
+    });
+  }
+
+  it("answers a question_answer_command with the stable instanceId and the seam's status", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const answerQuestion = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      answerQuestion,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers: [["Postgres"]],
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(answerQuestion).toHaveBeenCalledTimes(1);
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "question_answer_result",
+      commandId: answerCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "confirmed",
+    });
+  });
+
+  it("passes the exact ordered answers, the owning directory, and a bounded signal to the seam", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const answers = [["Postgres"], ["rust", "go"], ["Custom: as needed"]];
+    const answerQuestion = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      answerQuestion,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers,
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(answerQuestion).toHaveBeenCalledWith(
+      "req_1",
+      "/work/notify",
+      answers,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("does not coalesce concurrent commands with different commandIds", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const resolves: Array<() => void> = [];
+    const answerQuestion = vi.fn(
+      () =>
+        new Promise<"confirmed">((resolve) => {
+          resolves.push(() => resolve("confirmed"));
+        }),
+    );
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      answerQuestion,
+    });
+    const secondCommandId = "8f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    for (const commandId of [answerCommandId, secondCommandId]) {
+      socket.emit("message", {
+        data: JSON.stringify({
+          type: "question_answer_command",
+          commandId,
+          requestId: "req_1",
+          answers: [["Postgres"]],
+        }),
+      });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    // Each command runs independently: the seam is never coalesced onto one call.
+    expect(answerQuestion).toHaveBeenCalledTimes(2);
+
+    for (const resolve of resolves) {
+      resolve();
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    const results = socket.sent
+      .map((frame) => JSON.parse(frame))
+      .filter((frame) => frame.type === "question_answer_result");
+    expect(results).toHaveLength(2);
+    expect(results.map((result) => result.commandId).sort()).toEqual(
+      [answerCommandId, secondCommandId].sort(),
+    );
+  });
+
+  it("ignores a question_answer_command received before registration", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const answerQuestion = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      answerQuestion,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    socket.emit("open");
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers: [["Postgres"]],
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(answerQuestion).not.toHaveBeenCalled();
+    expect(socket.sent.map((frame) => JSON.parse(frame))).not.toContainEqual(
+      expect.objectContaining({ type: "question_answer_result" }),
+    );
+  });
+
+  it("ignores malformed question_answer_command frames without killing notification behavior", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const answerQuestion = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      answerQuestion,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+
+    const valid = {
+      type: "question_answer_command",
+      commandId: answerCommandId,
+      requestId: "req_1",
+      answers: [["Postgres"]],
+    };
+    const garbage: Record<string, unknown>[] = [
+      { ...valid, commandId: "cmd_1" },
+      { ...valid, commandId: "" },
+      { ...valid, commandId: 7 },
+      { ...valid, requestId: "" },
+      { ...valid, requestId: 7 },
+      { ...valid, answers: [] },
+      { ...valid, answers: [[]] },
+      { ...valid, answers: [[""]] },
+      { ...valid, answers: [["Postgres", ""]] },
+      { ...valid, answers: [[42]] },
+      { ...valid, answers: "Postgres" },
+      { ...valid, answers: undefined },
+      { type: "question_answer_command", commandId: answerCommandId, requestId: "req_1" },
+      { type: "question_answer_command", commandId: answerCommandId, answers: [["Postgres"]] },
+      { type: "question_answer_command" },
+    ];
+    for (const frame of garbage) {
+      socket.emit("message", { data: JSON.stringify(frame) });
+    }
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(answerQuestion).not.toHaveBeenCalled();
+    expect(socket.sent.map((frame) => JSON.parse(frame))).not.toContainEqual(
+      expect.objectContaining({ type: "question_answer_result" }),
+    );
+
+    // The channel stays alive and still answers a well-formed command.
+    socket.emit("message", { data: JSON.stringify(valid) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answerQuestion).toHaveBeenCalledTimes(1);
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual(
+      expect.objectContaining({
+        type: "question_answer_result",
+        commandId: answerCommandId,
+        status: "confirmed",
+      }),
+    );
+  });
+
+  it("reports result_unknown when no answer seam is configured", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers: [["Postgres"]],
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "question_answer_result",
+      commandId: answerCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "result_unknown",
+    });
+  });
+
+  it("reports result_unknown when the answer seam throws", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const answerQuestion = vi.fn(async () => {
+      throw new Error("sdk exploded");
+    });
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      answerQuestion,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers: [["Postgres"]],
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "question_answer_result",
+      commandId: answerCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "result_unknown",
+    });
+  });
+
+  it("aborts the answer seam after the bounded timeout and reports result_unknown", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    let latestSignal: AbortSignal | undefined;
+    const answerQuestion = vi.fn(
+      (_requestId: string, _directory: string, _answers: unknown[], signal: AbortSignal) => {
+        latestSignal = signal;
+        return new Promise<"confirmed">(() => undefined); // hangs forever
+      },
+    );
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      answerTimeoutMs: 50,
+      socketFactory: () => socket,
+      answerQuestion,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers: [["Postgres"]],
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(latestSignal?.aborted).toBe(true);
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "question_answer_result",
+      commandId: answerCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "result_unknown",
+    });
+  });
+
+  it("never leaks answer bodies into the result frame", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const answerQuestion = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      answerQuestion,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers: [["SECRET-ANSWER"]],
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const frames = socket.sent.map((frame) => JSON.parse(frame));
+    const result = frames.find((frame) => frame.type === "question_answer_result");
+    expect(result).toEqual({
+      type: "question_answer_result",
+      commandId: answerCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "confirmed",
+    });
+    expect(JSON.stringify(frames)).not.toContain("SECRET-ANSWER");
+  });
 });

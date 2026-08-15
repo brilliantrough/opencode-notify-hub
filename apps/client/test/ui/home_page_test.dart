@@ -1,12 +1,20 @@
+import 'dart:async';
+
+import 'package:client/auth/auth_controller.dart';
+import 'package:client/auth/auth_state.dart';
+import 'package:client/pending/pending_answer.dart';
 import 'package:client/pending/pending_controller.dart';
 import 'package:client/pending/pending_interaction.dart';
 import 'package:client/realtime/active_sessions.dart';
 import 'package:client/realtime/instance_presence.dart';
 import 'package:client/realtime/ws_client.dart';
 import 'package:client/ui/home_page.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fake_auth_controller.dart';
 
 class FakeActiveSessions extends ActiveSessions {
   FakeActiveSessions(this._initial);
@@ -33,6 +41,83 @@ class FakePendingInteractions extends PendingInteractionsController {
 
   @override
   Future<List<PendingInteraction>> build() async => _initial;
+}
+
+class AnswerScript {
+  int calls = 0;
+  Completer<QuestionAnswerResult>? gate;
+  QuestionAnswerOutcome outcome = QuestionAnswerOutcome.confirmed;
+  Object? throwError;
+
+  Future<QuestionAnswerResult> call({
+    required String instanceId,
+    required String requestId,
+    required String commandId,
+    required List<List<String>> answers,
+  }) async {
+    calls++;
+    final current = gate;
+    if (current != null) {
+      return current.future;
+    }
+    final error = throwError;
+    if (error != null) {
+      throw error;
+    }
+    return QuestionAnswerResult(commandId: commandId, outcome: outcome);
+  }
+}
+
+Future<void> pumpAnswerableHome(
+  WidgetTester tester, {
+  required List<PendingInteraction> Function() loader,
+  required AnswerScript script,
+}) async {
+  tester.view.physicalSize = const Size(1200, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        wsStatusProvider.overrideWith(
+          (ref) => Stream.value(WsStatus.connected),
+        ),
+        activeSessionsProvider.overrideWith(() => FakeActiveSessions(const {})),
+        instancePresencesProvider.overrideWith(
+          () => FakeInstancePresences(const {}),
+        ),
+        authControllerProvider.overrideWith(
+          () => FakeAuthController(
+            const Authenticated(
+              accessToken: 'token',
+              email: 'user@example.com',
+            ),
+          ),
+        ),
+        pendingInteractionLoaderProvider.overrideWithValue(() async {
+          return loader();
+        }),
+        questionAnswerSenderProvider.overrideWithValue(script.call),
+        commandIdGeneratorProvider.overrideWithValue(() => 'cmd-1'),
+      ],
+      child: const MaterialApp(home: HomePage()),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+const tileKey = ValueKey(
+  'interaction-6f0d91b0-93e4-43a9-9449-0bed03e651aa-question-1',
+);
+
+Future<void> answerAndSubmit(WidgetTester tester) async {
+  await tester.tap(find.byKey(tileKey));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('question-0-option-0')));
+  await tester.pump();
+  await tester.tap(find.byKey(const ValueKey('submit-answer')));
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -222,5 +307,96 @@ void main() {
     expect(find.text('版本不兼容'), findsOneWidget);
     expect(find.text('离线'), findsOneWidget);
     expect(find.byKey(const ValueKey('instance-one')), findsOneWidget);
+  });
+
+  testWidgets(
+    'the request leaves the workbench only after OpenCode confirms it',
+    (tester) async {
+      final script = AnswerScript()..gate = Completer<QuestionAnswerResult>();
+      var confirmed = false;
+      final pending = pendingQuestion(
+        'question-1',
+        DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+      await pumpAnswerableHome(
+        tester,
+        loader: () => confirmed ? const <PendingInteraction>[] : [pending],
+        script: script,
+      );
+      expect(find.byKey(tileKey), findsOneWidget);
+
+      await tester.tap(find.byKey(tileKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('question-0-option-0')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('submit-answer')));
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('answer-submitting')), findsOneWidget);
+      expect(script.calls, 1);
+
+      confirmed = true;
+      script.gate!.complete(
+        const QuestionAnswerResult(
+          commandId: 'cmd-1',
+          outcome: QuestionAnswerOutcome.confirmed,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(tileKey), findsNothing);
+      expect(find.text('待处理请求'), findsNothing);
+    },
+  );
+
+  for (final scenario in [
+    (name: 'stale', outcome: QuestionAnswerOutcome.stale),
+    (name: 'upstream error', outcome: QuestionAnswerOutcome.upstreamError),
+    (name: 'result unknown', outcome: QuestionAnswerOutcome.resultUnknown),
+  ]) {
+    testWidgets('a ${scenario.name} outcome keeps the pending tile', (
+      tester,
+    ) async {
+      final script = AnswerScript()..outcome = scenario.outcome;
+      final pending = pendingQuestion(
+        'question-1',
+        DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+      await pumpAnswerableHome(tester, loader: () => [pending], script: script);
+
+      await answerAndSubmit(tester);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(tileKey), findsOneWidget);
+      expect(find.text('待处理请求'), findsOneWidget);
+    });
+  }
+
+  testWidgets('a 4xx gateway rejection keeps the pending tile', (tester) async {
+    final script = AnswerScript()
+      ..throwError = DioException(
+        requestOptions: RequestOptions(
+          path: '/v1/pending-interactions/i/questions/q/answer',
+        ),
+        response: Response(
+          requestOptions: RequestOptions(path: ''),
+          statusCode: 409,
+        ),
+        type: DioExceptionType.badResponse,
+      );
+    final pending = pendingQuestion(
+      'question-1',
+      DateTime.now().subtract(const Duration(minutes: 10)),
+    );
+    await pumpAnswerableHome(tester, loader: () => [pending], script: script);
+
+    await answerAndSubmit(tester);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(tileKey), findsOneWidget);
   });
 }

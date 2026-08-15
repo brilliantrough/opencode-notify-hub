@@ -33,6 +33,7 @@ Examples use `https://notify.example.com`.
 | `DELETE /v1/ingest-keys/{id}` | Revoke an ingest key |
 | `POST /v1/events` | Accept one signed notification event (`202`) |
 | `GET /v1/pending-interactions` | Collect the user's authoritative OpenCode pending snapshot |
+| `POST /v1/pending-interactions/{instanceId}/questions/{requestId}/answer` | Route one ordered question answer set to the owning instance |
 | `GET /v1/ws` | Upgrade to the authenticated realtime WebSocket |
 | `GET /v1/plugin/ws` | Upgrade to the Plugin control WebSocket |
 
@@ -110,6 +111,21 @@ Each upgraded Plugin connects to `/v1/plugin/ws`, registers its OpenCode
 instance, and handles `pending_snapshot_request` frames. Its response carries
 the complete question or permission context from its own instance-specific
 OpenCode Server. The OpenAPI document defines the exact discriminated unions.
+
+### Question answers
+
+`POST /v1/pending-interactions/{instanceId}/questions/{requestId}/answer`
+carries a client-generated UUID `commandId` and `answers: string[][]` — one
+non-empty entry per upstream question, in exact order. The command is routed
+only to the owning account's connected `controllable` instance whose pending
+projection contains that question; unknown or foreign instances answer `404`,
+stale or wrong-kind targets answer `409`, and a second command for the same
+request while one is in flight answers `409`. The Plugin maps the command to
+the OpenCode V2 question reply API and returns `confirmed`, `stale`, or
+`upstream_error`. A gateway timeout or disconnect returns `result_unknown`,
+which never means failure: the client must reconcile against a fresh snapshot
+instead of blindly resubmitting. Answers transit memory only and are redacted
+from logs.
 
 ## Regeneration
 

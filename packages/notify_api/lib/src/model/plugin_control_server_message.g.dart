@@ -46,6 +46,9 @@ _$pluginControlServerMessageTypeEnum_registration =
 const PluginControlServerMessageTypeEnum
 _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest =
     const PluginControlServerMessageTypeEnum._('pendingSnapshotRequest');
+const PluginControlServerMessageTypeEnum
+_$pluginControlServerMessageTypeEnum_questionAnswerCommand =
+    const PluginControlServerMessageTypeEnum._('questionAnswerCommand');
 
 PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
   String name,
@@ -55,6 +58,8 @@ PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
       return _$pluginControlServerMessageTypeEnum_registration;
     case 'pendingSnapshotRequest':
       return _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest;
+    case 'questionAnswerCommand':
+      return _$pluginControlServerMessageTypeEnum_questionAnswerCommand;
     default:
       throw ArgumentError(name);
   }
@@ -66,6 +71,7 @@ _$pluginControlServerMessageTypeEnumValues =
       const <PluginControlServerMessageTypeEnum>[
         _$pluginControlServerMessageTypeEnum_registration,
         _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest,
+        _$pluginControlServerMessageTypeEnum_questionAnswerCommand,
       ],
     );
 
@@ -118,10 +124,12 @@ class _$PluginControlServerMessageTypeEnumSerializer
   static const Map<String, Object> _toWire = const <String, Object>{
     'registration': 'registration',
     'pendingSnapshotRequest': 'pending_snapshot_request',
+    'questionAnswerCommand': 'question_answer_command',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'registration': 'registration',
     'pending_snapshot_request': 'pendingSnapshotRequest',
+    'question_answer_command': 'questionAnswerCommand',
   };
 
   @override

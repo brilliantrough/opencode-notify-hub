@@ -1,7 +1,18 @@
-import { pendingSnapshotSchema, type PendingSnapshot } from "@notify/contracts";
+import {
+  answerQuestionBodySchema,
+  pendingSnapshotSchema,
+  questionCommandResultSchema,
+  type AnswerQuestionBody,
+  type PendingSnapshot,
+  type QuestionCommandResult,
+} from "@notify/contracts";
 import type { FastifyPluginAsync } from "fastify";
 
-import type { InstanceRegistry } from "./instance-registry.js";
+import { ErrorCodes, errorBody } from "../../lib/errors.js";
+import type {
+  AnswerQuestionOutcome,
+  InstanceRegistry,
+} from "./instance-registry.js";
 
 /**
  * `GET /v1/pending-interactions`: owner-scoped read-only snapshot. The route
@@ -11,6 +22,16 @@ import type { InstanceRegistry } from "./instance-registry.js";
  * instances are never contacted; a partial 200 snapshot is returned when an
  * instance times out. Interaction payloads are relayed through memory only —
  * never persisted and never logged.
+ *
+ * `POST /v1/pending-interactions/:instanceId/questions/:requestId/answer`:
+ * submit one complete ordered answer set for a pending question owned by the
+ * authenticated account. The registry routes the command to the exact Plugin
+ * instance and awaits its terminal outcome; the 200 response carries the
+ * client-generated `commandId` and confirms gateway routing, not that
+ * OpenCode applied the answers. Unknown/foreign/non-actionable targets and
+ * never-projected request ids answer a uniform 404; stale requests and the
+ * wrong interaction kind answer 409. Answer bodies are redacted from logs and
+ * never persisted.
  */
 export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPluginAsync {
   return async (app) => {
@@ -25,6 +46,38 @@ export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPl
           request.userId as string,
         );
         return reply.status(200).send(snapshot satisfies PendingSnapshot);
+      },
+    );
+
+    app.post<{ Params: { instanceId: string; requestId: string } }>(
+      "/v1/pending-interactions/:instanceId/questions/:requestId/answer",
+      {
+        preHandler: app.authenticate,
+        schema: {
+          body: answerQuestionBodySchema,
+          response: { 200: questionCommandResultSchema },
+        },
+      },
+      async (request, reply) => {
+        const body = request.body as AnswerQuestionBody;
+        const outcome: AnswerQuestionOutcome = await registry.answerQuestion(
+          request.userId as string,
+          request.params.instanceId,
+          request.params.requestId,
+          body.commandId,
+          body.answers,
+        );
+        if (!outcome.ok) {
+          if (outcome.error.code === "conflict") {
+            return reply
+              .status(409)
+              .send(errorBody(ErrorCodes.CONFLICT, "Question request is stale or not pending"));
+          }
+          return reply
+            .status(404)
+            .send(errorBody(ErrorCodes.NOT_FOUND, "Question request not found"));
+        }
+        return reply.status(200).send(outcome.result satisfies QuestionCommandResult);
       },
     );
   };

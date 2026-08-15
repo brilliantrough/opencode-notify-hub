@@ -8,6 +8,7 @@ part of 'serializers.dart';
 
 Serializers _$serializers =
     (Serializers().toBuilder()
+          ..add(AnswerQuestionBody.serializer)
           ..add(CreateIngestKeyBody.serializer)
           ..add(CreateIngestKeyResponse.serializer)
           ..add(Device.serializer)
@@ -69,13 +70,20 @@ Serializers _$serializers =
           ..add(PluginControlClientMessageOneOf.serializer)
           ..add(PluginControlClientMessageOneOf1.serializer)
           ..add(PluginControlClientMessageOneOf1TypeEnum.serializer)
+          ..add(PluginControlClientMessageOneOf2.serializer)
+          ..add(PluginControlClientMessageOneOf2StatusEnum.serializer)
+          ..add(PluginControlClientMessageOneOf2TypeEnum.serializer)
           ..add(PluginControlClientMessageOneOfTypeEnum.serializer)
           ..add(PluginControlServerMessage.serializer)
           ..add(PluginControlServerMessageOneOf.serializer)
           ..add(PluginControlServerMessageOneOf1.serializer)
           ..add(PluginControlServerMessageOneOf1TypeEnum.serializer)
+          ..add(PluginControlServerMessageOneOf2.serializer)
+          ..add(PluginControlServerMessageOneOf2TypeEnum.serializer)
           ..add(PluginControlServerMessageOneOfStateEnum.serializer)
           ..add(PluginControlServerMessageOneOfTypeEnum.serializer)
+          ..add(QuestionCommandResult.serializer)
+          ..add(QuestionCommandResultStatusEnum.serializer)
           ..add(RefreshBody.serializer)
           ..add(RegisterBody.serializer)
           ..add(RegisterDeviceBody.serializer)
@@ -91,6 +99,18 @@ Serializers _$serializers =
           ..add(WsServerMessageOneOf1TypeEnum.serializer)
           ..add(WsServerMessageOneOfEvent.serializer)
           ..add(WsServerMessageOneOfTypeEnum.serializer)
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [
+              const FullType(BuiltList, const [const FullType(String)]),
+            ]),
+            () => ListBuilder<BuiltList<String>>(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [
+              const FullType(BuiltList, const [const FullType(String)]),
+            ]),
+            () => ListBuilder<BuiltList<String>>(),
+          )
           ..addBuilderFactory(
             const FullType(BuiltList, const [
               const FullType(NotifyEventOneOf1PayloadOneOfQuestionsInner),

@@ -7,6 +7,8 @@ import {
   type PendingSnapshot,
   type PluginControlClientMessage,
   type PluginControlServerMessage,
+  type QuestionAnswers,
+  type QuestionCommandResult,
   type WsServerMessage,
 } from "@notify/contracts";
 
@@ -29,6 +31,21 @@ export const CONTROL_MAX_FRAME_BYTES = 1024 * 1024;
  * {@link InstanceRegistryDeps.snapshotTimeoutMs}; tests shrink it.
  */
 export const PENDING_SNAPSHOT_TIMEOUT_MS = 2500;
+
+/**
+ * Default bounded wait for the terminal `question_answer_result` after the
+ * gateway routes one answer command (issue #9). Injectable through
+ * {@link InstanceRegistryDeps.answerTimeoutMs}; tests shrink it. On timeout
+ * the command settles as result_unknown, never an error.
+ */
+export const ANSWER_TIMEOUT_MS = 10_000;
+
+/**
+ * Ceiling on remembered stale request ids per instance. Stale ids only
+ * distinguish a 409 from a 404 for a short window; the bound keeps the
+ * per-instance memory constant regardless of request churn.
+ */
+export const MAX_STALE_REQUEST_IDS = 256;
 
 const READY_OPEN = 1;
 const SUPPORTED_OPENCODE_VERSION = "1.18.18";
@@ -58,6 +75,20 @@ interface InstanceRecord {
   state: InstancePresence["state"];
   lastSeenAt: string;
   connection?: ControlConnection;
+  /**
+   * Issue #9: requestId -> interaction kind projection of the last accepted
+   * `pending_snapshot_response` (request ids only, never bodies). Answering
+   * is authorized only against this projection, so a Plugin cannot make a
+   * request answerable that it never reported pending.
+   */
+  readonly projectedRequests: Map<string, PendingInteraction["kind"]>;
+  /**
+   * Request ids that were projected but are no longer pending (removed by a
+   * newer snapshot or by a confirmed answer command). Answering one of these
+   * is a stale conflict (409), distinct from an id that was never projected
+   * (404). Bounded by {@link MAX_STALE_REQUEST_IDS}.
+   */
+  readonly staleRequests: Map<string, number>;
 }
 
 /** One outstanding `pending_snapshot_request` awaiting its response. */
@@ -70,13 +101,43 @@ interface PendingSnapshotRequest {
   readonly resolve: (interactions: PendingInteraction[]) => void;
 }
 
+/** One outstanding `question_answer_command` awaiting its terminal result. */
+interface PendingAnswerCommand {
+  readonly connection: ControlConnection;
+  readonly requestId: string;
+  readonly commandId: string;
+  readonly timer: NodeJS.Timeout;
+  readonly resolve: (result: QuestionCommandResult) => void;
+}
+
+type QuestionAnswerResultMessage = Extract<
+  PluginControlClientMessage,
+  { type: "question_answer_result" }
+>;
+
 export interface InstanceRegistryDeps {
   clock: Clock;
   publish(userId: string, message: WsServerMessage): void;
   pingIntervalMs?: number;
   /** Defaults to {@link PENDING_SNAPSHOT_TIMEOUT_MS}; tests inject a short wait. */
   snapshotTimeoutMs?: number;
+  /** Defaults to {@link ANSWER_TIMEOUT_MS}; tests inject a short wait. */
+  answerTimeoutMs?: number;
 }
+
+/**
+ * A rejected answer command. `not_found` covers unknown instances, foreign
+ * accounts, offline/conflicting/incompatible records, and request ids that
+ * were never projected; `conflict` covers stale requests and the wrong
+ * interaction kind. The route maps them to the uniform 404/409 responses.
+ */
+export type AnswerQuestionError =
+  | { readonly code: "not_found" }
+  | { readonly code: "conflict" };
+
+export type AnswerQuestionOutcome =
+  | { readonly ok: false; readonly error: AnswerQuestionError }
+  | { readonly ok: true; readonly result: QuestionCommandResult };
 
 /**
  * In-memory owner-scoped projection of Plugin control connections. Owns
@@ -86,18 +147,24 @@ export interface InstanceRegistryDeps {
  * one user are ever queried, responses are accepted only after registration
  * and only for the exact requestId+connection+instanceId that was issued,
  * and every query settles after {@link PENDING_SNAPSHOT_TIMEOUT_MS} (partial
- * snapshot on timeouts). Late or unknown responses are ignored; malformed
- * frames and registration violations still close the control connection.
+ * snapshot on timeouts). Issue #9 adds owner-scoped answer routing: a command
+ * is accepted only for a projected pending question of a connected
+ * `controllable` own record, is correlated by connection+commandId, and
+ * settles under {@link ANSWER_TIMEOUT_MS}. Late or unknown responses and
+ * results are ignored; malformed frames and registration violations still
+ * close the control connection.
  */
 export class InstanceRegistry {
   private readonly records = new Map<string, InstanceRecord>();
   private readonly ownership = new Map<string, string>();
   private readonly connections = new Set<ControlConnection>();
   private readonly pendingRequests = new Map<string, PendingSnapshotRequest>();
+  private readonly pendingAnswerCommands = new Map<string, PendingAnswerCommand>();
   private readonly clock: Clock;
   private readonly publish: InstanceRegistryDeps["publish"];
   private readonly pingIntervalMs: number;
   private readonly snapshotTimeoutMs: number;
+  private readonly answerTimeoutMs: number;
   private nextSequence = 0;
   private nextConnectionUid = 0;
 
@@ -106,6 +173,7 @@ export class InstanceRegistry {
     this.publish = deps.publish;
     this.pingIntervalMs = deps.pingIntervalMs ?? WS_PING_INTERVAL_MS;
     this.snapshotTimeoutMs = deps.snapshotTimeoutMs ?? PENDING_SNAPSHOT_TIMEOUT_MS;
+    this.answerTimeoutMs = deps.answerTimeoutMs ?? ANSWER_TIMEOUT_MS;
   }
 
   add(auth: VerifiedIngestKey, socket: RealtimeSocket): void {
@@ -180,6 +248,72 @@ export class InstanceRegistry {
     };
   }
 
+  /**
+   * Issue #9: route one client answer command to the owning Plugin instance
+   * and await its terminal result. Only a connected, `controllable` record
+   * of the authenticated user whose projection shows a pending `question`
+   * for `requestId` is actionable; unknown instances, foreign accounts,
+   * offline/conflicting/incompatible records, and request ids that were
+   * never projected answer the uniform `not_found`, while stale requests
+   * and the wrong interaction kind answer `conflict`. The command is
+   * correlated by connection+commandId and sent verbatim; it settles under
+   * {@link ANSWER_TIMEOUT_MS}, and a timeout or a disconnect resolves as
+   * result_unknown, never as an error.
+   */
+  async answerQuestion(
+    userId: string,
+    instanceId: string,
+    requestId: string,
+    commandId: string,
+    answers: QuestionAnswers,
+  ): Promise<AnswerQuestionOutcome> {
+    const record = this.records.get(this.recordKey(userId, instanceId));
+    if (
+      record === undefined ||
+      record.userId !== userId ||
+      record.state !== "controllable" ||
+      record.connection === undefined ||
+      record.connection.socket.readyState !== READY_OPEN
+    ) {
+      return { ok: false, error: { code: "not_found" } };
+    }
+    const projected = record.projectedRequests.get(requestId);
+    if (projected === undefined) {
+      return record.staleRequests.has(requestId)
+        ? { ok: false, error: { code: "conflict" } }
+        : { ok: false, error: { code: "not_found" } };
+    }
+    if (projected !== "question") {
+      return { ok: false, error: { code: "conflict" } };
+    }
+
+    const connection = record.connection;
+    for (const pending of this.pendingAnswerCommands.values()) {
+      if (
+        pending.connection === connection &&
+        (pending.requestId === requestId || pending.commandId === commandId)
+      ) {
+        return { ok: false, error: { code: "conflict" } };
+      }
+    }
+    const result = await new Promise<QuestionCommandResult>((resolve) => {
+      const key = this.commandKey(connection, commandId);
+      const entry: PendingAnswerCommand = {
+        connection,
+        requestId,
+        commandId,
+        timer: setTimeout(() => {
+          this.pendingAnswerCommands.delete(key);
+          resolve({ commandId, status: "result_unknown" });
+        }, this.answerTimeoutMs),
+        resolve,
+      };
+      this.pendingAnswerCommands.set(key, entry);
+      this.send(connection, { type: "question_answer_command", commandId, requestId, answers });
+    });
+    return { ok: true, result };
+  }
+
   revokeKey(ingestKeyId: string): void {
     for (const connection of [...this.connections]) {
       if (connection.auth.id !== ingestKeyId) {
@@ -210,6 +344,12 @@ export class InstanceRegistry {
       // Validated snapshot answers are not registration traffic: unknown,
       // late, or foreign responses are ignored, never a connection error.
       this.handleSnapshotResponse(connection, message);
+      return;
+    }
+    if (message.type === "question_answer_result") {
+      // Validated command results are not registration traffic: unknown,
+      // late, or foreign results are ignored, never a connection error.
+      this.handleQuestionAnswerResult(connection, message);
       return;
     }
     if (connection.instanceId !== undefined) {
@@ -259,9 +399,89 @@ export class InstanceRegistry {
     }
     this.pendingRequests.delete(key);
     clearTimeout(pending.timer);
+    const record = this.records.get(
+      this.recordKey(connection.auth.userId, connection.instanceId),
+    );
+    if (record?.connection === connection) {
+      // The projection always tracks the latest authoritative pending set,
+      // so request ids that disappeared were resolved upstream.
+      this.applyProjection(record, message.interactions);
+    }
     pending.resolve(
       message.interactions.map((interaction) => this.enrich(interaction, pending.registration)),
     );
+  }
+
+  private handleQuestionAnswerResult(
+    connection: ControlConnection,
+    message: QuestionAnswerResultMessage,
+  ): void {
+    if (connection.instanceId === undefined) {
+      // A result before registration cannot be correlated to anything.
+      return;
+    }
+    if (message.instanceId !== connection.instanceId) {
+      // The frame names an instance this connection does not own: ignore.
+      return;
+    }
+    const key = this.commandKey(connection, message.commandId);
+    const pending = this.pendingAnswerCommands.get(key);
+    if (pending === undefined) {
+      // Unknown, already-settled (late), or duplicate commandId: ignore.
+      return;
+    }
+    this.pendingAnswerCommands.delete(key);
+    clearTimeout(pending.timer);
+    if (message.status === "confirmed") {
+      const record = this.records.get(
+        this.recordKey(connection.auth.userId, connection.instanceId),
+      );
+      if (record?.connection === connection) {
+        // A confirmed command resolves the request: drop it from the
+        // projection and remember it as stale, so concurrent clients that
+        // race the same request get a 409 instead of a second command.
+        record.projectedRequests.delete(pending.requestId);
+        this.rememberStale(record, pending.requestId);
+      }
+    }
+    pending.resolve({ commandId: pending.commandId, status: message.status });
+  }
+
+  /**
+   * Replace the record's requestId -> kind projection with the interactions
+   * of one accepted snapshot. Ids that are no longer present were resolved
+   * upstream and become stale (a later answer is a 409 conflict), so the
+   * projection always mirrors the most recent authoritative pending set.
+   */
+  private applyProjection(
+    record: InstanceRecord,
+    interactions: PendingInteraction[],
+  ): void {
+    const incoming = new Map<string, PendingInteraction["kind"]>();
+    for (const interaction of interactions) {
+      incoming.set(interaction.requestId, interaction.kind);
+    }
+    for (const requestId of record.projectedRequests.keys()) {
+      if (!incoming.has(requestId)) {
+        this.rememberStale(record, requestId);
+      }
+    }
+    record.projectedRequests.clear();
+    for (const [requestId, kind] of incoming) {
+      record.projectedRequests.set(requestId, kind);
+    }
+  }
+
+  /** Remember a request id that stopped being pending, bounded in size. */
+  private rememberStale(record: InstanceRecord, requestId: string): void {
+    record.staleRequests.set(requestId, this.clock.nowMs());
+    while (record.staleRequests.size > MAX_STALE_REQUEST_IDS) {
+      const oldest = record.staleRequests.keys().next().value;
+      if (oldest === undefined) {
+        return;
+      }
+      record.staleRequests.delete(oldest);
+    }
   }
 
   /**
@@ -316,6 +536,8 @@ export class InstanceRegistry {
       state,
       lastSeenAt: this.clock.now().toISOString(),
       connection,
+      projectedRequests: new Map(),
+      staleRequests: new Map(),
     };
     this.records.set(recordKey, record);
     this.send(connection, {
@@ -336,6 +558,13 @@ export class InstanceRegistry {
         this.pendingRequests.delete(key);
         clearTimeout(pending.timer);
         pending.resolve([]);
+      }
+    }
+    for (const [key, pending] of this.pendingAnswerCommands) {
+      if (pending.connection === connection) {
+        this.pendingAnswerCommands.delete(key);
+        clearTimeout(pending.timer);
+        pending.resolve({ commandId: pending.commandId, status: "result_unknown" });
       }
     }
     const instanceId = connection.instanceId;
@@ -446,6 +675,10 @@ export class InstanceRegistry {
 
   private pendingKey(connection: ControlConnection, requestId: string): string {
     return `${connection.uid}\u0000${requestId}`;
+  }
+
+  private commandKey(connection: ControlConnection, commandId: string): string {
+    return `${connection.uid}\u0000${commandId}`;
   }
 
   private pruneOfflineOwnership(

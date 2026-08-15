@@ -43,8 +43,9 @@ import {
 import { normalizeEvent, type NormalizedEvent } from "./events.js";
 import { createSafeLogger, type SafeLogger } from "./log.js";
 import { MessageCache } from "./message-cache.js";
-import { PendingAdapter } from "./pending-adapter.js";
+import { PendingAdapter, type PendingListClient } from "./pending-adapter.js";
 import { QueuePump } from "./pump.js";
+import { QuestionReplyAdapter, type QuestionReplyClient } from "./question-reply-adapter.js";
 import { GatewaySender } from "./sender.js";
 import {
   createSdkLookup,
@@ -153,11 +154,21 @@ export function createSessionNotifyHooks(
       capacity: config.queueCapacity,
     });
   const directory = source.directory;
-  // Lazy pending-interaction adapter: the V2 SDK client and adapter are only
-  // constructed on the first snapshot request, long after the plugin
-  // initialized, so no self-HTTP happens during startup. The instance is
-  // reused across requests so first-observed timestamps stay stable.
+  // Lazy pending/answer adapters: the V2 SDK client and both adapters are
+  // only constructed on the first snapshot request or answer command, long
+  // after the plugin initialized, so no self-HTTP happens during startup.
+  // One client instance is shared by both adapters and reused across
+  // requests so first-observed timestamps stay stable.
+  let v2: (PendingListClient & QuestionReplyClient) | null = null;
+  const v2Client = (): PendingListClient & QuestionReplyClient => {
+    v2 ??= createOpencodeClient({
+      baseUrl: input.serverUrl.toString(),
+      directory,
+    });
+    return v2;
+  };
   let pending: PendingAdapter | null = null;
+  let answerer: QuestionReplyAdapter | null = null;
   const control =
     deps.control ??
     (input.serverUrl instanceof URL
@@ -186,13 +197,14 @@ export function createSessionNotifyHooks(
           },
           listPendingInteractions: (pendingSource, signal) => {
             pending ??= new PendingAdapter({
-              client: createOpencodeClient({
-                baseUrl: input.serverUrl.toString(),
-                directory,
-              }),
+              client: v2Client(),
               titleForSession: (sessionID) => registry.title(sessionID),
             });
             return pending.list(pendingSource, signal);
+          },
+          answerQuestion: (requestId, answerDirectory, answers, signal) => {
+            answerer ??= new QuestionReplyAdapter({ client: v2Client() });
+            return answerer.reply(requestId, answerDirectory, answers, signal);
           },
         })
       : null);

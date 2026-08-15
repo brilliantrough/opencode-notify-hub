@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:built_collection/built_collection.dart';
 import 'package:notify_api/notify_api.dart';
 import 'package:test/test.dart';
 
@@ -356,5 +357,63 @@ void main() {
       snapshot,
     );
     expect(jsonDecode(jsonEncode(out)), snapshotJson);
+  });
+
+  group('Question answer command', () {
+    test('AnswerQuestionBody round-trips the ordered answer set', () {
+      final body = AnswerQuestionBody((b) {
+        b.commandId = 'cmd-42';
+        b.answers.replace([
+          BuiltList<String>(['PostgreSQL']),
+          BuiltList<String>(['Migrate', 'PostgreSQL', 'Use read replicas']),
+        ]);
+      });
+
+      final out = standardSerializers.serializeWith(
+        AnswerQuestionBody.serializer,
+        body,
+      );
+      expect(jsonDecode(jsonEncode(out)), {
+        'answers': [
+          ['PostgreSQL'],
+          ['Migrate', 'PostgreSQL', 'Use read replicas'],
+        ],
+        'commandId': 'cmd-42',
+      });
+
+      final restored = standardSerializers.deserializeWith(
+        AnswerQuestionBody.serializer,
+        out,
+      )!;
+      expect(restored.commandId, 'cmd-42');
+      expect(restored.answers.map((answer) => answer.toList()), [
+        ['PostgreSQL'],
+        ['Migrate', 'PostgreSQL', 'Use read replicas'],
+      ]);
+    });
+
+    test('QuestionCommandResult round-trips every terminal status', () {
+      const statuses = [
+        (QuestionCommandResultStatusEnum.confirmed, 'confirmed'),
+        (QuestionCommandResultStatusEnum.stale, 'stale'),
+        (QuestionCommandResultStatusEnum.upstreamError, 'upstream_error'),
+        (QuestionCommandResultStatusEnum.resultUnknown, 'result_unknown'),
+      ];
+      for (final (status, wire) in statuses) {
+        final json = {'commandId': 'cmd-42', 'status': wire};
+        final result = standardSerializers.deserializeWith(
+          QuestionCommandResult.serializer,
+          json,
+        )!;
+        expect(result.commandId, 'cmd-42');
+        expect(result.status, status);
+
+        final out = standardSerializers.serializeWith(
+          QuestionCommandResult.serializer,
+          result,
+        );
+        expect(jsonDecode(jsonEncode(out)), json);
+      }
+    });
   });
 }

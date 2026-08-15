@@ -14,6 +14,7 @@ import 'package:built_value/iso_8601_date_time_serializer.dart';
 import 'package:notify_api/src/date_serializer.dart';
 import 'package:notify_api/src/model/date.dart';
 
+import 'package:notify_api/src/model/answer_question_body.dart';
 import 'package:notify_api/src/model/create_ingest_key_body.dart';
 import 'package:notify_api/src/model/create_ingest_key_response.dart';
 import 'package:notify_api/src/model/device.dart';
@@ -56,9 +57,12 @@ import 'package:notify_api/src/model/pending_snapshot_interactions_inner.dart';
 import 'package:notify_api/src/model/plugin_control_client_message.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of1.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of2.dart';
 import 'package:notify_api/src/model/plugin_control_server_message.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of2.dart';
+import 'package:notify_api/src/model/question_command_result.dart';
 import 'package:notify_api/src/model/refresh_body.dart';
 import 'package:notify_api/src/model/register_body.dart';
 import 'package:notify_api/src/model/register_device_body.dart';
@@ -74,6 +78,7 @@ import 'package:notify_api/src/model/ws_server_message_one_of_event.dart';
 part 'serializers.g.dart';
 
 @SerializersFor([
+  AnswerQuestionBody,
   CreateIngestKeyBody,
   CreateIngestKeyResponse,
   Device,
@@ -116,9 +121,12 @@ part 'serializers.g.dart';
   PluginControlClientMessage,
   PluginControlClientMessageOneOf,
   PluginControlClientMessageOneOf1,
+  PluginControlClientMessageOneOf2,
   PluginControlServerMessage,
   PluginControlServerMessageOneOf,
   PluginControlServerMessageOneOf1,
+  PluginControlServerMessageOneOf2,
+  QuestionCommandResult,
   RefreshBody,
   RegisterBody,
   RegisterDeviceBody,

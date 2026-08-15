@@ -3,6 +3,7 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:notify_api/src/model/plugin_control_server_message_one_of2.dart';
 import 'package:built_collection/built_collection.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
@@ -19,11 +20,13 @@ part 'plugin_control_server_message.g.dart';
 /// * [state]
 /// * [type]
 /// * [requestId]
+/// * [answers]
+/// * [commandId]
 @BuiltValue()
 abstract class PluginControlServerMessage
     implements
         Built<PluginControlServerMessage, PluginControlServerMessageBuilder> {
-  /// One Of [PluginControlServerMessageOneOf], [PluginControlServerMessageOneOf1]
+  /// One Of [PluginControlServerMessageOneOf], [PluginControlServerMessageOneOf1], [PluginControlServerMessageOneOf2]
   OneOf get oneOf;
 
   PluginControlServerMessage._();
@@ -81,6 +84,7 @@ class _$PluginControlServerMessageSerializer
     final targetType = const FullType(OneOf, [
       FullType(PluginControlServerMessageOneOf),
       FullType(PluginControlServerMessageOneOf1),
+      FullType(PluginControlServerMessageOneOf2),
     ]);
     oneOfDataSrc = serialized;
     result.oneOf =
@@ -119,6 +123,9 @@ class PluginControlServerMessageTypeEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'pending_snapshot_request')
   static const PluginControlServerMessageTypeEnum pendingSnapshotRequest =
       _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest;
+  @BuiltValueEnumConst(wireName: r'question_answer_command')
+  static const PluginControlServerMessageTypeEnum questionAnswerCommand =
+      _$pluginControlServerMessageTypeEnum_questionAnswerCommand;
 
   static Serializer<PluginControlServerMessageTypeEnum> get serializer =>
       _$pluginControlServerMessageTypeEnumSerializer;

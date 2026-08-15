@@ -209,6 +209,78 @@ class CapturingSocket {
   }
 }
 
+/** A fetch that records every call and lets the OpenCode reply path respond distinctly. */
+function makeAnswerFetch(options: {
+  reply?: () => Response | Promise<Response>;
+} = {}): { calls: FetchCall[]; fetchImpl: typeof fetch } {
+  const calls: FetchCall[] = [];
+  const fetchImpl = (async (url: unknown, init?: { headers?: unknown; body?: unknown }) => {
+    const requestUrl =
+      url !== null && typeof url === "object" && "url" in url
+        ? String((url as { url: unknown }).url)
+        : String(url);
+    calls.push({
+      url: requestUrl,
+      body: String(init?.body),
+      headers: init?.headers as Record<string, string>,
+    });
+    if (requestUrl.includes("/question/") && requestUrl.includes("/reply")) {
+      return (options.reply ?? defaultReply)();
+    }
+    return new Response("true", { status: 202 });
+  }) as unknown as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+/** OpenCode's real reply body is JSON `true`; keep the stub's content type honest. */
+function defaultReply(): Response {
+  return new Response("true", { status: 202, headers: { "Content-Type": "application/json" } });
+}
+
+/** Capture real ControlChannel sockets created through the global WebSocket stub. */
+function makeCapturedSockets(): { sockets: CapturingSocket[]; WebSocketClass: unknown } {
+  const sockets: CapturingSocket[] = [];
+  const WebSocketClass = class {
+    readonly delegate: CapturingSocket;
+    constructor() {
+      this.delegate = new CapturingSocket();
+      sockets.push(this.delegate);
+    }
+    addEventListener(event: string, listener: (event?: unknown) => void): void {
+      this.delegate.addEventListener(event, listener);
+    }
+    send(data: string): void {
+      this.delegate.send(data);
+    }
+    close(): void {
+      this.delegate.close();
+    }
+  };
+  return { sockets, WebSocketClass };
+}
+
+const ANSWER_COMMAND_ID = "7f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
+
+/** Drive an open control socket into registration and submit one answer command. */
+function driveAnswerCommand(socket: CapturingSocket): void {
+  socket.emit("open");
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "registration",
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      state: "controllable",
+    }),
+  });
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "question_answer_command",
+      commandId: ANSWER_COMMAND_ID,
+      requestId: "qst_req1",
+      answers: [["Postgres"], ["rust", "go", "Custom: polyglot"]],
+    }),
+  });
+}
+
 describe("SessionNotifyPlugin", () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: FIXED_NOW });
@@ -872,6 +944,138 @@ describe("SessionNotifyPlugin", () => {
         type: "pending_snapshot_response",
         requestId: "0e3f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b",
         instanceId: expect.any(String),
+      }),
+    );
+
+    await hooks.dispose?.();
+  });
+
+  it("defers the answer adapter and its V2 client until a question_answer_command arrives (no self-HTTP at init)", async () => {
+    const { calls, fetchImpl } = makeAnswerFetch();
+    vi.stubGlobal("fetch", fetchImpl);
+    const { sockets, WebSocketClass } = makeCapturedSockets();
+    vi.stubGlobal("WebSocket", WebSocketClass);
+    const { client } = makeClient();
+
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+
+    // Initialization made no self-HTTP: the answer adapter and its V2 SDK
+    // client are only constructed on the first answer command, never during
+    // plugin startup.
+    expect(sockets).toHaveLength(0);
+    expect(calls.filter((call) => call.url.startsWith("http://127.0.0.1"))).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(0); // deferred control start
+    expect(sockets).toHaveLength(1);
+    expect(calls.filter((call) => call.url.startsWith("http://127.0.0.1"))).toHaveLength(0);
+
+    driveAnswerCommand(sockets[0]);
+    await settle();
+
+    // The lazy adapter now replied to its own OpenCode instance (self-HTTP
+    // only after initialization) and reported confirmation to the gateway.
+    const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    expect(selfCalls.length).toBeGreaterThan(0);
+    const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: "question_answer_result",
+        commandId: ANSWER_COMMAND_ID,
+        instanceId: expect.any(String),
+        status: "confirmed",
+      }),
+    );
+
+    await hooks.dispose?.();
+  });
+
+  it("answers a question_answer_command through the real V2 SDK and never calls question.reject", async () => {
+    const { calls, fetchImpl } = makeAnswerFetch();
+    vi.stubGlobal("fetch", fetchImpl);
+    const { sockets, WebSocketClass } = makeCapturedSockets();
+    vi.stubGlobal("WebSocket", WebSocketClass);
+    const { client } = makeClient();
+
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+    await vi.advanceTimersByTimeAsync(0);
+    driveAnswerCommand(sockets[0]);
+    await settle();
+
+    const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    expect(selfCalls).toHaveLength(1);
+    expect(selfCalls[0].url).toContain("/question/qst_req1/reply");
+    expect(selfCalls[0].url).toContain("directory=");
+    // Navigating away or answering never invokes question.reject.
+    expect(calls.map((call) => call.url).every((url) => !url.includes("/reject"))).toBe(true);
+
+    const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
+    const result = frames.find((frame) => frame.type === "question_answer_result");
+    expect(result).toMatchObject({
+      commandId: ANSWER_COMMAND_ID,
+      instanceId: expect.any(String),
+      status: "confirmed",
+    });
+    // The result frame carries ids and status only, never answer bodies.
+    expect(JSON.stringify(frames)).not.toContain("Postgres");
+
+    await hooks.dispose?.();
+  });
+
+  it("reports upstream_error when OpenCode rejects the answer", async () => {
+    const { calls, fetchImpl } = makeAnswerFetch({
+      reply: () => new Response(JSON.stringify({ _tag: "InvalidRequestError" }), { status: 400 }),
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const { sockets, WebSocketClass } = makeCapturedSockets();
+    vi.stubGlobal("WebSocket", WebSocketClass);
+    const { client } = makeClient();
+
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+    await vi.advanceTimersByTimeAsync(0);
+    driveAnswerCommand(sockets[0]);
+    await settle();
+
+    const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    expect(selfCalls).toHaveLength(1);
+    expect(selfCalls[0].url).toContain("/question/qst_req1/reply");
+    const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: "question_answer_result",
+        commandId: ANSWER_COMMAND_ID,
+        status: "upstream_error",
+      }),
+    );
+
+    await hooks.dispose?.();
+  });
+
+  it("reports stale when OpenCode already resolved the request", async () => {
+    const { calls, fetchImpl } = makeAnswerFetch({
+      reply: () =>
+        new Response(JSON.stringify({ _tag: "QuestionNotFoundError", status: 404 }), {
+          status: 404,
+        }),
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const { sockets, WebSocketClass } = makeCapturedSockets();
+    vi.stubGlobal("WebSocket", WebSocketClass);
+    const { client } = makeClient();
+
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+    await vi.advanceTimersByTimeAsync(0);
+    driveAnswerCommand(sockets[0]);
+    await settle();
+
+    const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    expect(selfCalls).toHaveLength(1);
+    expect(selfCalls[0].url).toContain("/question/qst_req1/reply");
+    const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: "question_answer_result",
+        commandId: ANSWER_COMMAND_ID,
+        status: "stale",
       }),
     );
 

@@ -32,6 +32,7 @@ import {
   ingestKeyListResponseSchema,
 } from "../src/schemas/ingest-keys.js";
 import { pendingInteractionSchema, pendingSnapshotSchema } from "../src/schemas/pending.js";
+import { answerQuestionBodySchema, questionCommandResultSchema } from "../src/schemas/questions.js";
 import { wsServerMessageSchema } from "../src/schemas/ws.js";
 
 // The API version is sourced from the package metadata so the document can
@@ -63,6 +64,22 @@ const idPathParameter = (description: string) => ({
   description,
   schema: { type: "string", minLength: 1 },
 });
+
+const instanceIdPathParameter = {
+  name: "instanceId",
+  in: "path",
+  required: true,
+  description: "OpenCode instance identifier.",
+  schema: { type: "string", format: "uuid" },
+};
+
+const requestIdPathParameter = {
+  name: "requestId",
+  in: "path",
+  required: true,
+  description: "OpenCode question request identifier.",
+  schema: { type: "string", minLength: 1 },
+};
 
 const ingestSignatureParameters = [
   {
@@ -365,6 +382,35 @@ const document = {
         },
       },
     },
+    "/v1/pending-interactions/{instanceId}/questions/{requestId}/answer": {
+      post: {
+        operationId: "answerQuestion",
+        tags: ["pending"],
+        security: bearerSecurity,
+        summary: "Submit a complete answer set for a pending OpenCode question.",
+        description:
+          "Validates and submits one complete ordered answer set for a pending " +
+          "question owned by the authenticated account and routes the command to " +
+          "the exact Plugin instance. The response carries the client-generated " +
+          "commandId and the terminal outcome; it confirms gateway routing, not " +
+          "that OpenCode applied the answers. Leaving the request unanswered has " +
+          "no OpenCode side effect and never invokes question reject.",
+        parameters: [instanceIdPathParameter, requestIdPathParameter],
+        requestBody: jsonBody("AnswerQuestionBody"),
+        responses: {
+          "200": jsonResponse("Terminal command outcome.", "QuestionCommandResult"),
+          "400": errorResponse("Validation failed."),
+          "401": errorResponse("Missing or invalid access token."),
+          "404": errorResponse(
+            "Unknown instance for this user, or no matching pending question request.",
+          ),
+          "409": errorResponse(
+            "Command conflicts with existing state; for example the request is stale " +
+              "or a conflicting command is already in flight.",
+          ),
+        },
+      },
+    },
     "/v1/ws": {
       get: {
         operationId: "connectEvents",
@@ -453,6 +499,7 @@ const document = {
       },
     },
     schemas: {
+      AnswerQuestionBody: answerQuestionBodySchema,
       CreateIngestKeyBody: createIngestKeyBodySchema,
       CreateIngestKeyResponse: createIngestKeyResponseSchema,
       Device: deviceSchema,
@@ -470,6 +517,7 @@ const document = {
       PluginControlClientMessage: pluginControlClientMessageSchema,
       PluginControlServerMessage: pluginControlServerMessageSchema,
       PatchDeviceBody: patchDeviceBodySchema,
+      QuestionCommandResult: questionCommandResultSchema,
       RefreshBody: refreshBodySchema,
       RegisterBody: registerBodySchema,
       RegisterDeviceBody: registerDeviceBodySchema,

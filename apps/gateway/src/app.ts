@@ -68,9 +68,11 @@ export interface GatewayDeps {
   realtime?: { pingIntervalMs?: number };
   /**
    * Control-channel tuning; tests shrink the pending-snapshot timeout so
-   * partial-snapshot behavior is exercised without real waits.
+   * partial-snapshot behavior is exercised without real waits, and the
+   * answer-command timeout so result-unknown behavior is exercised without
+   * real waits.
    */
-  control?: { snapshotTimeoutMs?: number };
+  control?: { snapshotTimeoutMs?: number; answerTimeoutMs?: number };
 }
 
 /**
@@ -105,11 +107,14 @@ const LOG_REDACT_PATHS = [
   // covered by the deepest wildcard). `session` stays visible so operators
   // can correlate a log line to a session without the sensitive content.
   "body.interactions",
+  // Remote-unblock answer commands: the submitted answer content is as
+  // sensitive as the question it responds to and must never reach the logs.
+  "body.answers",
   // Catch-alls for the same fields logged at any other depth: one wildcard
   // per nesting level (fast-redact wildcards match exactly one segment), so
-  // credentials, tokens, codes, signatures, FCM tokens, event payloads, and
-  // interaction question/permission content are redacted however deep inside
-  // a logged object they end up.
+  // credentials, tokens, codes, signatures, FCM tokens, event payloads,
+  // interaction question/permission content, and answer content are redacted
+  // however deep inside a logged object they end up.
   ...[
     "password",
     "newPassword",
@@ -121,6 +126,7 @@ const LOG_REDACT_PATHS = [
     "signature",
     "payload",
     "interactions",
+    "answers",
     "question",
     "questions",
     "permission",
@@ -160,8 +166,12 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
       customOptions: {
         // The shared contract schemas declare additionalProperties: false;
         // Fastify's default removeAdditional would silently strip unknown
-        // fields instead of rejecting them, so turn it off.
+        // fields instead of rejecting them, so turn it off. The default
+        // coerceTypes would silently coerce wrong-typed body values (for
+        // example a numeric answer where the contract requires a string),
+        // so type coercion is disabled to match the strict contract.
         removeAdditional: false,
+        coerceTypes: false,
       },
     },
   });
@@ -260,6 +270,9 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
         : {}),
       ...(deps.control?.snapshotTimeoutMs !== undefined
         ? { snapshotTimeoutMs: deps.control.snapshotTimeoutMs }
+        : {}),
+      ...(deps.control?.answerTimeoutMs !== undefined
+        ? { answerTimeoutMs: deps.control.answerTimeoutMs }
         : {}),
     });
     await app.register(

@@ -27,6 +27,8 @@ import {
   validateWsServerMessage,
   validatePendingInteraction,
   validatePendingSnapshot,
+  validateAnswerQuestionBody,
+  validateQuestionCommandResult,
 } from "../src/index.js";
 
 const EVENT_ID = "3b8f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b";
@@ -890,6 +892,116 @@ describe("Plugin control WebSocket messages", () => {
       }),
     ).toBe(false);
   });
+
+  const answerCommandId = "7f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
+
+  it("accepts a question_answer_command server frame", () => {
+    expect(
+      validatePluginControlServerMessage({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers: [["Postgres"], ["rust", "go"]],
+      }),
+    ).toBe(true);
+  });
+
+  it("preserves the exact ordered answer shape on a question_answer_command", () => {
+    const answers = [
+      ["Postgres"],
+      ["rust", "go", "Custom: polyglot"],
+      ["Custom: as needed"],
+    ];
+    expect(
+      validatePluginControlServerMessage({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers,
+      }),
+    ).toBe(true);
+    expect(answers).toEqual([
+      ["Postgres"],
+      ["rust", "go", "Custom: polyglot"],
+      ["Custom: as needed"],
+    ]);
+  });
+
+  it("rejects a malformed question_answer_command frame", () => {
+    const command = {
+      type: "question_answer_command",
+      commandId: answerCommandId,
+      requestId: "req_1",
+      answers: [["Postgres"]],
+    };
+    expect(validatePluginControlServerMessage({ ...command, commandId: "cmd_1" })).toBe(false);
+    expect(validatePluginControlServerMessage({ ...command, requestId: "" })).toBe(false);
+    expect(validatePluginControlServerMessage({ ...command, answers: [] })).toBe(false);
+    expect(validatePluginControlServerMessage({ ...command, answers: [[]] })).toBe(false);
+    expect(validatePluginControlServerMessage({ ...command, answers: [[""]] })).toBe(false);
+    expect(validatePluginControlServerMessage({ ...command, answers: "Postgres" })).toBe(false);
+    expect(
+      validatePluginControlServerMessage({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+      }),
+    ).toBe(false);
+  });
+
+  it.each(["confirmed", "stale", "upstream_error", "result_unknown"])(
+    "accepts a question_answer_result client frame with status %s",
+    (status) => {
+      expect(
+        validatePluginControlClientMessage({
+          type: "question_answer_result",
+          commandId: answerCommandId,
+          instanceId: registration.instanceId,
+          status,
+        }),
+      ).toBe(true);
+    },
+  );
+
+  it("rejects a malformed question_answer_result frame", () => {
+    const result = {
+      type: "question_answer_result",
+      commandId: answerCommandId,
+      instanceId: registration.instanceId,
+      status: "confirmed",
+    };
+    expect(validatePluginControlClientMessage({ ...result, status: "pending" })).toBe(false);
+    expect(validatePluginControlClientMessage({ ...result, commandId: "cmd_1" })).toBe(false);
+    expect(validatePluginControlClientMessage({ ...result, instanceId: "runtime-1" })).toBe(false);
+    expect(
+      validatePluginControlClientMessage({
+        type: "question_answer_result",
+        commandId: answerCommandId,
+        instanceId: registration.instanceId,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects answer frames that mix union members", () => {
+    expect(
+      validatePluginControlServerMessage({
+        type: "question_answer_command",
+        commandId: answerCommandId,
+        requestId: "req_1",
+        answers: [["Postgres"]],
+        instanceId: registration.instanceId,
+      }),
+    ).toBe(false);
+    expect(
+      validatePluginControlClientMessage({
+        type: "question_answer_result",
+        commandId: answerCommandId,
+        instanceId: registration.instanceId,
+        status: "confirmed",
+        answers: [["Postgres"]],
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("PendingInteraction union", () => {
@@ -1209,6 +1321,122 @@ describe("PendingSnapshot", () => {
   });
 });
 
+describe("AnswerQuestion body", () => {
+  const commandId = "7f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
+
+  it("accepts a single-select answer with one label", () => {
+    expect(validateAnswerQuestionBody({ commandId, answers: [["Postgres"]] })).toBe(true);
+  });
+
+  it("accepts a multi-select answer with labels plus custom text", () => {
+    expect(
+      validateAnswerQuestionBody({ commandId, answers: [["rust", "go", "Custom: polyglot"]] }),
+    ).toBe(true);
+  });
+
+  it("preserves an exact ordered multi-question shape", () => {
+    const answers = [
+      ["Postgres"],
+      ["rust", "go"],
+      ["Custom: as needed"],
+    ];
+    const body = { commandId, answers };
+    expect(validateAnswerQuestionBody(body)).toBe(true);
+    // The schema validates read-only: the exact upstream question order and
+    // per-question groupings survive untouched.
+    expect(body.answers).toEqual(answers);
+    expect(body.answers.length).toBe(3);
+    expect(body.answers[1]).toEqual(["rust", "go"]);
+    expect(body.answers[2]).toEqual(["Custom: as needed"]);
+  });
+
+  it("accepts many questions without a total-size cap", () => {
+    expect(
+      validateAnswerQuestionBody({
+        commandId,
+        answers: Array.from({ length: 4096 }, () => ["answer"]),
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts complete answers beyond the 1 MiB transport limit", () => {
+    const large = "x".repeat(1_048_577);
+    expect(validateAnswerQuestionBody({ commandId, answers: [[large]] })).toBe(true);
+    expect(validateAnswerQuestionBody({ commandId, answers: [[large], ["y"]] })).toBe(true);
+  });
+
+  it("rejects an empty outer answers array", () => {
+    expect(validateAnswerQuestionBody({ commandId, answers: [] })).toBe(false);
+  });
+
+  it("rejects an empty inner answers array", () => {
+    expect(validateAnswerQuestionBody({ commandId, answers: [[]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, answers: [["Postgres"], []] })).toBe(false);
+  });
+
+  it("rejects empty answer strings", () => {
+    expect(validateAnswerQuestionBody({ commandId, answers: [[""]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, answers: [["Postgres", ""]] })).toBe(false);
+  });
+
+  it("rejects non-string answer values", () => {
+    expect(validateAnswerQuestionBody({ commandId, answers: [[42]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, answers: [["Postgres", null]] })).toBe(false);
+  });
+
+  it("rejects a non-array answers value", () => {
+    expect(validateAnswerQuestionBody({ commandId, answers: "Postgres" })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, answers: ["Postgres"] })).toBe(false);
+  });
+
+  it("requires commandId and answers", () => {
+    expect(validateAnswerQuestionBody({ answers: [["Postgres"]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId })).toBe(false);
+    expect(validateAnswerQuestionBody({})).toBe(false);
+  });
+
+  it("rejects a non-uuid commandId", () => {
+    expect(validateAnswerQuestionBody({ commandId: "cmd_1", answers: [["Postgres"]] })).toBe(false);
+  });
+
+  it("rejects unknown properties", () => {
+    expect(
+      validateAnswerQuestionBody({ commandId, answers: [["Postgres"]], instanceId: "nope" }),
+    ).toBe(false);
+  });
+});
+
+describe("QuestionCommandResult", () => {
+  const commandId = "7f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
+
+  it.each(["confirmed", "stale", "upstream_error", "result_unknown"])(
+    "accepts status %s",
+    (status) => {
+      expect(validateQuestionCommandResult({ commandId, status })).toBe(true);
+    },
+  );
+
+  it("rejects an unknown status", () => {
+    expect(validateQuestionCommandResult({ commandId, status: "pending" })).toBe(false);
+    expect(validateQuestionCommandResult({ commandId, status: "timeout" })).toBe(false);
+  });
+
+  it("rejects a non-uuid commandId", () => {
+    expect(validateQuestionCommandResult({ commandId: "cmd_1", status: "confirmed" })).toBe(false);
+  });
+
+  it("requires commandId and status", () => {
+    expect(validateQuestionCommandResult({ status: "confirmed" })).toBe(false);
+    expect(validateQuestionCommandResult({ commandId })).toBe(false);
+  });
+
+  it("rejects unknown properties", () => {
+    expect(validateQuestionCommandResult({ commandId, status: "confirmed", answers: [] })).toBe(
+      false,
+    );
+  });
+});
+
 describe("API support schemas", () => {
   it("accepts a valid EmailBody", () => {
     expect(validateEmailBody({ email: "dev@example.com" })).toBe(true);
@@ -1344,5 +1572,38 @@ describe("OpenAPI generation", () => {
     expect(responses["202"].content?.["application/json"]?.schema).toEqual({
       $ref: "#/components/schemas/EventIngestResponse",
     });
+  });
+
+  it("documents the authenticated question answer command path", () => {
+    interface OpenApiLike {
+      paths: {
+        [path: string]: {
+          post?: {
+            operationId: string;
+            security: Record<string, unknown>[];
+            parameters: { name: string; schema: { type: string } }[];
+            responses: Record<string, { content?: { "application/json"?: { schema: unknown } } }>;
+          };
+        };
+      };
+    }
+    const document = parse(buildOpenApiYaml()) as OpenApiLike;
+    const path = "/v1/pending-interactions/{instanceId}/questions/{requestId}/answer";
+    const operation = document.paths[path]?.post;
+    expect(operation).toBeDefined();
+    expect(operation?.operationId).toBe("answerQuestion");
+    expect(operation?.security).toEqual([{ bearerAuth: [] }]);
+    const parameterNames = (operation?.parameters ?? []).map(({ name }) => name);
+    expect(parameterNames).toEqual(["instanceId", "requestId"]);
+    expect(operation?.responses["200"].content?.["application/json"]?.schema).toEqual({
+      $ref: "#/components/schemas/QuestionCommandResult",
+    });
+    expect(Object.keys(operation?.responses ?? {}).sort()).toEqual([
+      "200",
+      "400",
+      "401",
+      "404",
+      "409",
+    ]);
   });
 });
