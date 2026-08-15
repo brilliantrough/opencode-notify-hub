@@ -3,7 +3,12 @@ import 'dart:async';
 import 'package:built_collection/built_collection.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:notify_api/notify_api.dart' show AnswerQuestionBody, PendingApi;
+import 'package:notify_api/notify_api.dart'
+    show
+        AnswerQuestionBody,
+        DecidePermissionBody,
+        DecidePermissionBodyDecisionEnum,
+        PendingApi;
 import 'package:uuid/uuid.dart';
 
 import '../auth/auth_controller.dart';
@@ -11,6 +16,7 @@ import '../auth/auth_state.dart';
 import '../realtime/instance_presence.dart';
 import 'pending_answer.dart';
 import 'pending_interaction.dart';
+import 'pending_permission.dart';
 
 final pendingApiProvider = Provider<PendingApi>(
   (ref) => ref.watch(apiClientProvider).notifyApi.getPendingApi(),
@@ -65,6 +71,33 @@ class QuestionSubmissionStates
   }
 }
 
+/// Per-request submission lifecycle for deciding a pending permission. The
+/// workbench and the focused page read this to show submitting and result
+/// states without sending or rejecting anything on navigation.
+final permissionSubmissionStatesProvider =
+    NotifierProvider<
+      PermissionSubmissionStates,
+      Map<String, PermissionDecisionState>
+    >(PermissionSubmissionStates.new);
+
+class PermissionSubmissionStates
+    extends Notifier<Map<String, PermissionDecisionState>> {
+  @override
+  Map<String, PermissionDecisionState> build() => const {};
+
+  void reset(String requestId) {
+    final next = Map<String, PermissionDecisionState>.from(state);
+    next.remove(requestId);
+    state = next;
+  }
+
+  void mark(String requestId, PermissionDecisionState value) {
+    final next = Map<String, PermissionDecisionState>.from(state);
+    next[requestId] = value;
+    state = next;
+  }
+}
+
 typedef CommandIdGenerator = String Function();
 
 /// Generates a unique client command id for each question submission. The
@@ -110,6 +143,50 @@ final questionAnswerSenderProvider = Provider<QuestionAnswerSender>((ref) {
     return QuestionAnswerResult(
       commandId: data.commandId,
       outcome: questionAnswerOutcomeFromStatus(data.status),
+    );
+  };
+});
+
+typedef PermissionDecisionSender =
+    Future<PermissionDecisionResult> Function({
+      required String instanceId,
+      required String requestId,
+      required String commandId,
+      required PermissionDecision decision,
+    });
+
+/// Submits one immediate allow-once or reject decision through the generated
+/// [PendingApi.decidePermission] and maps the gateway's terminal outcome.
+/// Gateway 4xx errors surface as a thrown [DioException]. Always allow is
+/// never submitted here.
+final permissionDecisionSenderProvider = Provider<PermissionDecisionSender>((
+  ref,
+) {
+  final api = ref.watch(pendingApiProvider);
+  return ({
+    required instanceId,
+    required requestId,
+    required commandId,
+    required decision,
+  }) async {
+    final response = await api.decidePermission(
+      instanceId: instanceId,
+      requestId: requestId,
+      decidePermissionBody: DecidePermissionBody((b) {
+        b.commandId = commandId;
+        b.decision = switch (decision) {
+          PermissionDecision.once => DecidePermissionBodyDecisionEnum.once,
+          PermissionDecision.reject => DecidePermissionBodyDecisionEnum.reject,
+        };
+      }),
+    );
+    final data = response.data;
+    if (data == null) {
+      throw StateError('Empty decide-permission response');
+    }
+    return PermissionDecisionResult(
+      commandId: data.commandId,
+      outcome: permissionDecisionOutcomeFromStatus(data.status),
     );
   };
 });
@@ -252,6 +329,70 @@ class PendingInteractionsController
     }
   }
 
+  /// Submits an immediate [decision] for [permission] with a fresh
+  /// client-generated command id and drives the per-request submission state.
+  ///
+  /// Only a confirmed outcome removes the request from the workbench; stale,
+  /// upstream-error, and gateway-rejected outcomes keep it and trigger an
+  /// authoritative snapshot re-read, while unknown and transport failures
+  /// keep it visible without re-reading. Gateway 4xx rejections never remove
+  /// the request and never propagate.
+  Future<void> decidePermission({
+    required PendingPermission permission,
+    required PermissionDecision decision,
+  }) async {
+    final requestId = permission.requestId;
+    final commandId = ref.read(commandIdGeneratorProvider)();
+    _markPermissionSubmission(requestId, PermissionDecisionState.submitting);
+    try {
+      final result = await ref.read(permissionDecisionSenderProvider)(
+        instanceId: permission.instanceId,
+        requestId: requestId,
+        commandId: commandId,
+        decision: decision,
+      );
+      switch (result.outcome) {
+        case PermissionDecisionOutcome.confirmed:
+          _markPermissionSubmission(
+            requestId,
+            PermissionDecisionState.confirmed,
+          );
+          _removeInteraction(requestId);
+          await reconcile();
+        case PermissionDecisionOutcome.stale:
+          _markPermissionSubmission(requestId, PermissionDecisionState.stale);
+          await reconcile();
+        case PermissionDecisionOutcome.upstreamError:
+          _markPermissionSubmission(
+            requestId,
+            PermissionDecisionState.upstreamError,
+          );
+          await reconcile();
+        case PermissionDecisionOutcome.resultUnknown:
+          _markPermissionSubmission(
+            requestId,
+            PermissionDecisionState.resultUnknown,
+          );
+      }
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode;
+      if (statusCode != null && statusCode >= 400 && statusCode < 500) {
+        _markPermissionSubmission(requestId, PermissionDecisionState.rejected);
+        await reconcile();
+      } else {
+        _markPermissionSubmission(
+          requestId,
+          PermissionDecisionState.resultUnknown,
+        );
+      }
+    } catch (_) {
+      _markPermissionSubmission(
+        requestId,
+        PermissionDecisionState.resultUnknown,
+      );
+    }
+  }
+
   /// Refetches the authoritative snapshot and replaces the list without first
   /// clearing current data. Queues behind an in-flight [refresh].
   Future<void> reconcile() async {
@@ -287,6 +428,15 @@ class PendingInteractionsController
 
   void _markSubmission(String requestId, QuestionSubmissionState value) {
     ref.read(questionSubmissionStatesProvider.notifier).mark(requestId, value);
+  }
+
+  void _markPermissionSubmission(
+    String requestId,
+    PermissionDecisionState value,
+  ) {
+    ref
+        .read(permissionSubmissionStatesProvider.notifier)
+        .mark(requestId, value);
   }
 
   static String _actionableSignature(

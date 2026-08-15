@@ -1,6 +1,10 @@
 import type { JSONSchema } from "json-schema-to-ts";
 
 import { pendingInteractionSchema } from "./pending.js";
+import {
+  permissionCommandStatusSchema,
+  permissionDecisionSchema,
+} from "./permissions.js";
 import { questionAnswersSchema, questionCommandStatusSchema } from "./questions.js";
 
 const nonEmptyString = { type: "string", minLength: 1 } as const;
@@ -100,8 +104,42 @@ const questionAnswerResultSchema = {
   },
 } as const satisfies JSONSchema;
 
+// The gateway routes a client-submitted permission decision to the owning
+// Plugin instance. `requestId` is the plain OpenCode request identifier and
+// `decision` mirrors the strict DecidePermission body.
+const permissionDecideCommandSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "commandId", "requestId", "decision"],
+  properties: {
+    type: { const: "permission_decide_command" },
+    commandId: uuidString,
+    requestId: nonEmptyString,
+    decision: permissionDecisionSchema,
+  },
+} as const satisfies JSONSchema;
+
+// The Plugin reports the terminal outcome of one decision command back to the
+// gateway. `status` is the same terminal enum as the PermissionCommandResult.
+const permissionDecideResultSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "commandId", "instanceId", "status"],
+  properties: {
+    type: { const: "permission_decide_result" },
+    commandId: uuidString,
+    instanceId: uuidString,
+    status: permissionCommandStatusSchema,
+  },
+} as const satisfies JSONSchema;
+
 export const pluginControlClientMessageSchema = {
-  oneOf: [pluginRegistrationSchema, pendingSnapshotResponseSchema, questionAnswerResultSchema],
+  oneOf: [
+    pluginRegistrationSchema,
+    pendingSnapshotResponseSchema,
+    questionAnswerResultSchema,
+    permissionDecideResultSchema,
+  ],
 } as const satisfies JSONSchema;
 
 const pluginRegistrationResultSchema = {
@@ -133,5 +171,6 @@ export const pluginControlServerMessageSchema = {
     pluginRegistrationResultSchema,
     pendingSnapshotRequestSchema,
     questionAnswerCommandSchema,
+    permissionDecideCommandSchema,
   ],
 } as const satisfies JSONSchema;

@@ -5,6 +5,8 @@ import {
   type InstancePresence,
   type PendingInteraction,
   type PendingSnapshot,
+  type PermissionCommandResult,
+  type PermissionDecision,
   type PluginControlClientMessage,
   type PluginControlServerMessage,
   type QuestionAnswers,
@@ -115,6 +117,20 @@ type QuestionAnswerResultMessage = Extract<
   { type: "question_answer_result" }
 >;
 
+/** One outstanding `permission_decide_command` awaiting its terminal result. */
+interface PendingDecideCommand {
+  readonly connection: ControlConnection;
+  readonly requestId: string;
+  readonly commandId: string;
+  readonly timer: NodeJS.Timeout;
+  readonly resolve: (result: PermissionCommandResult) => void;
+}
+
+type PermissionDecideResultMessage = Extract<
+  PluginControlClientMessage,
+  { type: "permission_decide_result" }
+>;
+
 export interface InstanceRegistryDeps {
   clock: Clock;
   publish(userId: string, message: WsServerMessage): void;
@@ -140,6 +156,22 @@ export type AnswerQuestionOutcome =
   | { readonly ok: true; readonly result: QuestionCommandResult };
 
 /**
+ * A rejected decision command. The codes mirror {@link AnswerQuestionError}:
+ * `not_found` covers unknown instances, foreign accounts,
+ * offline/conflicting/incompatible records, and request ids that were never
+ * projected; `conflict` covers stale requests, the wrong interaction kind,
+ * and a second in-flight decision on the same connection. The route maps
+ * them to the uniform 404/409 responses.
+ */
+export type DecidePermissionError =
+  | { readonly code: "not_found" }
+  | { readonly code: "conflict" };
+
+export type DecidePermissionOutcome =
+  | { readonly ok: false; readonly error: DecidePermissionError }
+  | { readonly ok: true; readonly result: PermissionCommandResult };
+
+/**
  * In-memory owner-scoped projection of Plugin control connections. Owns
  * registration rules (first machine/project owner wins, incompatible and
  * conflicting instances are not actionable) and the owner-scoped read-only
@@ -150,9 +182,13 @@ export type AnswerQuestionOutcome =
  * snapshot on timeouts). Issue #9 adds owner-scoped answer routing: a command
  * is accepted only for a projected pending question of a connected
  * `controllable` own record, is correlated by connection+commandId, and
- * settles under {@link ANSWER_TIMEOUT_MS}. Late or unknown responses and
- * results are ignored; malformed frames and registration violations still
- * close the control connection.
+ * settles under {@link ANSWER_TIMEOUT_MS}. Issue #10 adds owner-scoped
+ * decision routing for pending permissions under the same gate and timeout:
+ * a decision command is accepted only for a projected pending `permission`
+ * of a connected `controllable` own record, is correlated by
+ * connection+commandId, and a confirmed decision removes the projected
+ * request. Late or unknown responses and results are ignored; malformed
+ * frames and registration violations still close the control connection.
  */
 export class InstanceRegistry {
   private readonly records = new Map<string, InstanceRecord>();
@@ -160,6 +196,7 @@ export class InstanceRegistry {
   private readonly connections = new Set<ControlConnection>();
   private readonly pendingRequests = new Map<string, PendingSnapshotRequest>();
   private readonly pendingAnswerCommands = new Map<string, PendingAnswerCommand>();
+  private readonly pendingDecideCommands = new Map<string, PendingDecideCommand>();
   private readonly clock: Clock;
   private readonly publish: InstanceRegistryDeps["publish"];
   private readonly pingIntervalMs: number;
@@ -314,6 +351,81 @@ export class InstanceRegistry {
     return { ok: true, result };
   }
 
+  /**
+   * Issue #10: route one client permission decision to the owning Plugin
+   * instance and await its terminal result. Mirrors {@link answerQuestion}
+   * against the same pending projection, but the projected interaction must
+   * be a `permission` (answering a question is a different route and a
+   * `conflict` here). Unknown instances, foreign accounts,
+   * offline/conflicting/incompatible records, and request ids that were
+   * never projected answer the uniform `not_found`; stale requests, the
+   * wrong interaction kind, and a second in-flight decision for the same
+   * `requestId` or `commandId` on the same connection answer `conflict`. The
+   * command is correlated by connection+commandId and sent verbatim; it
+   * settles under {@link ANSWER_TIMEOUT_MS}, and a timeout or a disconnect
+   * resolves as result_unknown, never as an error. A confirmed decision
+   * removes the projected request (the same state transition as a confirmed
+   * answer), so a repeat decision for it is stale.
+   */
+  async decidePermission(
+    userId: string,
+    instanceId: string,
+    requestId: string,
+    commandId: string,
+    decision: PermissionDecision,
+  ): Promise<DecidePermissionOutcome> {
+    const record = this.records.get(this.recordKey(userId, instanceId));
+    if (
+      record === undefined ||
+      record.userId !== userId ||
+      record.state !== "controllable" ||
+      record.connection === undefined ||
+      record.connection.socket.readyState !== READY_OPEN
+    ) {
+      return { ok: false, error: { code: "not_found" } };
+    }
+    const projected = record.projectedRequests.get(requestId);
+    if (projected === undefined) {
+      return record.staleRequests.has(requestId)
+        ? { ok: false, error: { code: "conflict" } }
+        : { ok: false, error: { code: "not_found" } };
+    }
+    if (projected !== "permission") {
+      return { ok: false, error: { code: "conflict" } };
+    }
+
+    const connection = record.connection;
+    for (const pending of this.pendingDecideCommands.values()) {
+      if (
+        pending.connection === connection &&
+        (pending.requestId === requestId || pending.commandId === commandId)
+      ) {
+        return { ok: false, error: { code: "conflict" } };
+      }
+    }
+    const result = await new Promise<PermissionCommandResult>((resolve) => {
+      const key = this.commandKey(connection, commandId);
+      const entry: PendingDecideCommand = {
+        connection,
+        requestId,
+        commandId,
+        timer: setTimeout(() => {
+          this.pendingDecideCommands.delete(key);
+          resolve({ commandId, status: "result_unknown" });
+        }, this.answerTimeoutMs),
+        resolve,
+      };
+      this.pendingDecideCommands.set(key, entry);
+      this.send(connection, {
+        type: "permission_decide_command",
+        commandId,
+        requestId,
+        decision,
+      });
+    });
+    return { ok: true, result };
+  }
+
   revokeKey(ingestKeyId: string): void {
     for (const connection of [...this.connections]) {
       if (connection.auth.id !== ingestKeyId) {
@@ -350,6 +462,12 @@ export class InstanceRegistry {
       // Validated command results are not registration traffic: unknown,
       // late, or foreign results are ignored, never a connection error.
       this.handleQuestionAnswerResult(connection, message);
+      return;
+    }
+    if (message.type === "permission_decide_result") {
+      // Validated decision results are not registration traffic: unknown,
+      // late, or foreign results are ignored, never a connection error.
+      this.handlePermissionDecideResult(connection, message);
       return;
     }
     if (connection.instanceId !== undefined) {
@@ -440,6 +558,40 @@ export class InstanceRegistry {
         // A confirmed command resolves the request: drop it from the
         // projection and remember it as stale, so concurrent clients that
         // race the same request get a 409 instead of a second command.
+        record.projectedRequests.delete(pending.requestId);
+        this.rememberStale(record, pending.requestId);
+      }
+    }
+    pending.resolve({ commandId: pending.commandId, status: message.status });
+  }
+
+  private handlePermissionDecideResult(
+    connection: ControlConnection,
+    message: PermissionDecideResultMessage,
+  ): void {
+    if (connection.instanceId === undefined) {
+      // A result before registration cannot be correlated to anything.
+      return;
+    }
+    if (message.instanceId !== connection.instanceId) {
+      // The frame names an instance this connection does not own: ignore.
+      return;
+    }
+    const key = this.commandKey(connection, message.commandId);
+    const pending = this.pendingDecideCommands.get(key);
+    if (pending === undefined) {
+      // Unknown, already-settled (late), or duplicate commandId: ignore.
+      return;
+    }
+    this.pendingDecideCommands.delete(key);
+    clearTimeout(pending.timer);
+    if (message.status === "confirmed") {
+      const record = this.records.get(
+        this.recordKey(connection.auth.userId, connection.instanceId),
+      );
+      if (record?.connection === connection) {
+        // A confirmed decision resolves the request exactly like a confirmed
+        // answer: drop it from the projection and remember it as stale.
         record.projectedRequests.delete(pending.requestId);
         this.rememberStale(record, pending.requestId);
       }
@@ -563,6 +715,13 @@ export class InstanceRegistry {
     for (const [key, pending] of this.pendingAnswerCommands) {
       if (pending.connection === connection) {
         this.pendingAnswerCommands.delete(key);
+        clearTimeout(pending.timer);
+        pending.resolve({ commandId: pending.commandId, status: "result_unknown" });
+      }
+    }
+    for (const [key, pending] of this.pendingDecideCommands) {
+      if (pending.connection === connection) {
+        this.pendingDecideCommands.delete(key);
         clearTimeout(pending.timer);
         pending.resolve({ commandId: pending.commandId, status: "result_unknown" });
       }

@@ -281,6 +281,51 @@ function driveAnswerCommand(socket: CapturingSocket): void {
   });
 }
 
+/** A fetch that records every call and lets the OpenCode permission reply path respond distinctly. */
+function makePermissionFetch(options: {
+  reply?: () => Response | Promise<Response>;
+} = {}): { calls: FetchCall[]; fetchImpl: typeof fetch } {
+  const calls: FetchCall[] = [];
+  const fetchImpl = (async (url: unknown, init?: { headers?: unknown; body?: unknown }) => {
+    const requestUrl =
+      url !== null && typeof url === "object" && "url" in url
+        ? String((url as { url: unknown }).url)
+        : String(url);
+    calls.push({
+      url: requestUrl,
+      body: String(init?.body),
+      headers: init?.headers as Record<string, string>,
+    });
+    if (requestUrl.includes("/permission/") && requestUrl.includes("/reply")) {
+      return (options.reply ?? defaultReply)();
+    }
+    return new Response("true", { status: 202 });
+  }) as unknown as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+const DECISION_COMMAND_ID = "2a4b8d9c-3e5f-4a6b-9c7d-1e2f3a4b5c6d";
+
+/** Drive an open control socket into registration and submit one decision command. */
+function driveDecisionCommand(socket: CapturingSocket, decision = "once"): void {
+  socket.emit("open");
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "registration",
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      state: "controllable",
+    }),
+  });
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "permission_decide_command",
+      commandId: DECISION_COMMAND_ID,
+      requestId: "per_req1",
+      decision,
+    }),
+  });
+}
+
 describe("SessionNotifyPlugin", () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: FIXED_NOW });
@@ -1075,6 +1120,139 @@ describe("SessionNotifyPlugin", () => {
       expect.objectContaining({
         type: "question_answer_result",
         commandId: ANSWER_COMMAND_ID,
+        status: "stale",
+      }),
+    );
+
+    await hooks.dispose?.();
+  });
+
+  it("defers the decision adapter and its V2 client until a permission_decide_command arrives (no self-HTTP at init)", async () => {
+    const { calls, fetchImpl } = makePermissionFetch();
+    vi.stubGlobal("fetch", fetchImpl);
+    const { sockets, WebSocketClass } = makeCapturedSockets();
+    vi.stubGlobal("WebSocket", WebSocketClass);
+    const { client } = makeClient();
+
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+
+    // Initialization made no self-HTTP: the decision adapter and its V2 SDK
+    // client are only constructed on the first decision command, never
+    // during plugin startup.
+    expect(sockets).toHaveLength(0);
+    expect(calls.filter((call) => call.url.startsWith("http://127.0.0.1"))).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(0); // deferred control start
+    expect(sockets).toHaveLength(1);
+    expect(calls.filter((call) => call.url.startsWith("http://127.0.0.1"))).toHaveLength(0);
+
+    driveDecisionCommand(sockets[0]);
+    await settle();
+
+    // The lazy adapter now replied to its own OpenCode instance (self-HTTP
+    // only after initialization) and reported confirmation to the gateway.
+    const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    expect(selfCalls.length).toBeGreaterThan(0);
+    const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: "permission_decide_result",
+        commandId: DECISION_COMMAND_ID,
+        instanceId: expect.any(String),
+        status: "confirmed",
+      }),
+    );
+
+    await hooks.dispose?.();
+  });
+
+  it("answers a permission_decide_command through the real V2 SDK and never calls a reject API", async () => {
+    const { calls, fetchImpl } = makePermissionFetch();
+    vi.stubGlobal("fetch", fetchImpl);
+    const { sockets, WebSocketClass } = makeCapturedSockets();
+    vi.stubGlobal("WebSocket", WebSocketClass);
+    const { client } = makeClient();
+
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+    await vi.advanceTimersByTimeAsync(0);
+    driveDecisionCommand(sockets[0], "reject");
+    await settle();
+
+    const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    expect(selfCalls).toHaveLength(1);
+    expect(selfCalls[0].url).toContain("/permission/per_req1/reply");
+    expect(selfCalls[0].url).toContain("directory=");
+    // The reject decision travels through the reply body; no reject/respond
+    // endpoint is ever invoked.
+    expect(calls.map((call) => call.url).every((url) => !url.includes("/reject"))).toBe(true);
+
+    const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
+    const result = frames.find((frame) => frame.type === "permission_decide_result");
+    expect(result).toMatchObject({
+      commandId: DECISION_COMMAND_ID,
+      instanceId: expect.any(String),
+      status: "confirmed",
+    });
+    // The result frame carries ids and status only, never the decision body.
+    expect(JSON.stringify(frames)).not.toContain("per_req1");
+
+    await hooks.dispose?.();
+  });
+
+  it("reports upstream_error when OpenCode rejects the decision", async () => {
+    const { calls, fetchImpl } = makePermissionFetch({
+      reply: () => new Response(JSON.stringify({ _tag: "InvalidRequestError" }), { status: 400 }),
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const { sockets, WebSocketClass } = makeCapturedSockets();
+    vi.stubGlobal("WebSocket", WebSocketClass);
+    const { client } = makeClient();
+
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+    await vi.advanceTimersByTimeAsync(0);
+    driveDecisionCommand(sockets[0]);
+    await settle();
+
+    const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    expect(selfCalls).toHaveLength(1);
+    expect(selfCalls[0].url).toContain("/permission/per_req1/reply");
+    const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: "permission_decide_result",
+        commandId: DECISION_COMMAND_ID,
+        status: "upstream_error",
+      }),
+    );
+
+    await hooks.dispose?.();
+  });
+
+  it("reports stale when OpenCode already resolved the permission request", async () => {
+    const { calls, fetchImpl } = makePermissionFetch({
+      reply: () =>
+        new Response(JSON.stringify({ _tag: "PermissionNotFoundError", status: 404 }), {
+          status: 404,
+        }),
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const { sockets, WebSocketClass } = makeCapturedSockets();
+    vi.stubGlobal("WebSocket", WebSocketClass);
+    const { client } = makeClient();
+
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+    await vi.advanceTimersByTimeAsync(0);
+    driveDecisionCommand(sockets[0]);
+    await settle();
+
+    const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    expect(selfCalls).toHaveLength(1);
+    expect(selfCalls[0].url).toContain("/permission/per_req1/reply");
+    const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: "permission_decide_result",
+        commandId: DECISION_COMMAND_ID,
         status: "stale",
       }),
     );

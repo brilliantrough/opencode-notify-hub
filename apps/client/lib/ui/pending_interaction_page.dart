@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../pending/pending_answer.dart';
 import '../pending/pending_controller.dart';
 import '../pending/pending_interaction.dart';
+import '../pending/pending_permission.dart';
 
 class PendingInteractionPage extends ConsumerStatefulWidget {
   const PendingInteractionPage({super.key, required this.interaction});
@@ -28,6 +29,11 @@ class _PendingInteractionPageState
     return interaction is PendingQuestion ? interaction : null;
   }
 
+  PendingPermission? get _permission {
+    final interaction = widget.interaction;
+    return interaction is PendingPermission ? interaction : null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -39,15 +45,23 @@ class _PendingInteractionPageState
         _multiChoice.add(<String>{});
         _customControllers.add(TextEditingController());
       }
-      // Reopening the page starts a fresh submission attempt. Deferred so the
-      // provider write never happens while the widget tree is building.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+    }
+    // Reopening the page starts a fresh submission attempt. Deferred so the
+    // provider write never happens while the widget tree is building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (question != null) {
         ref
             .read(questionSubmissionStatesProvider.notifier)
             .reset(question.requestId);
-      });
-    }
+      }
+      final permission = _permission;
+      if (permission != null) {
+        ref
+            .read(permissionSubmissionStatesProvider.notifier)
+            .reset(permission.requestId);
+      }
+    });
   }
 
   @override
@@ -104,6 +118,15 @@ class _PendingInteractionPageState
         .answerQuestion(question: question, answers: answers);
   }
 
+  Future<void> _decide(
+    PendingPermission permission,
+    PermissionDecision decision,
+  ) async {
+    await ref
+        .read(pendingInteractionsProvider.notifier)
+        .decidePermission(permission: permission, decision: decision);
+  }
+
   @override
   Widget build(BuildContext context) {
     final interaction = widget.interaction;
@@ -117,6 +140,13 @@ class _PendingInteractionPageState
         submission == QuestionSubmissionState.submitting ||
         submission == QuestionSubmissionState.confirmed;
     final answers = question == null ? null : _answers(question);
+    final permission = _permission;
+    final permissionState = permission == null
+        ? PermissionDecisionState.idle
+        : ref.watch(permissionSubmissionStatesProvider)[permission.requestId] ??
+              PermissionDecisionState.idle;
+    final permissionSubmitting =
+        permissionState == PermissionDecisionState.submitting;
     return Scaffold(
       appBar: AppBar(title: Text(question != null ? '待处理问题' : '待处理权限')),
       body: ListView(
@@ -170,8 +200,22 @@ class _PendingInteractionPageState
               ),
             ),
           ],
-          if (interaction case final PendingPermission permission)
+          if (permission != null) ...[
             _PermissionDetails(permission: permission),
+            _PermissionActions(
+              state: permissionState,
+              onAllowOnce: () => _decide(permission, PermissionDecision.once),
+              onReject: () => _decide(permission, PermissionDecision.reject),
+            ),
+            if (permissionSubmitting)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: LinearProgressIndicator(
+                  key: ValueKey('permission-submitting'),
+                ),
+              ),
+            _PermissionDecisionBanner(state: permissionState),
+          ],
           if (interaction.tool case final tool?)
             _DetailSection(
               title: '工具来源',
@@ -320,6 +364,95 @@ class _SubmissionBanner extends StatelessWidget {
     };
     return ListTile(
       key: const ValueKey('submission-result'),
+      dense: true,
+      leading: Icon(icon),
+      title: Text(text!, textAlign: TextAlign.center),
+    );
+  }
+}
+
+class _PermissionActions extends StatelessWidget {
+  const _PermissionActions({
+    required this.state,
+    required this.onAllowOnce,
+    required this.onReject,
+  });
+
+  final PermissionDecisionState state;
+  final VoidCallback onAllowOnce;
+  final VoidCallback onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    final locked =
+        state == PermissionDecisionState.submitting ||
+        state == PermissionDecisionState.confirmed;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: FilledButton.icon(
+              key: const ValueKey('permission-allow-once'),
+              onPressed: locked ? null : onAllowOnce,
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('允许一次'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: OutlinedButton.icon(
+              key: const ValueKey('permission-reject'),
+              onPressed: locked ? null : onReject,
+              icon: const Icon(Icons.block_outlined),
+              label: const Text('拒绝'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PermissionDecisionBanner extends StatelessWidget {
+  const _PermissionDecisionBanner({required this.state});
+
+  final PermissionDecisionState state;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state == PermissionDecisionState.idle) {
+      return const SizedBox.shrink();
+    }
+    final (text, icon) = switch (state) {
+      PermissionDecisionState.idle => (null, null),
+      PermissionDecisionState.submitting => ('正在提交权限决定…', Icons.hourglass_top),
+      PermissionDecisionState.confirmed => (
+        'OpenCode 已确认决定，请求已解除。',
+        Icons.check_circle_outline,
+      ),
+      PermissionDecisionState.stale => (
+        '该权限请求已失效，可能已在其他设备处理。',
+        Icons.history_toggle_off,
+      ),
+      PermissionDecisionState.upstreamError => (
+        '上游 OpenCode 返回错误，决定未被应用。',
+        Icons.error_outline,
+      ),
+      PermissionDecisionState.resultUnknown => (
+        '结果未知，权限请求仍在等待。',
+        Icons.help_outline,
+      ),
+      PermissionDecisionState.rejected => (
+        '网关拒绝了该决定，请求可能已失效。',
+        Icons.block_outlined,
+      ),
+    };
+    return ListTile(
+      key: const ValueKey('permission-decision-result'),
       dense: true,
       leading: Icon(icon),
       title: Text(text!, textAlign: TextAlign.center),

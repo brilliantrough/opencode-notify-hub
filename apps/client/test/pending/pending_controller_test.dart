@@ -5,6 +5,7 @@ import 'package:client/auth/auth_state.dart';
 import 'package:client/pending/pending_answer.dart';
 import 'package:client/pending/pending_controller.dart';
 import 'package:client/pending/pending_interaction.dart';
+import 'package:client/pending/pending_permission.dart';
 import 'package:client/realtime/instance_presence.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -143,6 +144,91 @@ ProviderContainer answerContainer({
         return loader?.call(call) ?? [question];
       }),
       questionAnswerSenderProvider.overrideWithValue(sender),
+      commandIdGeneratorProvider.overrideWithValue(commandId ?? () => 'cmd-1'),
+    ],
+  );
+}
+
+PendingPermission permission(String id, DateTime occurredAt) =>
+    PendingPermission(
+      instanceId: '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+      machine: 'dev-box',
+      project: 'api',
+      directory: '/work/api',
+      sessionId: 'ses-$id',
+      sessionTitle: 'Session $id',
+      requestId: id,
+      occurredAt: occurredAt,
+      tool: null,
+      permission: 'bash',
+      patterns: const ['docker build .'],
+      always: const ['docker build *'],
+      metadata: const {'command': 'docker build .'},
+    );
+
+/// Controllable decision sender for controller tests.
+class ScriptedDecisionSender {
+  int calls = 0;
+  final List<
+    ({
+      String instanceId,
+      String requestId,
+      String commandId,
+      PermissionDecision decision,
+    })
+  >
+  received = [];
+  Completer<PermissionDecisionResult>? gate;
+  PermissionDecisionOutcome outcome = PermissionDecisionOutcome.confirmed;
+  Object? throwError;
+
+  Future<PermissionDecisionResult> call({
+    required String instanceId,
+    required String requestId,
+    required String commandId,
+    required PermissionDecision decision,
+  }) async {
+    calls++;
+    received.add((
+      instanceId: instanceId,
+      requestId: requestId,
+      commandId: commandId,
+      decision: decision,
+    ));
+    final current = gate;
+    if (current != null) {
+      return current.future;
+    }
+    final error = throwError;
+    if (error != null) {
+      throw error;
+    }
+    return PermissionDecisionResult(commandId: commandId, outcome: outcome);
+  }
+}
+
+ProviderContainer decisionContainer({
+  required PendingPermission permission,
+  required PermissionDecisionSender sender,
+  Future<List<PendingInteraction>> Function(int call)? loader,
+  String Function()? commandId,
+}) {
+  var calls = 0;
+  return ProviderContainer(
+    overrides: [
+      authControllerProvider.overrideWith(
+        () => MutableAuthController(
+          const Authenticated(
+            accessToken: 'access-1',
+            email: 'user@example.com',
+          ),
+        ),
+      ),
+      pendingInteractionLoaderProvider.overrideWithValue(() async {
+        final call = calls++;
+        return loader?.call(call) ?? [permission];
+      }),
+      permissionDecisionSenderProvider.overrideWithValue(sender),
       commandIdGeneratorProvider.overrideWithValue(commandId ?? () => 'cmd-1'),
     ],
   );
@@ -695,6 +781,384 @@ void main() {
               .single
               .requestId,
           'question-1',
+        );
+      },
+    );
+  });
+
+  group('decidePermission', () {
+    final pendingPermission = permission(
+      'permission-1',
+      DateTime.utc(2026, 8, 14, 9),
+    );
+
+    test('allow once with the injected command id and confirmed removes '
+        'the interaction', () async {
+      final sender = ScriptedDecisionSender()
+        ..outcome = PermissionDecisionOutcome.confirmed;
+      var loads = 0;
+      final container = decisionContainer(
+        permission: pendingPermission,
+        sender: sender.call,
+        loader: (call) async {
+          loads++;
+          return call == 0 ? [pendingPermission] : const <PendingInteraction>[];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .decidePermission(
+            permission: pendingPermission,
+            decision: PermissionDecision.once,
+          );
+
+      expect(sender.calls, 1);
+      final sent = sender.received.single;
+      expect(sent.commandId, 'cmd-1');
+      expect(sent.instanceId, pendingPermission.instanceId);
+      expect(sent.requestId, 'permission-1');
+      expect(sent.decision, PermissionDecision.once);
+      expect(loads, 2);
+      expect(
+        container.read(permissionSubmissionStatesProvider)['permission-1'],
+        PermissionDecisionState.confirmed,
+      );
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+    });
+
+    test('reject with the injected command id and confirmed removes the '
+        'interaction', () async {
+      final sender = ScriptedDecisionSender()
+        ..outcome = PermissionDecisionOutcome.confirmed;
+      var loads = 0;
+      final container = decisionContainer(
+        permission: pendingPermission,
+        sender: sender.call,
+        loader: (call) async {
+          loads++;
+          return call == 0 ? [pendingPermission] : const <PendingInteraction>[];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .decidePermission(
+            permission: pendingPermission,
+            decision: PermissionDecision.reject,
+          );
+
+      expect(sender.received.single.decision, PermissionDecision.reject);
+      expect(loads, 2);
+      expect(
+        container.read(permissionSubmissionStatesProvider)['permission-1'],
+        PermissionDecisionState.confirmed,
+      );
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+    });
+
+    test(
+      'shows submitting while in flight and resolves to confirmed',
+      () async {
+        final sender = ScriptedDecisionSender()
+          ..gate = Completer<PermissionDecisionResult>();
+        var loads = 0;
+        final container = decisionContainer(
+          permission: pendingPermission,
+          sender: sender.call,
+          loader: (call) async {
+            loads++;
+            return call == 0
+                ? [pendingPermission]
+                : const <PendingInteraction>[];
+          },
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        final submission = container
+            .read(pendingInteractionsProvider.notifier)
+            .decidePermission(
+              permission: pendingPermission,
+              decision: PermissionDecision.once,
+            );
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          container.read(permissionSubmissionStatesProvider)['permission-1'],
+          PermissionDecisionState.submitting,
+        );
+
+        sender.gate!.complete(
+          const PermissionDecisionResult(
+            commandId: 'cmd-1',
+            outcome: PermissionDecisionOutcome.confirmed,
+          ),
+        );
+        await submission;
+        expect(loads, 2);
+        expect(
+          container.read(permissionSubmissionStatesProvider)['permission-1'],
+          PermissionDecisionState.confirmed,
+        );
+        expect(
+          container.read(pendingInteractionsProvider).requireValue,
+          isEmpty,
+        );
+      },
+    );
+
+    test('stale keeps the interaction and re-reads the snapshot', () async {
+      final sender = ScriptedDecisionSender()
+        ..outcome = PermissionDecisionOutcome.stale;
+      var loads = 0;
+      final container = decisionContainer(
+        permission: pendingPermission,
+        sender: sender.call,
+        loader: (call) async {
+          loads++;
+          return [pendingPermission];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .decidePermission(
+            permission: pendingPermission,
+            decision: PermissionDecision.once,
+          );
+
+      expect(loads, 2);
+      expect(
+        container.read(permissionSubmissionStatesProvider)['permission-1'],
+        PermissionDecisionState.stale,
+      );
+      expect(
+        container
+            .read(pendingInteractionsProvider)
+            .requireValue
+            .single
+            .requestId,
+        'permission-1',
+      );
+    });
+
+    test(
+      'upstream error keeps the interaction and re-reads the snapshot',
+      () async {
+        final sender = ScriptedDecisionSender()
+          ..outcome = PermissionDecisionOutcome.upstreamError;
+        var loads = 0;
+        final container = decisionContainer(
+          permission: pendingPermission,
+          sender: sender.call,
+          loader: (call) async {
+            loads++;
+            return [pendingPermission];
+          },
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        await container
+            .read(pendingInteractionsProvider.notifier)
+            .decidePermission(
+              permission: pendingPermission,
+              decision: PermissionDecision.reject,
+            );
+
+        expect(loads, 2);
+        expect(
+          container.read(permissionSubmissionStatesProvider)['permission-1'],
+          PermissionDecisionState.upstreamError,
+        );
+        expect(
+          container
+              .read(pendingInteractionsProvider)
+              .requireValue
+              .single
+              .requestId,
+          'permission-1',
+        );
+      },
+    );
+
+    test(
+      'result unknown keeps the interaction visible without re-reading',
+      () async {
+        final sender = ScriptedDecisionSender()
+          ..outcome = PermissionDecisionOutcome.resultUnknown;
+        var loads = 0;
+        final container = decisionContainer(
+          permission: pendingPermission,
+          sender: sender.call,
+          loader: (call) async {
+            loads++;
+            return [pendingPermission];
+          },
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        await container
+            .read(pendingInteractionsProvider.notifier)
+            .decidePermission(
+              permission: pendingPermission,
+              decision: PermissionDecision.once,
+            );
+
+        expect(loads, 1);
+        expect(
+          container.read(permissionSubmissionStatesProvider)['permission-1'],
+          PermissionDecisionState.resultUnknown,
+        );
+        expect(
+          container
+              .read(pendingInteractionsProvider)
+              .requireValue
+              .single
+              .requestId,
+          'permission-1',
+        );
+      },
+    );
+
+    test(
+      'a 4xx gateway rejection keeps the interaction and re-reads',
+      () async {
+        final sender = ScriptedDecisionSender()
+          ..throwError = DioException(
+            requestOptions: RequestOptions(
+              path: '/v1/pending-interactions/i/permissions/p/decision',
+            ),
+            response: Response(
+              requestOptions: RequestOptions(path: ''),
+              statusCode: 409,
+            ),
+            type: DioExceptionType.badResponse,
+          );
+        var loads = 0;
+        final container = decisionContainer(
+          permission: pendingPermission,
+          sender: sender.call,
+          loader: (call) async {
+            loads++;
+            return [pendingPermission];
+          },
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        await container
+            .read(pendingInteractionsProvider.notifier)
+            .decidePermission(
+              permission: pendingPermission,
+              decision: PermissionDecision.once,
+            );
+
+        expect(loads, 2);
+        expect(
+          container.read(permissionSubmissionStatesProvider)['permission-1'],
+          PermissionDecisionState.rejected,
+        );
+        expect(
+          container
+              .read(pendingInteractionsProvider)
+              .requireValue
+              .single
+              .requestId,
+          'permission-1',
+        );
+      },
+    );
+
+    test(
+      'a transport failure keeps the interaction as result unknown',
+      () async {
+        final sender = ScriptedDecisionSender()
+          ..throwError = DioException(
+            requestOptions: RequestOptions(
+              path: '/v1/pending-interactions/i/permissions/p/decision',
+            ),
+            type: DioExceptionType.connectionError,
+            error: 'no network',
+          );
+        var loads = 0;
+        final container = decisionContainer(
+          permission: pendingPermission,
+          sender: sender.call,
+          loader: (call) async {
+            loads++;
+            return [pendingPermission];
+          },
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        await container
+            .read(pendingInteractionsProvider.notifier)
+            .decidePermission(
+              permission: pendingPermission,
+              decision: PermissionDecision.once,
+            );
+
+        expect(loads, 1);
+        expect(
+          container.read(permissionSubmissionStatesProvider)['permission-1'],
+          PermissionDecisionState.resultUnknown,
+        );
+        expect(
+          container
+              .read(pendingInteractionsProvider)
+              .requireValue
+              .single
+              .requestId,
+          'permission-1',
+        );
+      },
+    );
+
+    test(
+      'an unexpected sender failure keeps the interaction as unknown',
+      () async {
+        final sender = ScriptedDecisionSender()
+          ..throwError = StateError('no response body');
+        var loads = 0;
+        final container = decisionContainer(
+          permission: pendingPermission,
+          sender: sender.call,
+          loader: (call) async {
+            loads++;
+            return [pendingPermission];
+          },
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        await container
+            .read(pendingInteractionsProvider.notifier)
+            .decidePermission(
+              permission: pendingPermission,
+              decision: PermissionDecision.once,
+            );
+
+        expect(loads, 1);
+        expect(
+          container.read(permissionSubmissionStatesProvider)['permission-1'],
+          PermissionDecisionState.resultUnknown,
+        );
+        expect(
+          container
+              .read(pendingInteractionsProvider)
+              .requireValue
+              .single
+              .requestId,
+          'permission-1',
         );
       },
     );

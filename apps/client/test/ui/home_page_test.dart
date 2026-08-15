@@ -5,6 +5,7 @@ import 'package:client/auth/auth_state.dart';
 import 'package:client/pending/pending_answer.dart';
 import 'package:client/pending/pending_controller.dart';
 import 'package:client/pending/pending_interaction.dart';
+import 'package:client/pending/pending_permission.dart';
 import 'package:client/realtime/active_sessions.dart';
 import 'package:client/realtime/instance_presence.dart';
 import 'package:client/realtime/ws_client.dart';
@@ -68,10 +69,36 @@ class AnswerScript {
   }
 }
 
+class DecideScript {
+  int calls = 0;
+  Completer<PermissionDecisionResult>? gate;
+  PermissionDecisionOutcome outcome = PermissionDecisionOutcome.confirmed;
+  Object? throwError;
+
+  Future<PermissionDecisionResult> call({
+    required String instanceId,
+    required String requestId,
+    required String commandId,
+    required PermissionDecision decision,
+  }) async {
+    calls++;
+    final current = gate;
+    if (current != null) {
+      return current.future;
+    }
+    final error = throwError;
+    if (error != null) {
+      throw error;
+    }
+    return PermissionDecisionResult(commandId: commandId, outcome: outcome);
+  }
+}
+
 Future<void> pumpAnswerableHome(
   WidgetTester tester, {
   required List<PendingInteraction> Function() loader,
   required AnswerScript script,
+  DecideScript? decide,
 }) async {
   tester.view.physicalSize = const Size(1200, 2400);
   tester.view.devicePixelRatio = 1.0;
@@ -99,6 +126,8 @@ Future<void> pumpAnswerableHome(
           return loader();
         }),
         questionAnswerSenderProvider.overrideWithValue(script.call),
+        if (decide != null)
+          permissionDecisionSenderProvider.overrideWithValue(decide.call),
         commandIdGeneratorProvider.overrideWithValue(() => 'cmd-1'),
       ],
       child: const MaterialApp(home: HomePage()),
@@ -200,6 +229,23 @@ void main() {
             custom: true,
           ),
         ],
+      );
+
+  PendingPermission pendingPermission(String id, DateTime occurredAt) =>
+      PendingPermission(
+        instanceId: '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+        machine: 'dev-box',
+        project: 'shop-api',
+        directory: '/work/shop-api',
+        sessionId: 'ses-$id',
+        sessionTitle: 'Release build',
+        requestId: id,
+        occurredAt: occurredAt,
+        tool: null,
+        permission: 'bash',
+        patterns: const ['docker build .'],
+        always: const ['docker build *'],
+        metadata: const {'command': 'docker build .'},
       );
 
   testWidgets('shows 已连接 when the socket is connected', (tester) async {
@@ -398,5 +444,127 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(tileKey), findsOneWidget);
+  });
+
+  group('permission decisions', () {
+    const permissionTileKey = ValueKey(
+      'interaction-6f0d91b0-93e4-43a9-9449-0bed03e651aa-permission-1',
+    );
+
+    Future<void> decideAndSubmit(WidgetTester tester) async {
+      await tester.tap(find.byKey(permissionTileKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('permission-allow-once')));
+      await tester.pumpAndSettle();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'a confirmed permission decision leaves the workbench only after '
+      'OpenCode confirms it',
+      (tester) async {
+        final script = DecideScript()
+          ..gate = Completer<PermissionDecisionResult>();
+        var confirmed = false;
+        final pending = pendingPermission(
+          'permission-1',
+          DateTime.now().subtract(const Duration(minutes: 10)),
+        );
+        await pumpAnswerableHome(
+          tester,
+          loader: () => confirmed ? const <PendingInteraction>[] : [pending],
+          script: AnswerScript(),
+          decide: script,
+        );
+        expect(find.byKey(permissionTileKey), findsOneWidget);
+
+        await tester.tap(find.byKey(permissionTileKey));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('permission-allow-once')));
+        await tester.pump();
+
+        expect(
+          find.byKey(const ValueKey('permission-submitting')),
+          findsOneWidget,
+        );
+        expect(script.calls, 1);
+
+        confirmed = true;
+        script.gate!.complete(
+          const PermissionDecisionResult(
+            commandId: 'cmd-1',
+            outcome: PermissionDecisionOutcome.confirmed,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(permissionTileKey), findsNothing);
+        expect(find.text('待处理请求'), findsNothing);
+      },
+    );
+
+    for (final scenario in [
+      (name: 'stale', outcome: PermissionDecisionOutcome.stale),
+      (
+        name: 'upstream error',
+        outcome: PermissionDecisionOutcome.upstreamError,
+      ),
+      (
+        name: 'result unknown',
+        outcome: PermissionDecisionOutcome.resultUnknown,
+      ),
+    ]) {
+      testWidgets('a ${scenario.name} outcome keeps the permission tile', (
+        tester,
+      ) async {
+        final script = DecideScript()..outcome = scenario.outcome;
+        final pending = pendingPermission(
+          'permission-1',
+          DateTime.now().subtract(const Duration(minutes: 10)),
+        );
+        await pumpAnswerableHome(
+          tester,
+          loader: () => [pending],
+          script: AnswerScript(),
+          decide: script,
+        );
+
+        await decideAndSubmit(tester);
+
+        expect(find.byKey(permissionTileKey), findsOneWidget);
+        expect(find.text('待处理请求'), findsOneWidget);
+      });
+    }
+
+    testWidgets('a 4xx rejection keeps the permission tile', (tester) async {
+      final script = DecideScript()
+        ..throwError = DioException(
+          requestOptions: RequestOptions(
+            path: '/v1/pending-interactions/i/permissions/p/decision',
+          ),
+          response: Response(
+            requestOptions: RequestOptions(path: ''),
+            statusCode: 409,
+          ),
+          type: DioExceptionType.badResponse,
+        );
+      final pending = pendingPermission(
+        'permission-1',
+        DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+      await pumpAnswerableHome(
+        tester,
+        loader: () => [pending],
+        script: AnswerScript(),
+        decide: script,
+      );
+
+      await decideAndSubmit(tester);
+
+      expect(find.byKey(permissionTileKey), findsOneWidget);
+    });
   });
 }

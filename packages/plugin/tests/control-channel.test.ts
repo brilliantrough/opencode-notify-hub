@@ -888,4 +888,392 @@ describe("ControlChannel", () => {
     });
     expect(JSON.stringify(frames)).not.toContain("SECRET-ANSWER");
   });
+
+  const decisionCommandId = "2a4b8d9c-3e5f-4a6b-9c7d-1e2f3a4b5c6d";
+
+  it("answers a permission_decide_command with the stable instanceId and the seam's status", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const decidePermission = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      decidePermission,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "permission_decide_command",
+        commandId: decisionCommandId,
+        requestId: "per_req_1",
+        decision: "once",
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(decidePermission).toHaveBeenCalledTimes(1);
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "permission_decide_result",
+      commandId: decisionCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "confirmed",
+    });
+  });
+
+  it("passes the exact decision, the owning directory, and a bounded signal to the decision seam", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const decidePermission = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      decidePermission,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "permission_decide_command",
+        commandId: decisionCommandId,
+        requestId: "per_req_1",
+        decision: "reject",
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(decidePermission).toHaveBeenCalledWith(
+      "per_req_1",
+      "/work/notify",
+      "reject",
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("does not coalesce concurrent decision commands with different commandIds", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const resolves: Array<() => void> = [];
+    const decidePermission = vi.fn(
+      () =>
+        new Promise<"confirmed">((resolve) => {
+          resolves.push(() => resolve("confirmed"));
+        }),
+    );
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      decidePermission,
+    });
+    const secondCommandId = "3a4b8d9c-3e5f-4a6b-9c7d-1e2f3a4b5c6d";
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    for (const commandId of [decisionCommandId, secondCommandId]) {
+      socket.emit("message", {
+        data: JSON.stringify({
+          type: "permission_decide_command",
+          commandId,
+          requestId: "per_req_1",
+          decision: "once",
+        }),
+      });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    // Each command runs independently: the seam is never coalesced onto one call.
+    expect(decidePermission).toHaveBeenCalledTimes(2);
+
+    for (const resolve of resolves) {
+      resolve();
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    const results = socket.sent
+      .map((frame) => JSON.parse(frame))
+      .filter((frame) => frame.type === "permission_decide_result");
+    expect(results).toHaveLength(2);
+    expect(results.map((result) => result.commandId).sort()).toEqual(
+      [decisionCommandId, secondCommandId].sort(),
+    );
+  });
+
+  it("ignores a permission_decide_command received before registration", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const decidePermission = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      decidePermission,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    socket.emit("open");
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "permission_decide_command",
+        commandId: decisionCommandId,
+        requestId: "per_req_1",
+        decision: "once",
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(decidePermission).not.toHaveBeenCalled();
+    expect(socket.sent.map((frame) => JSON.parse(frame))).not.toContainEqual(
+      expect.objectContaining({ type: "permission_decide_result" }),
+    );
+  });
+
+  it("ignores malformed permission_decide_command frames without killing notification behavior", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const decidePermission = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      decidePermission,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+
+    const valid = {
+      type: "permission_decide_command",
+      commandId: decisionCommandId,
+      requestId: "per_req_1",
+      decision: "once",
+    };
+    const garbage: Record<string, unknown>[] = [
+      { ...valid, commandId: "cmd_1" },
+      { ...valid, commandId: "" },
+      { ...valid, commandId: 7 },
+      { ...valid, requestId: "" },
+      { ...valid, requestId: 7 },
+      { ...valid, decision: "always" },
+      { ...valid, decision: "" },
+      { ...valid, decision: 1 },
+      { ...valid, decision: null },
+      { ...valid, decision: undefined },
+      { type: "permission_decide_command", commandId: decisionCommandId, requestId: "per_req_1" },
+      { type: "permission_decide_command", commandId: decisionCommandId, decision: "once" },
+      { type: "permission_decide_command" },
+    ];
+    for (const frame of garbage) {
+      socket.emit("message", { data: JSON.stringify(frame) });
+    }
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(decidePermission).not.toHaveBeenCalled();
+    expect(socket.sent.map((frame) => JSON.parse(frame))).not.toContainEqual(
+      expect.objectContaining({ type: "permission_decide_result" }),
+    );
+
+    // The channel stays alive and still answers a well-formed command.
+    socket.emit("message", { data: JSON.stringify(valid) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decidePermission).toHaveBeenCalledTimes(1);
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual(
+      expect.objectContaining({
+        type: "permission_decide_result",
+        commandId: decisionCommandId,
+        status: "confirmed",
+      }),
+    );
+  });
+
+  it("reports result_unknown when no decision seam is configured", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "permission_decide_command",
+        commandId: decisionCommandId,
+        requestId: "per_req_1",
+        decision: "once",
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "permission_decide_result",
+      commandId: decisionCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "result_unknown",
+    });
+  });
+
+  it("reports result_unknown when the decision seam throws", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const decidePermission = vi.fn(async () => {
+      throw new Error("sdk exploded");
+    });
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      decidePermission,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "permission_decide_command",
+        commandId: decisionCommandId,
+        requestId: "per_req_1",
+        decision: "reject",
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "permission_decide_result",
+      commandId: decisionCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "result_unknown",
+    });
+  });
+
+  it("aborts the decision seam after the bounded timeout and reports result_unknown", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    let latestSignal: AbortSignal | undefined;
+    const decidePermission = vi.fn(
+      (_requestId: string, _directory: string, _decision: unknown, signal: AbortSignal) => {
+        latestSignal = signal;
+        return new Promise<"confirmed">(() => undefined); // hangs forever
+      },
+    );
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      decideTimeoutMs: 50,
+      socketFactory: () => socket,
+      decidePermission,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "permission_decide_command",
+        commandId: decisionCommandId,
+        requestId: "per_req_1",
+        decision: "once",
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(latestSignal?.aborted).toBe(true);
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "permission_decide_result",
+      commandId: decisionCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "result_unknown",
+    });
+  });
+
+  it("never leaks decision bodies into the result frame", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const decidePermission = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      decidePermission,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "permission_decide_command",
+        commandId: decisionCommandId,
+        requestId: "per_req_1",
+        decision: "once",
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const frames = socket.sent.map((frame) => JSON.parse(frame));
+    const result = frames.find((frame) => frame.type === "permission_decide_result");
+    expect(result).toEqual({
+      type: "permission_decide_result",
+      commandId: decisionCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "confirmed",
+    });
+    expect(JSON.stringify(frames)).not.toContain("per_req_1");
+  });
 });

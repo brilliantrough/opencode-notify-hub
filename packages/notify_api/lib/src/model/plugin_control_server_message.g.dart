@@ -49,6 +49,9 @@ _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest =
 const PluginControlServerMessageTypeEnum
 _$pluginControlServerMessageTypeEnum_questionAnswerCommand =
     const PluginControlServerMessageTypeEnum._('questionAnswerCommand');
+const PluginControlServerMessageTypeEnum
+_$pluginControlServerMessageTypeEnum_permissionDecideCommand =
+    const PluginControlServerMessageTypeEnum._('permissionDecideCommand');
 
 PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
   String name,
@@ -60,6 +63,8 @@ PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
       return _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest;
     case 'questionAnswerCommand':
       return _$pluginControlServerMessageTypeEnum_questionAnswerCommand;
+    case 'permissionDecideCommand':
+      return _$pluginControlServerMessageTypeEnum_permissionDecideCommand;
     default:
       throw ArgumentError(name);
   }
@@ -72,6 +77,35 @@ _$pluginControlServerMessageTypeEnumValues =
         _$pluginControlServerMessageTypeEnum_registration,
         _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest,
         _$pluginControlServerMessageTypeEnum_questionAnswerCommand,
+        _$pluginControlServerMessageTypeEnum_permissionDecideCommand,
+      ],
+    );
+
+const PluginControlServerMessageDecisionEnum
+_$pluginControlServerMessageDecisionEnum_once =
+    const PluginControlServerMessageDecisionEnum._('once');
+const PluginControlServerMessageDecisionEnum
+_$pluginControlServerMessageDecisionEnum_reject =
+    const PluginControlServerMessageDecisionEnum._('reject');
+
+PluginControlServerMessageDecisionEnum
+_$pluginControlServerMessageDecisionEnumValueOf(String name) {
+  switch (name) {
+    case 'once':
+      return _$pluginControlServerMessageDecisionEnum_once;
+    case 'reject':
+      return _$pluginControlServerMessageDecisionEnum_reject;
+    default:
+      throw ArgumentError(name);
+  }
+}
+
+final BuiltSet<PluginControlServerMessageDecisionEnum>
+_$pluginControlServerMessageDecisionEnumValues =
+    BuiltSet<PluginControlServerMessageDecisionEnum>(
+      const <PluginControlServerMessageDecisionEnum>[
+        _$pluginControlServerMessageDecisionEnum_once,
+        _$pluginControlServerMessageDecisionEnum_reject,
       ],
     );
 
@@ -81,6 +115,9 @@ _$pluginControlServerMessageStateEnumSerializer =
 Serializer<PluginControlServerMessageTypeEnum>
 _$pluginControlServerMessageTypeEnumSerializer =
     _$PluginControlServerMessageTypeEnumSerializer();
+Serializer<PluginControlServerMessageDecisionEnum>
+_$pluginControlServerMessageDecisionEnumSerializer =
+    _$PluginControlServerMessageDecisionEnumSerializer();
 
 class _$PluginControlServerMessageStateEnumSerializer
     implements PrimitiveSerializer<PluginControlServerMessageStateEnum> {
@@ -125,11 +162,13 @@ class _$PluginControlServerMessageTypeEnumSerializer
     'registration': 'registration',
     'pendingSnapshotRequest': 'pending_snapshot_request',
     'questionAnswerCommand': 'question_answer_command',
+    'permissionDecideCommand': 'permission_decide_command',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'registration': 'registration',
     'pending_snapshot_request': 'pendingSnapshotRequest',
     'question_answer_command': 'questionAnswerCommand',
+    'permission_decide_command': 'permissionDecideCommand',
   };
 
   @override
@@ -150,6 +189,41 @@ class _$PluginControlServerMessageTypeEnumSerializer
     Object serialized, {
     FullType specifiedType = FullType.unspecified,
   }) => PluginControlServerMessageTypeEnum.valueOf(
+    _fromWire[serialized] ?? (serialized is String ? serialized : ''),
+  );
+}
+
+class _$PluginControlServerMessageDecisionEnumSerializer
+    implements PrimitiveSerializer<PluginControlServerMessageDecisionEnum> {
+  static const Map<String, Object> _toWire = const <String, Object>{
+    'once': 'once',
+    'reject': 'reject',
+  };
+  static const Map<Object, String> _fromWire = const <Object, String>{
+    'once': 'once',
+    'reject': 'reject',
+  };
+
+  @override
+  final Iterable<Type> types = const <Type>[
+    PluginControlServerMessageDecisionEnum,
+  ];
+  @override
+  final String wireName = 'PluginControlServerMessageDecisionEnum';
+
+  @override
+  Object serialize(
+    Serializers serializers,
+    PluginControlServerMessageDecisionEnum object, {
+    FullType specifiedType = FullType.unspecified,
+  }) => _toWire[object.name] ?? object.name;
+
+  @override
+  PluginControlServerMessageDecisionEnum deserialize(
+    Serializers serializers,
+    Object serialized, {
+    FullType specifiedType = FullType.unspecified,
+  }) => PluginControlServerMessageDecisionEnum.valueOf(
     _fromWire[serialized] ?? (serialized is String ? serialized : ''),
   );
 }

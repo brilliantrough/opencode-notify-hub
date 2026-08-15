@@ -29,6 +29,8 @@ import {
   validatePendingSnapshot,
   validateAnswerQuestionBody,
   validateQuestionCommandResult,
+  validateDecidePermissionBody,
+  validatePermissionCommandResult,
 } from "../src/index.js";
 
 const EVENT_ID = "3b8f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b";
@@ -1002,6 +1004,112 @@ describe("Plugin control WebSocket messages", () => {
       }),
     ).toBe(false);
   });
+
+  const decideCommandId = "9d4c8a1e-5f2b-4a7d-9e6c-1b3d5f7a9c2e";
+
+  it("accepts a permission_decide_command server frame", () => {
+    expect(
+      validatePluginControlServerMessage({
+        type: "permission_decide_command",
+        commandId: decideCommandId,
+        requestId: "per_1",
+        decision: "once",
+      }),
+    ).toBe(true);
+    expect(
+      validatePluginControlServerMessage({
+        type: "permission_decide_command",
+        commandId: decideCommandId,
+        requestId: "per_1",
+        decision: "reject",
+      }),
+    ).toBe(true);
+  });
+
+  it("preserves the exact decision value on a permission_decide_command", () => {
+    const command = {
+      type: "permission_decide_command",
+      commandId: decideCommandId,
+      requestId: "per_1",
+      decision: "once",
+    };
+    expect(validatePluginControlServerMessage(command)).toBe(true);
+    expect(command.decision).toBe("once");
+  });
+
+  it("rejects a malformed permission_decide_command frame", () => {
+    const command = {
+      type: "permission_decide_command",
+      commandId: decideCommandId,
+      requestId: "per_1",
+      decision: "once",
+    };
+    expect(validatePluginControlServerMessage({ ...command, commandId: "cmd_1" })).toBe(false);
+    expect(validatePluginControlServerMessage({ ...command, requestId: "" })).toBe(false);
+    expect(validatePluginControlServerMessage({ ...command, decision: "always" })).toBe(false);
+    expect(validatePluginControlServerMessage({ ...command, decision: "allow" })).toBe(false);
+    expect(
+      validatePluginControlServerMessage({
+        type: "permission_decide_command",
+        commandId: decideCommandId,
+        requestId: "per_1",
+      }),
+    ).toBe(false);
+  });
+
+  it.each(["confirmed", "stale", "upstream_error", "result_unknown"])(
+    "accepts a permission_decide_result client frame with status %s",
+    (status) => {
+      expect(
+        validatePluginControlClientMessage({
+          type: "permission_decide_result",
+          commandId: decideCommandId,
+          instanceId: registration.instanceId,
+          status,
+        }),
+      ).toBe(true);
+    },
+  );
+
+  it("rejects a malformed permission_decide_result frame", () => {
+    const result = {
+      type: "permission_decide_result",
+      commandId: decideCommandId,
+      instanceId: registration.instanceId,
+      status: "confirmed",
+    };
+    expect(validatePluginControlClientMessage({ ...result, status: "pending" })).toBe(false);
+    expect(validatePluginControlClientMessage({ ...result, commandId: "cmd_1" })).toBe(false);
+    expect(validatePluginControlClientMessage({ ...result, instanceId: "runtime-1" })).toBe(false);
+    expect(
+      validatePluginControlClientMessage({
+        type: "permission_decide_result",
+        commandId: decideCommandId,
+        instanceId: registration.instanceId,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects decision frames that mix union members", () => {
+    expect(
+      validatePluginControlServerMessage({
+        type: "permission_decide_command",
+        commandId: decideCommandId,
+        requestId: "per_1",
+        decision: "once",
+        answers: [["Postgres"]],
+      }),
+    ).toBe(false);
+    expect(
+      validatePluginControlClientMessage({
+        type: "permission_decide_result",
+        commandId: decideCommandId,
+        instanceId: registration.instanceId,
+        status: "confirmed",
+        decision: "once",
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("PendingInteraction union", () => {
@@ -1437,6 +1545,81 @@ describe("QuestionCommandResult", () => {
   });
 });
 
+describe("DecidePermission body", () => {
+  const commandId = "9d4c8a1e-5f2b-4a7d-9e6c-1b3d5f7a9c2e";
+
+  it("accepts the once decision", () => {
+    expect(validateDecidePermissionBody({ commandId, decision: "once" })).toBe(true);
+  });
+
+  it("accepts the reject decision", () => {
+    expect(validateDecidePermissionBody({ commandId, decision: "reject" })).toBe(true);
+  });
+
+  it("rejects the always decision: always allow is a later slice", () => {
+    expect(validateDecidePermissionBody({ commandId, decision: "always" })).toBe(false);
+  });
+
+  it("rejects an unknown decision", () => {
+    expect(validateDecidePermissionBody({ commandId, decision: "allow" })).toBe(false);
+    expect(validateDecidePermissionBody({ commandId, decision: "deny" })).toBe(false);
+  });
+
+  it("rejects a non-string decision", () => {
+    expect(validateDecidePermissionBody({ commandId, decision: 1 })).toBe(false);
+    expect(validateDecidePermissionBody({ commandId, decision: null })).toBe(false);
+  });
+
+  it("requires commandId and decision", () => {
+    expect(validateDecidePermissionBody({ commandId })).toBe(false);
+    expect(validateDecidePermissionBody({ decision: "once" })).toBe(false);
+    expect(validateDecidePermissionBody({})).toBe(false);
+  });
+
+  it("rejects a non-uuid commandId", () => {
+    expect(validateDecidePermissionBody({ commandId: "cmd_1", decision: "once" })).toBe(false);
+  });
+
+  it("rejects unknown properties", () => {
+    expect(
+      validateDecidePermissionBody({ commandId, decision: "once", patterns: [] }),
+    ).toBe(false);
+  });
+});
+
+describe("PermissionCommandResult", () => {
+  const commandId = "9d4c8a1e-5f2b-4a7d-9e6c-1b3d5f7a9c2e";
+
+  it.each(["confirmed", "stale", "upstream_error", "result_unknown"])(
+    "accepts status %s",
+    (status) => {
+      expect(validatePermissionCommandResult({ commandId, status })).toBe(true);
+    },
+  );
+
+  it("rejects an unknown status", () => {
+    expect(validatePermissionCommandResult({ commandId, status: "pending" })).toBe(false);
+    expect(validatePermissionCommandResult({ commandId, status: "timeout" })).toBe(false);
+  });
+
+  it("rejects a non-uuid commandId", () => {
+    expect(validatePermissionCommandResult({ commandId: "cmd_1", status: "confirmed" })).toBe(
+      false,
+    );
+  });
+
+  it("requires commandId and status", () => {
+    expect(validatePermissionCommandResult({ status: "confirmed" })).toBe(false);
+    expect(validatePermissionCommandResult({ commandId })).toBe(false);
+  });
+
+  it("rejects unknown properties", () => {
+    expect(
+      validatePermissionCommandResult({ commandId, status: "confirmed", decision: "once" }),
+    ).toBe(false);
+  });
+});
+
 describe("API support schemas", () => {
   it("accepts a valid EmailBody", () => {
     expect(validateEmailBody({ email: "dev@example.com" })).toBe(true);
@@ -1597,6 +1780,39 @@ describe("OpenAPI generation", () => {
     expect(parameterNames).toEqual(["instanceId", "requestId"]);
     expect(operation?.responses["200"].content?.["application/json"]?.schema).toEqual({
       $ref: "#/components/schemas/QuestionCommandResult",
+    });
+    expect(Object.keys(operation?.responses ?? {}).sort()).toEqual([
+      "200",
+      "400",
+      "401",
+      "404",
+      "409",
+    ]);
+  });
+
+  it("documents the authenticated permission decision command path", () => {
+    interface OpenApiLike {
+      paths: {
+        [path: string]: {
+          post?: {
+            operationId: string;
+            security: Record<string, unknown>[];
+            parameters: { name: string; schema: { type: string } }[];
+            responses: Record<string, { content?: { "application/json"?: { schema: unknown } } }>;
+          };
+        };
+      };
+    }
+    const document = parse(buildOpenApiYaml()) as OpenApiLike;
+    const path = "/v1/pending-interactions/{instanceId}/permissions/{requestId}/decision";
+    const operation = document.paths[path]?.post;
+    expect(operation).toBeDefined();
+    expect(operation?.operationId).toBe("decidePermission");
+    expect(operation?.security).toEqual([{ bearerAuth: [] }]);
+    const parameterNames = (operation?.parameters ?? []).map(({ name }) => name);
+    expect(parameterNames).toEqual(["instanceId", "requestId"]);
+    expect(operation?.responses["200"].content?.["application/json"]?.schema).toEqual({
+      $ref: "#/components/schemas/PermissionCommandResult",
     });
     expect(Object.keys(operation?.responses ?? {}).sort()).toEqual([
       "200",

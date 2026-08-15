@@ -5,6 +5,7 @@ import 'package:client/auth/auth_state.dart';
 import 'package:client/pending/pending_answer.dart';
 import 'package:client/pending/pending_controller.dart';
 import 'package:client/pending/pending_interaction.dart';
+import 'package:client/pending/pending_permission.dart';
 import 'package:client/ui/pending_interaction_page.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -103,10 +104,51 @@ class ScriptedAnswerSender {
   }
 }
 
+class ScriptedDecisionSender {
+  int calls = 0;
+  final List<
+    ({
+      String instanceId,
+      String requestId,
+      String commandId,
+      PermissionDecision decision,
+    })
+  >
+  received = [];
+  Completer<PermissionDecisionResult>? gate;
+  PermissionDecisionOutcome outcome = PermissionDecisionOutcome.confirmed;
+  Object? throwError;
+
+  Future<PermissionDecisionResult> call({
+    required String instanceId,
+    required String requestId,
+    required String commandId,
+    required PermissionDecision decision,
+  }) async {
+    calls++;
+    received.add((
+      instanceId: instanceId,
+      requestId: requestId,
+      commandId: commandId,
+      decision: decision,
+    ));
+    final current = gate;
+    if (current != null) {
+      return current.future;
+    }
+    final error = throwError;
+    if (error != null) {
+      throw error;
+    }
+    return PermissionDecisionResult(commandId: commandId, outcome: outcome);
+  }
+}
+
 Future<void> pumpPage(
   WidgetTester tester, {
   required PendingInteraction interaction,
   required QuestionAnswerSender sender,
+  PermissionDecisionSender? decisionSender,
 }) async {
   tester.view.physicalSize = const Size(1200, 2400);
   tester.view.devicePixelRatio = 1.0;
@@ -127,6 +169,8 @@ Future<void> pumpPage(
           return [interaction];
         }),
         questionAnswerSenderProvider.overrideWithValue(sender),
+        if (decisionSender != null)
+          permissionDecisionSenderProvider.overrideWithValue(decisionSender),
         commandIdGeneratorProvider.overrideWithValue(() => 'cmd-1'),
       ],
       child: MaterialApp(
@@ -164,6 +208,20 @@ Future<void> answerEverything(WidgetTester tester) async {
 bool submitEnabled(WidgetTester tester) {
   final button = tester.widget<FilledButton>(
     find.byKey(const ValueKey('submit-answer')),
+  );
+  return button.onPressed != null;
+}
+
+bool allowOnceEnabled(WidgetTester tester) {
+  final button = tester.widget<FilledButton>(
+    find.byKey(const ValueKey('permission-allow-once')),
+  );
+  return button.onPressed != null;
+}
+
+bool rejectEnabled(WidgetTester tester) {
+  final button = tester.widget<OutlinedButton>(
+    find.byKey(const ValueKey('permission-reject')),
   );
   return button.onPressed != null;
 }
@@ -383,25 +441,208 @@ void main() {
     expect(submitEnabled(tester), isTrue);
   });
 
-  testWidgets('permission page stays read-only without a submit action', (
+  testWidgets(
+    'permission page renders the complete authorization object with only '
+    'allow-once and reject actions',
+    (tester) async {
+      await pumpPage(
+        tester,
+        interaction: permission(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: ScriptedDecisionSender().call,
+      );
+
+      expect(find.text('待处理权限'), findsOneWidget);
+      expect(find.text('build-host'), findsOneWidget);
+      expect(find.text('shop-api'), findsOneWidget);
+      expect(find.text('/work/shop-api'), findsOneWidget);
+      expect(find.textContaining('Release build'), findsOneWidget);
+      expect(find.text('bash'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('permission-pattern-0')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('permission-pattern-1')),
+        findsOneWidget,
+      );
+      expect(find.text('docker build .'), findsWidgets);
+      expect(find.text('/work/shop-api/Dockerfile'), findsOneWidget);
+      expect(find.text('永久允许范围'), findsOneWidget);
+      expect(find.byKey(const ValueKey('permission-always-0')), findsOneWidget);
+      expect(find.text('docker build *'), findsOneWidget);
+      expect(find.textContaining('"path": "/work/shop-api"'), findsOneWidget);
+      expect(find.text('msg-2'), findsOneWidget);
+      expect(find.text('call-2'), findsOneWidget);
+
+      expect(
+        find.byKey(const ValueKey('permission-allow-once')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('permission-reject')), findsOneWidget);
+      expect(find.text('允许一次'), findsOneWidget);
+      expect(find.text('拒绝'), findsOneWidget);
+      expect(find.byKey(const ValueKey('submit-answer')), findsNothing);
+      expect(find.byType(TextField), findsNothing);
+    },
+  );
+
+  testWidgets('permission page never offers an always-allow action', (
     tester,
   ) async {
     await pumpPage(
       tester,
       interaction: permission(),
       sender: ScriptedAnswerSender().call,
+      decisionSender: ScriptedDecisionSender().call,
     );
 
+    expect(find.byKey(const ValueKey('permission-always-allow')), findsNothing);
+    expect(find.textContaining('始终允许'), findsNothing);
+    expect(find.textContaining('Always allow'), findsNothing);
+  });
+
+  testWidgets(
+    'allow once shows submitting then confirmed and never resubmits',
+    (tester) async {
+      final sender = ScriptedDecisionSender()
+        ..gate = Completer<PermissionDecisionResult>();
+      await pumpPage(
+        tester,
+        interaction: permission(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: sender.call,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('permission-allow-once')));
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('permission-submitting')),
+        findsOneWidget,
+      );
+      expect(find.text('正在提交权限决定…'), findsOneWidget);
+      expect(allowOnceEnabled(tester), isFalse);
+      expect(rejectEnabled(tester), isFalse);
+
+      sender.gate!.complete(
+        const PermissionDecisionResult(
+          commandId: 'cmd-1',
+          outcome: PermissionDecisionOutcome.confirmed,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('已确认'), findsOneWidget);
+      expect(sender.calls, 1);
+      expect(sender.received.single.decision, PermissionDecision.once);
+      expect(allowOnceEnabled(tester), isFalse);
+      expect(rejectEnabled(tester), isFalse);
+    },
+  );
+
+  testWidgets('reject submits once and confirms the request', (tester) async {
+    final sender = ScriptedDecisionSender()
+      ..outcome = PermissionDecisionOutcome.confirmed;
+    await pumpPage(
+      tester,
+      interaction: permission(),
+      sender: ScriptedAnswerSender().call,
+      decisionSender: sender.call,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('permission-reject')));
+    await tester.pumpAndSettle();
+
+    expect(sender.calls, 1);
+    expect(sender.received.single.decision, PermissionDecision.reject);
+    expect(find.textContaining('已确认'), findsOneWidget);
+  });
+
+  for (final scenario in [
+    (
+      name: 'stale',
+      outcome: PermissionDecisionOutcome.stale,
+      text: '该权限请求已失效，可能已在其他设备处理。',
+    ),
+    (
+      name: 'upstream error',
+      outcome: PermissionDecisionOutcome.upstreamError,
+      text: '上游 OpenCode 返回错误，决定未被应用。',
+    ),
+    (
+      name: 'result unknown',
+      outcome: PermissionDecisionOutcome.resultUnknown,
+      text: '结果未知，权限请求仍在等待。',
+    ),
+  ]) {
+    testWidgets('a ${scenario.name} outcome keeps the permission visible', (
+      tester,
+    ) async {
+      final sender = ScriptedDecisionSender()..outcome = scenario.outcome;
+      await pumpPage(
+        tester,
+        interaction: permission(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: sender.call,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('permission-allow-once')));
+      await tester.pumpAndSettle();
+
+      expect(find.text(scenario.text), findsOneWidget);
+      expect(find.text('bash'), findsOneWidget);
+      expect(allowOnceEnabled(tester), isTrue);
+      expect(rejectEnabled(tester), isTrue);
+    });
+  }
+
+  testWidgets('a 4xx rejection keeps the permission request visible', (
+    tester,
+  ) async {
+    final sender = ScriptedDecisionSender()
+      ..throwError = DioException(
+        requestOptions: RequestOptions(
+          path: '/v1/pending-interactions/i/permissions/p/decision',
+        ),
+        response: Response(
+          requestOptions: RequestOptions(path: ''),
+          statusCode: 409,
+        ),
+        type: DioExceptionType.badResponse,
+      );
+    await pumpPage(
+      tester,
+      interaction: permission(),
+      sender: ScriptedAnswerSender().call,
+      decisionSender: sender.call,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('permission-allow-once')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('网关拒绝了该决定，请求可能已失效。'), findsOneWidget);
     expect(find.text('bash'), findsOneWidget);
-    expect(find.text('docker build .'), findsWidgets);
-    expect(find.text('/work/shop-api/Dockerfile'), findsOneWidget);
-    expect(find.text('docker build *'), findsOneWidget);
-    expect(find.textContaining('"path": "/work/shop-api"'), findsOneWidget);
-    expect(find.text('msg-2'), findsOneWidget);
-    expect(find.byKey(const ValueKey('submit-answer')), findsNothing);
-    expect(find.byType(TextField), findsNothing);
-    expect(find.text('允许'), findsNothing);
-    expect(find.text('拒绝'), findsNothing);
+    expect(allowOnceEnabled(tester), isTrue);
+    expect(rejectEnabled(tester), isTrue);
+  });
+
+  testWidgets('back navigation never submits a permission decision', (
+    tester,
+  ) async {
+    final sender = ScriptedDecisionSender();
+    await pumpPage(
+      tester,
+      interaction: permission(),
+      sender: ScriptedAnswerSender().call,
+      decisionSender: sender.call,
+    );
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(sender.calls, 0);
+    expect(find.byType(PendingInteractionPage), findsNothing);
   });
 
   testWidgets('back navigation never submits or rejects', (tester) async {

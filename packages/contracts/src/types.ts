@@ -37,6 +37,12 @@ import type {
 } from "./schemas/ingest-keys.js";
 import type { pendingInteractionSchema, pendingSnapshotSchema } from "./schemas/pending.js";
 import type {
+  decidePermissionBodySchema,
+  permissionCommandResultSchema,
+  permissionCommandStatusSchema,
+  permissionDecisionSchema,
+} from "./schemas/permissions.js";
+import type {
   answerQuestionBodySchema,
   questionAnswersSchema,
   questionCommandResultSchema,
@@ -84,3 +90,8 @@ export type QuestionAnswers = FromSchema<typeof questionAnswersSchema>;
 export type QuestionCommandStatus = FromSchema<typeof questionCommandStatusSchema>;
 export type AnswerQuestionBody = FromSchema<typeof answerQuestionBodySchema>;
 export type QuestionCommandResult = FromSchema<typeof questionCommandResultSchema>;
+
+export type PermissionDecision = FromSchema<typeof permissionDecisionSchema>;
+export type PermissionCommandStatus = FromSchema<typeof permissionCommandStatusSchema>;
+export type DecidePermissionBody = FromSchema<typeof decidePermissionBodySchema>;
+export type PermissionCommandResult = FromSchema<typeof permissionCommandResultSchema>;

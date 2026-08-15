@@ -45,6 +45,7 @@ import { createSafeLogger, type SafeLogger } from "./log.js";
 import { MessageCache } from "./message-cache.js";
 import { PendingAdapter, type PendingListClient } from "./pending-adapter.js";
 import { QueuePump } from "./pump.js";
+import { PermissionReplyAdapter, type PermissionReplyClient } from "./permission-reply-adapter.js";
 import { QuestionReplyAdapter, type QuestionReplyClient } from "./question-reply-adapter.js";
 import { GatewaySender } from "./sender.js";
 import {
@@ -154,13 +155,14 @@ export function createSessionNotifyHooks(
       capacity: config.queueCapacity,
     });
   const directory = source.directory;
-  // Lazy pending/answer adapters: the V2 SDK client and both adapters are
-  // only constructed on the first snapshot request or answer command, long
-  // after the plugin initialized, so no self-HTTP happens during startup.
-  // One client instance is shared by both adapters and reused across
-  // requests so first-observed timestamps stay stable.
-  let v2: (PendingListClient & QuestionReplyClient) | null = null;
-  const v2Client = (): PendingListClient & QuestionReplyClient => {
+  // Lazy pending/answer/decision adapters: the V2 SDK client and all three
+  // adapters are only constructed on the first snapshot request, answer
+  // command, or decision command, long after the plugin initialized, so no
+  // self-HTTP happens during startup. One client instance is shared by all
+  // adapters and reused across requests so first-observed timestamps stay
+  // stable.
+  let v2: (PendingListClient & QuestionReplyClient & PermissionReplyClient) | null = null;
+  const v2Client = (): PendingListClient & QuestionReplyClient & PermissionReplyClient => {
     v2 ??= createOpencodeClient({
       baseUrl: input.serverUrl.toString(),
       directory,
@@ -169,6 +171,7 @@ export function createSessionNotifyHooks(
   };
   let pending: PendingAdapter | null = null;
   let answerer: QuestionReplyAdapter | null = null;
+  let decider: PermissionReplyAdapter | null = null;
   const control =
     deps.control ??
     (input.serverUrl instanceof URL
@@ -205,6 +208,10 @@ export function createSessionNotifyHooks(
           answerQuestion: (requestId, answerDirectory, answers, signal) => {
             answerer ??= new QuestionReplyAdapter({ client: v2Client() });
             return answerer.reply(requestId, answerDirectory, answers, signal);
+          },
+          decidePermission: (requestId, decisionDirectory, decision, signal) => {
+            decider ??= new PermissionReplyAdapter({ client: v2Client() });
+            return decider.reply(requestId, decisionDirectory, decision, signal);
           },
         })
       : null);

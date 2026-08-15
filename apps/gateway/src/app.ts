@@ -110,11 +110,16 @@ const LOG_REDACT_PATHS = [
   // Remote-unblock answer commands: the submitted answer content is as
   // sensitive as the question it responds to and must never reach the logs.
   "body.answers",
+  // Remote-unblock permission decisions: the immediate decision is the
+  // user's stance on a sensitive permission request and must never reach
+  // the logs.
+  "body.decision",
   // Catch-alls for the same fields logged at any other depth: one wildcard
   // per nesting level (fast-redact wildcards match exactly one segment), so
   // credentials, tokens, codes, signatures, FCM tokens, event payloads,
-  // interaction question/permission content, and answer content are redacted
-  // however deep inside a logged object they end up.
+  // interaction question/permission content, answer content, and permission
+  // decision/reply content are redacted however deep inside a logged object
+  // they end up.
   ...[
     "password",
     "newPassword",
@@ -127,6 +132,8 @@ const LOG_REDACT_PATHS = [
     "payload",
     "interactions",
     "answers",
+    "decision",
+    "reply",
     "question",
     "questions",
     "permission",

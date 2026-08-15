@@ -416,4 +416,76 @@ void main() {
       }
     });
   });
+
+  group('Permission decision command', () {
+    test('DecidePermissionBody round-trips once and reject decisions', () {
+      const decisions = [
+        (DecidePermissionBodyDecisionEnum.once, 'once'),
+        (DecidePermissionBodyDecisionEnum.reject, 'reject'),
+      ];
+      for (final (decision, wire) in decisions) {
+        final body = DecidePermissionBody((b) {
+          b.commandId = 'cmd-42';
+          b.decision = decision;
+        });
+
+        final out = standardSerializers.serializeWith(
+          DecidePermissionBody.serializer,
+          body,
+        );
+        expect(jsonDecode(jsonEncode(out)), {
+          'commandId': 'cmd-42',
+          'decision': wire,
+        });
+
+        final restored = standardSerializers.deserializeWith(
+          DecidePermissionBody.serializer,
+          out,
+        )!;
+        expect(restored.commandId, 'cmd-42');
+        expect(restored.decision, decision);
+      }
+    });
+
+    test('DecidePermissionBody rejects an always decision', () {
+      final always = {'commandId': 'cmd-42', 'decision': 'always'};
+      expect(
+        () => standardSerializers.deserializeWith(
+          DecidePermissionBody.serializer,
+          always,
+        ),
+        throwsA(
+          isA<Object>().having(
+            (error) => error.toString(),
+            'message',
+            contains('Invalid argument(s): always'),
+          ),
+        ),
+      );
+    });
+
+    test('PermissionCommandResult round-trips every terminal status', () {
+      const statuses = [
+        (PermissionCommandResultStatusEnum.confirmed, 'confirmed'),
+        (PermissionCommandResultStatusEnum.stale, 'stale'),
+        (PermissionCommandResultStatusEnum.upstreamError, 'upstream_error'),
+        (PermissionCommandResultStatusEnum.resultUnknown, 'result_unknown'),
+      ];
+      for (final (status, wire) in statuses) {
+        final json = {'commandId': 'cmd-42', 'status': wire};
+        final result = standardSerializers.deserializeWith(
+          PermissionCommandResult.serializer,
+          json,
+        )!;
+        expect(result.commandId, 'cmd-42');
+        expect(result.status, status);
+
+        final out = standardSerializers.serializeWith(
+          PermissionCommandResult.serializer,
+          result,
+        );
+        expect(jsonDecode(jsonEncode(out)), json);
+      }
+    });
+  });
 }

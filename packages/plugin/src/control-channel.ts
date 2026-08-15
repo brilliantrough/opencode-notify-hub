@@ -2,6 +2,8 @@ import { randomUUID as nodeRandomUUID } from "node:crypto";
 
 import type {
   PendingInteraction,
+  PermissionCommandStatus,
+  PermissionDecision,
   PluginControlClientMessage,
   QuestionAnswers,
   QuestionCommandStatus,
@@ -61,6 +63,22 @@ export interface ControlChannelOptions {
   ) => Promise<QuestionCommandStatus>;
   /** Bounded time to wait for the injected seam; defaults to 10 seconds. */
   answerTimeoutMs?: number;
+  /**
+   * Injected permission-decision seam. When set, a `permission_decide_command`
+   * server frame (after registration) is answered with a
+   * `permission_decide_result` carrying the channel's stable instanceId and
+   * the seam's mapped terminal status. The seam receives the exact decision
+   * and the channel's bounded abort signal; it must never throw, so its
+   * failures also map to `result_unknown`.
+   */
+  decidePermission?: (
+    requestId: string,
+    directory: string,
+    decision: PermissionDecision,
+    signal: AbortSignal,
+  ) => Promise<PermissionCommandStatus>;
+  /** Bounded time to wait for the injected seam; defaults to 8 seconds. */
+  decideTimeoutMs?: number;
 }
 
 const BASE_BACKOFF_MS = 500;
@@ -74,6 +92,14 @@ const DEFAULT_PENDING_SNAPSHOT_TIMEOUT_MS = 2_000;
  * the Gateway gives up and reports a timeout of its own.
  */
 const QUESTION_ANSWER_TIMEOUT_MS = 8_000;
+
+/**
+ * Bounded wait for one permission decision command (issue #10). Same
+ * discipline as the question answer timeout: the Plugin aborts its upstream
+ * OpenCode reply and reports `result_unknown` before the Gateway reports a
+ * timeout of its own.
+ */
+const PERMISSION_DECIDE_TIMEOUT_MS = 8_000;
 
 /** Never-throw outbound Plugin control connection. */
 export class ControlChannel implements PluginControl {
@@ -186,12 +212,13 @@ export class ControlChannel implements PluginControl {
   }
 
   /**
-   * Handle one server frame. Only a `pending_snapshot_request` or a
-   * `question_answer_command` received after the Gateway confirmed
-   * registration produces a reply; every other frame — registration
-   * results, unknown types, malformed JSON, non-string payloads, and
-   * either request type before registration — is ignored without ever
-   * throwing, so notification behavior is unaffected.
+   * Handle one server frame. Only a `pending_snapshot_request`, a
+   * `question_answer_command`, or a `permission_decide_command` received
+   * after the Gateway confirmed registration produces a reply; every other
+   * frame — registration results, unknown types, malformed JSON,
+   * non-string payloads, and any of the three request types before
+   * registration — is ignored without ever throwing, so notification
+   * behavior is unaffected.
    */
   private onServerFrame(socket: ControlSocket, event: unknown): void {
     const data = messageData(event);
@@ -228,6 +255,14 @@ export class ControlChannel implements PluginControl {
         return; // malformed answer command: ignore and keep the channel alive
       }
       void this.answerCommand(socket, command);
+      return;
+    }
+    if (frame.type === "permission_decide_command") {
+      const command = parseDecisionCommand(frame);
+      if (command === null) {
+        return; // malformed decision command: ignore and keep the channel alive
+      }
+      void this.decideCommand(socket, command);
     }
   }
 
@@ -299,6 +334,62 @@ export class ControlChannel implements PluginControl {
             abort.abort();
             resolve("result_unknown");
           }, this.options.answerTimeoutMs ?? QUESTION_ANSWER_TIMEOUT_MS);
+        }),
+      ]);
+    } catch {
+      return "result_unknown";
+    } finally {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
+  /**
+   * Answer a decision command with the channel's stable instanceId and the
+   * seam's terminal status. Every command runs independently (different
+   * commandIds are never coalesced onto one upstream call). Never throws:
+   * a missing seam, seam failure, or timeout all report `result_unknown`,
+   * and a socket that vanished mid-reply is left alone.
+   */
+  private async decideCommand(socket: ControlSocket, command: DecideCommand): Promise<void> {
+    const status = await this.runDecision(command);
+    if (!this.running || this.socket !== socket) {
+      return;
+    }
+    const result: PluginControlClientMessage = {
+      type: "permission_decide_result",
+      commandId: command.commandId,
+      instanceId: this.instanceId,
+      status,
+    };
+    try {
+      socket.send(JSON.stringify(result));
+    } catch {
+      // A failed reply must never affect notification behavior.
+    }
+  }
+
+  /** Run the injected decision seam under a bounded abort timeout. */
+  private async runDecision(command: DecideCommand): Promise<PermissionCommandStatus> {
+    if (this.options.decidePermission === undefined) {
+      return "result_unknown";
+    }
+    const abort = new AbortController();
+    let timeout: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        this.options.decidePermission(
+          command.requestId,
+          this.options.directory,
+          command.decision,
+          abort.signal,
+        ),
+        new Promise<PermissionCommandStatus>((resolve) => {
+          timeout = setTimeout(() => {
+            abort.abort();
+            resolve("result_unknown");
+          }, this.options.decideTimeoutMs ?? PERMISSION_DECIDE_TIMEOUT_MS);
         }),
       ]);
     } catch {
@@ -417,6 +508,37 @@ interface AnswerCommand {
   commandId: string;
   requestId: string;
   answers: QuestionAnswers;
+}
+
+/** One validated `permission_decide_command` server frame. */
+interface DecideCommand {
+  commandId: string;
+  requestId: string;
+  decision: PermissionDecision;
+}
+
+/**
+ * Structurally validate a `permission_decide_command` frame against the
+ * contract's shape (uuid commandId, nonempty requestId, `once`|`reject`
+ * decision). Returns null for anything malformed so the channel ignores it
+ * without a reply.
+ */
+function parseDecisionCommand(frame: Record<string, unknown>): DecideCommand | null {
+  if (!isUuid(frame.commandId)) {
+    return null;
+  }
+  if (typeof frame.requestId !== "string" || frame.requestId.length === 0) {
+    return null;
+  }
+  const decision = frame.decision;
+  if (decision !== "once" && decision !== "reject") {
+    return null;
+  }
+  return {
+    commandId: frame.commandId,
+    requestId: frame.requestId,
+    decision,
+  };
 }
 
 /**

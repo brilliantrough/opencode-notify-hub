@@ -5,6 +5,7 @@
 // ignore_for_file: unused_element
 import 'package:notify_api/src/model/plugin_control_server_message_one_of2.dart';
 import 'package:built_collection/built_collection.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of3.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
 import 'package:built_value/built_value.dart';
@@ -22,11 +23,12 @@ part 'plugin_control_server_message.g.dart';
 /// * [requestId]
 /// * [answers]
 /// * [commandId]
+/// * [decision]
 @BuiltValue()
 abstract class PluginControlServerMessage
     implements
         Built<PluginControlServerMessage, PluginControlServerMessageBuilder> {
-  /// One Of [PluginControlServerMessageOneOf], [PluginControlServerMessageOneOf1], [PluginControlServerMessageOneOf2]
+  /// One Of [PluginControlServerMessageOneOf], [PluginControlServerMessageOneOf1], [PluginControlServerMessageOneOf2], [PluginControlServerMessageOneOf3]
   OneOf get oneOf;
 
   PluginControlServerMessage._();
@@ -85,6 +87,7 @@ class _$PluginControlServerMessageSerializer
       FullType(PluginControlServerMessageOneOf),
       FullType(PluginControlServerMessageOneOf1),
       FullType(PluginControlServerMessageOneOf2),
+      FullType(PluginControlServerMessageOneOf3),
     ]);
     oneOfDataSrc = serialized;
     result.oneOf =
@@ -126,6 +129,9 @@ class PluginControlServerMessageTypeEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'question_answer_command')
   static const PluginControlServerMessageTypeEnum questionAnswerCommand =
       _$pluginControlServerMessageTypeEnum_questionAnswerCommand;
+  @BuiltValueEnumConst(wireName: r'permission_decide_command')
+  static const PluginControlServerMessageTypeEnum permissionDecideCommand =
+      _$pluginControlServerMessageTypeEnum_permissionDecideCommand;
 
   static Serializer<PluginControlServerMessageTypeEnum> get serializer =>
       _$pluginControlServerMessageTypeEnumSerializer;
@@ -136,4 +142,23 @@ class PluginControlServerMessageTypeEnum extends EnumClass {
       _$pluginControlServerMessageTypeEnumValues;
   static PluginControlServerMessageTypeEnum valueOf(String name) =>
       _$pluginControlServerMessageTypeEnumValueOf(name);
+}
+
+class PluginControlServerMessageDecisionEnum extends EnumClass {
+  @BuiltValueEnumConst(wireName: r'once')
+  static const PluginControlServerMessageDecisionEnum once =
+      _$pluginControlServerMessageDecisionEnum_once;
+  @BuiltValueEnumConst(wireName: r'reject')
+  static const PluginControlServerMessageDecisionEnum reject =
+      _$pluginControlServerMessageDecisionEnum_reject;
+
+  static Serializer<PluginControlServerMessageDecisionEnum> get serializer =>
+      _$pluginControlServerMessageDecisionEnumSerializer;
+
+  const PluginControlServerMessageDecisionEnum._(String name) : super(name);
+
+  static BuiltSet<PluginControlServerMessageDecisionEnum> get values =>
+      _$pluginControlServerMessageDecisionEnumValues;
+  static PluginControlServerMessageDecisionEnum valueOf(String name) =>
+      _$pluginControlServerMessageDecisionEnumValueOf(name);
 }

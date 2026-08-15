@@ -51,6 +51,21 @@ components:
         - createdAt
         - secret
       type: object
+    DecidePermissionBody:
+      additionalProperties: false
+      properties:
+        commandId:
+          format: uuid
+          type: string
+        decision:
+          enum:
+            - once
+            - reject
+          type: string
+      required:
+        - commandId
+        - decision
+      type: object
     Device:
       additionalProperties: false
       properties:
@@ -940,6 +955,23 @@ components:
         - generatedAt
         - interactions
       type: object
+    PermissionCommandResult:
+      additionalProperties: false
+      properties:
+        commandId:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - confirmed
+            - stale
+            - upstream_error
+            - result_unknown
+          type: string
+      required:
+        - commandId
+        - status
+      type: object
     PluginControlClientMessage:
       oneOf:
         - additionalProperties: false
@@ -1176,6 +1208,29 @@ components:
             - instanceId
             - status
           type: object
+        - additionalProperties: false
+          properties:
+            commandId:
+              format: uuid
+              type: string
+            instanceId:
+              format: uuid
+              type: string
+            status:
+              enum:
+                - confirmed
+                - stale
+                - upstream_error
+                - result_unknown
+              type: string
+            type:
+              const: permission_decide_result
+          required:
+            - type
+            - commandId
+            - instanceId
+            - status
+          type: object
     PluginControlServerMessage:
       oneOf:
         - additionalProperties: false
@@ -1231,6 +1286,27 @@ components:
             - commandId
             - requestId
             - answers
+          type: object
+        - additionalProperties: false
+          properties:
+            commandId:
+              format: uuid
+              type: string
+            decision:
+              enum:
+                - once
+                - reject
+              type: string
+            requestId:
+              minLength: 1
+              type: string
+            type:
+              const: permission_decide_command
+          required:
+            - type
+            - commandId
+            - requestId
+            - decision
           type: object
     QuestionCommandResult:
       additionalProperties: false
@@ -2361,6 +2437,67 @@ paths:
       security:
         - bearerAuth: []
       summary: List the authenticated user's pending interactions.
+      tags:
+        - pending
+  /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision:
+    post:
+      description: "Validates and submits one immediate allow-once or reject decision for a pending permission owned by the authenticated account and routes the command to the exact Plugin instance. The response carries the client-generated commandId and the terminal outcome; it confirms gateway routing, not that OpenCode applied the decision. Always-allow is not part of this operation: it is a later slice with its own confirmation. Leaving the request undecided has no OpenCode side effect."
+      operationId: decidePermission
+      parameters:
+        - description: OpenCode instance identifier.
+          in: path
+          name: instanceId
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: OpenCode permission request identifier.
+          in: path
+          name: requestId
+          required: true
+          schema:
+            minLength: 1
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecidePermissionBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionCommandResult"
+          description: Terminal command outcome.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Validation failed.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Missing or invalid access token.
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Unknown instance for this user, or no matching pending permission request.
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Command conflicts with existing state; for example the request is stale or a conflicting command is already in flight.
+      security:
+        - bearerAuth: []
+      summary: Submit an immediate decision for a pending OpenCode permission.
       tags:
         - pending
   /v1/pending-interactions/{instanceId}/questions/{requestId}/answer:

@@ -28,6 +28,10 @@ import {
   ingestKeyListResponseSchema,
 } from "./schemas/ingest-keys.js";
 import { pendingInteractionSchema, pendingSnapshotSchema } from "./schemas/pending.js";
+import {
+  decidePermissionBodySchema,
+  permissionCommandResultSchema,
+} from "./schemas/permissions.js";
 import { answerQuestionBodySchema, questionCommandResultSchema } from "./schemas/questions.js";
 import { wsServerMessageSchema } from "./schemas/ws.js";
 
@@ -72,6 +76,9 @@ export const validatePendingSnapshot = ajv.compile(pendingSnapshotSchema);
 export const validateAnswerQuestionBody = ajv.compile(answerQuestionBodySchema);
 export const validateQuestionCommandResult = ajv.compile(questionCommandResultSchema);
 
+export const validateDecidePermissionBody = ajv.compile(decidePermissionBodySchema);
+export const validatePermissionCommandResult = ajv.compile(permissionCommandResultSchema);
+
 export * from "./schemas/auth.js";
 export * from "./schemas/common.js";
 export * from "./schemas/control.js";
@@ -79,6 +86,7 @@ export * from "./schemas/devices.js";
 export * from "./schemas/events.js";
 export * from "./schemas/ingest-keys.js";
 export * from "./schemas/pending.js";
+export * from "./schemas/permissions.js";
 export * from "./schemas/questions.js";
 export * from "./schemas/ws.js";
 export * from "./types.js";

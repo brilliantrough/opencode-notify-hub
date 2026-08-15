@@ -17,6 +17,7 @@ import 'package:notify_api/src/model/date.dart';
 import 'package:notify_api/src/model/answer_question_body.dart';
 import 'package:notify_api/src/model/create_ingest_key_body.dart';
 import 'package:notify_api/src/model/create_ingest_key_response.dart';
+import 'package:notify_api/src/model/decide_permission_body.dart';
 import 'package:notify_api/src/model/device.dart';
 import 'package:notify_api/src/model/device_list_response_inner.dart';
 import 'package:notify_api/src/model/email_body.dart';
@@ -54,14 +55,17 @@ import 'package:notify_api/src/model/pending_interaction_one_of_questions_inner_
 import 'package:notify_api/src/model/pending_interaction_one_of_tool.dart';
 import 'package:notify_api/src/model/pending_snapshot.dart';
 import 'package:notify_api/src/model/pending_snapshot_interactions_inner.dart';
+import 'package:notify_api/src/model/permission_command_result.dart';
 import 'package:notify_api/src/model/plugin_control_client_message.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of1.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of2.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of3.dart';
 import 'package:notify_api/src/model/plugin_control_server_message.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of2.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of3.dart';
 import 'package:notify_api/src/model/question_command_result.dart';
 import 'package:notify_api/src/model/refresh_body.dart';
 import 'package:notify_api/src/model/register_body.dart';
@@ -81,6 +85,7 @@ part 'serializers.g.dart';
   AnswerQuestionBody,
   CreateIngestKeyBody,
   CreateIngestKeyResponse,
+  DecidePermissionBody,
   Device,
   DeviceListResponseInner,
   EmailBody,
@@ -118,14 +123,17 @@ part 'serializers.g.dart';
   PendingInteractionOneOfTool,
   PendingSnapshot,
   PendingSnapshotInteractionsInner,
+  PermissionCommandResult,
   PluginControlClientMessage,
   PluginControlClientMessageOneOf,
   PluginControlClientMessageOneOf1,
   PluginControlClientMessageOneOf2,
+  PluginControlClientMessageOneOf3,
   PluginControlServerMessage,
   PluginControlServerMessageOneOf,
   PluginControlServerMessageOneOf1,
   PluginControlServerMessageOneOf2,
+  PluginControlServerMessageOneOf3,
   QuestionCommandResult,
   RefreshBody,
   RegisterBody,

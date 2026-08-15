@@ -34,6 +34,7 @@ Examples use `https://notify.example.com`.
 | `POST /v1/events` | Accept one signed notification event (`202`) |
 | `GET /v1/pending-interactions` | Collect the user's authoritative OpenCode pending snapshot |
 | `POST /v1/pending-interactions/{instanceId}/questions/{requestId}/answer` | Route one ordered question answer set to the owning instance |
+| `POST /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision` | Route a `once` or `reject` permission decision to the owning instance |
 | `GET /v1/ws` | Upgrade to the authenticated realtime WebSocket |
 | `GET /v1/plugin/ws` | Upgrade to the Plugin control WebSocket |
 
@@ -126,6 +127,19 @@ the OpenCode V2 question reply API and returns `confirmed`, `stale`, or
 which never means failure: the client must reconcile against a fresh snapshot
 instead of blindly resubmitting. Answers transit memory only and are redacted
 from logs.
+
+### Permission decisions
+
+`POST /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision`
+carries a client-generated UUID `commandId` and `decision: "once" | "reject"`.
+The higher-risk `always` decision is deliberately not part of this contract.
+The same ownership, pending-projection, in-flight, timeout, and
+`result_unknown` rules as question answers apply: the owning account's
+connected `controllable` instance only, `404` for unknown/foreign targets,
+`409` for stale/wrong-kind/in-flight commands, and correlated terminal
+statuses `confirmed | stale | upstream_error | result_unknown`. Permission
+patterns, metadata, and decisions transit memory only and are redacted from
+logs; nothing is persisted.
 
 ## Regeneration
 

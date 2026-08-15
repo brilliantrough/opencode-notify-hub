@@ -8,6 +8,7 @@ import 'package:notify_api/src/model/pending_snapshot_interactions_inner.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of2.dart';
 import 'package:built_collection/built_collection.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of3.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 import 'package:one_of/one_of.dart';
@@ -32,7 +33,7 @@ part 'plugin_control_client_message.g.dart';
 abstract class PluginControlClientMessage
     implements
         Built<PluginControlClientMessage, PluginControlClientMessageBuilder> {
-  /// One Of [PluginControlClientMessageOneOf], [PluginControlClientMessageOneOf1], [PluginControlClientMessageOneOf2]
+  /// One Of [PluginControlClientMessageOneOf], [PluginControlClientMessageOneOf1], [PluginControlClientMessageOneOf2], [PluginControlClientMessageOneOf3]
   OneOf get oneOf;
 
   PluginControlClientMessage._();
@@ -91,6 +92,7 @@ class _$PluginControlClientMessageSerializer
       FullType(PluginControlClientMessageOneOf),
       FullType(PluginControlClientMessageOneOf1),
       FullType(PluginControlClientMessageOneOf2),
+      FullType(PluginControlClientMessageOneOf3),
     ]);
     oneOfDataSrc = serialized;
     result.oneOf =
@@ -110,6 +112,9 @@ class PluginControlClientMessageTypeEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'question_answer_result')
   static const PluginControlClientMessageTypeEnum questionAnswerResult =
       _$pluginControlClientMessageTypeEnum_questionAnswerResult;
+  @BuiltValueEnumConst(wireName: r'permission_decide_result')
+  static const PluginControlClientMessageTypeEnum permissionDecideResult =
+      _$pluginControlClientMessageTypeEnum_permissionDecideResult;
 
   static Serializer<PluginControlClientMessageTypeEnum> get serializer =>
       _$pluginControlClientMessageTypeEnumSerializer;

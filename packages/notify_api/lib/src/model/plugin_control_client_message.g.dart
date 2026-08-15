@@ -15,6 +15,9 @@ _$pluginControlClientMessageTypeEnum_pendingSnapshotResponse =
 const PluginControlClientMessageTypeEnum
 _$pluginControlClientMessageTypeEnum_questionAnswerResult =
     const PluginControlClientMessageTypeEnum._('questionAnswerResult');
+const PluginControlClientMessageTypeEnum
+_$pluginControlClientMessageTypeEnum_permissionDecideResult =
+    const PluginControlClientMessageTypeEnum._('permissionDecideResult');
 
 PluginControlClientMessageTypeEnum _$pluginControlClientMessageTypeEnumValueOf(
   String name,
@@ -26,6 +29,8 @@ PluginControlClientMessageTypeEnum _$pluginControlClientMessageTypeEnumValueOf(
       return _$pluginControlClientMessageTypeEnum_pendingSnapshotResponse;
     case 'questionAnswerResult':
       return _$pluginControlClientMessageTypeEnum_questionAnswerResult;
+    case 'permissionDecideResult':
+      return _$pluginControlClientMessageTypeEnum_permissionDecideResult;
     default:
       throw ArgumentError(name);
   }
@@ -38,6 +43,7 @@ _$pluginControlClientMessageTypeEnumValues =
         _$pluginControlClientMessageTypeEnum_register,
         _$pluginControlClientMessageTypeEnum_pendingSnapshotResponse,
         _$pluginControlClientMessageTypeEnum_questionAnswerResult,
+        _$pluginControlClientMessageTypeEnum_permissionDecideResult,
       ],
     );
 
@@ -94,11 +100,13 @@ class _$PluginControlClientMessageTypeEnumSerializer
     'register': 'register',
     'pendingSnapshotResponse': 'pending_snapshot_response',
     'questionAnswerResult': 'question_answer_result',
+    'permissionDecideResult': 'permission_decide_result',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'register': 'register',
     'pending_snapshot_response': 'pendingSnapshotResponse',
     'question_answer_result': 'questionAnswerResult',
+    'permission_decide_result': 'permissionDecideResult',
   };
 
   @override

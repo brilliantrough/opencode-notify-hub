@@ -32,6 +32,10 @@ import {
   ingestKeyListResponseSchema,
 } from "../src/schemas/ingest-keys.js";
 import { pendingInteractionSchema, pendingSnapshotSchema } from "../src/schemas/pending.js";
+import {
+  decidePermissionBodySchema,
+  permissionCommandResultSchema,
+} from "../src/schemas/permissions.js";
 import { answerQuestionBodySchema, questionCommandResultSchema } from "../src/schemas/questions.js";
 import { wsServerMessageSchema } from "../src/schemas/ws.js";
 
@@ -78,6 +82,14 @@ const requestIdPathParameter = {
   in: "path",
   required: true,
   description: "OpenCode question request identifier.",
+  schema: { type: "string", minLength: 1 },
+};
+
+const permissionRequestIdPathParameter = {
+  name: "requestId",
+  in: "path",
+  required: true,
+  description: "OpenCode permission request identifier.",
   schema: { type: "string", minLength: 1 },
 };
 
@@ -411,6 +423,36 @@ const document = {
         },
       },
     },
+    "/v1/pending-interactions/{instanceId}/permissions/{requestId}/decision": {
+      post: {
+        operationId: "decidePermission",
+        tags: ["pending"],
+        security: bearerSecurity,
+        summary: "Submit an immediate decision for a pending OpenCode permission.",
+        description:
+          "Validates and submits one immediate allow-once or reject decision for " +
+          "a pending permission owned by the authenticated account and routes the " +
+          "command to the exact Plugin instance. The response carries the " +
+          "client-generated commandId and the terminal outcome; it confirms gateway " +
+          "routing, not that OpenCode applied the decision. Always-allow is not " +
+          "part of this operation: it is a later slice with its own confirmation. " +
+          "Leaving the request undecided has no OpenCode side effect.",
+        parameters: [instanceIdPathParameter, permissionRequestIdPathParameter],
+        requestBody: jsonBody("DecidePermissionBody"),
+        responses: {
+          "200": jsonResponse("Terminal command outcome.", "PermissionCommandResult"),
+          "400": errorResponse("Validation failed."),
+          "401": errorResponse("Missing or invalid access token."),
+          "404": errorResponse(
+            "Unknown instance for this user, or no matching pending permission request.",
+          ),
+          "409": errorResponse(
+            "Command conflicts with existing state; for example the request is stale " +
+              "or a conflicting command is already in flight.",
+          ),
+        },
+      },
+    },
     "/v1/ws": {
       get: {
         operationId: "connectEvents",
@@ -502,6 +544,7 @@ const document = {
       AnswerQuestionBody: answerQuestionBodySchema,
       CreateIngestKeyBody: createIngestKeyBodySchema,
       CreateIngestKeyResponse: createIngestKeyResponseSchema,
+      DecidePermissionBody: decidePermissionBodySchema,
       Device: deviceSchema,
       DeviceListResponse: deviceListResponseSchema,
       EmailBody: emailBodySchema,
@@ -514,6 +557,7 @@ const document = {
       NotifyEvent: notifyEventSchema,
       PendingInteraction: pendingInteractionSchema,
       PendingSnapshot: pendingSnapshotSchema,
+      PermissionCommandResult: permissionCommandResultSchema,
       PluginControlClientMessage: pluginControlClientMessageSchema,
       PluginControlServerMessage: pluginControlServerMessageSchema,
       PatchDeviceBody: patchDeviceBodySchema,
