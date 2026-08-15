@@ -39,15 +39,15 @@ import type {
  * never persisted.
  *
  * `POST /v1/pending-interactions/:instanceId/permissions/:requestId/decision`:
- * submit one immediate decision (`once` or `reject`) for a pending permission
- * owned by the authenticated account. The registry routes the command to the
- * exact Plugin instance and awaits its terminal outcome; the 200 response
- * carries the client-generated `commandId` and confirms gateway routing, not
- * that OpenCode applied the decision. Unknown/foreign/non-actionable targets
- * and never-projected request ids answer a uniform 404; stale requests, the
- * wrong interaction kind, and a second in-flight decision on the same
- * connection answer 409. Decision bodies are redacted from logs and never
- * persisted.
+ * submit one immediate decision (`once`, `always`, or `reject`) for a pending
+ * permission owned by the authenticated account. The registry routes the
+ * command to the exact Plugin instance and awaits its terminal outcome; the
+ * 200 response carries the client-generated `commandId` and confirms gateway
+ * routing, not that OpenCode applied the decision. Unknown/foreign/non-actionable
+ * targets and never-projected request ids answer a uniform 404; stale
+ * requests, the wrong interaction kind, and a second in-flight decision on
+ * the same connection answer 409. Decision bodies are redacted from logs and
+ * never persisted.
  */
 export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPluginAsync {
   return async (app) => {

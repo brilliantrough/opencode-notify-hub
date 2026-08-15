@@ -151,6 +151,9 @@ class PluginControlServerMessageDecisionEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'reject')
   static const PluginControlServerMessageDecisionEnum reject =
       _$pluginControlServerMessageDecisionEnum_reject;
+  @BuiltValueEnumConst(wireName: r'always')
+  static const PluginControlServerMessageDecisionEnum always =
+      _$pluginControlServerMessageDecisionEnum_always;
 
   static Serializer<PluginControlServerMessageDecisionEnum> get serializer =>
       _$pluginControlServerMessageDecisionEnumSerializer;

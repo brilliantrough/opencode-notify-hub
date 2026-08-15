@@ -373,7 +373,6 @@ describe("permission decisions", () => {
         ["missing commandId", { decision: "once" }],
         ["missing decision", { commandId }],
         ["non-uuid commandId", { commandId: "cmd_1", decision: "once" }],
-        ["always decision is a later slice", { commandId, decision: "always" }],
         ["unknown decision", { commandId, decision: "allow" }],
         ["non-string decision", { commandId, decision: 1 }],
         ["unknown property", { commandId, decision: "once", patterns: [] }],
@@ -464,6 +463,57 @@ describe("permission decisions", () => {
       const body = res.json();
       expect(validatePermissionCommandResult(body)).toBe(true);
       expect(body).toEqual({ commandId, status: "confirmed" });
+    });
+
+    it("routes an always decision to the owning Plugin, returns the confirmed result, and clears the projection", async () => {
+      const alice = await createUser("decide-always@example.com");
+      const credential = await createPluginCredential(alice.token);
+      const instance = await registerPlugin(credential);
+      expect(instance.result.state).toBe("controllable");
+
+      await seedSnapshot(alice.token, instance.ws, instance.instanceId, [
+        permissionInteraction(instance.instanceId),
+      ]);
+
+      const commandId = randomUUID();
+      const command = nextMessage(instance.ws);
+      const response = decidePermission(alice.token, instance.instanceId, "per_1", {
+        commandId,
+        decision: "always",
+      });
+      const frame = (await command) as Record<string, unknown>;
+      expect(frame).toEqual({
+        type: "permission_decide_command",
+        commandId,
+        requestId: "per_1",
+        decision: "always",
+      });
+      instance.ws.send(
+        JSON.stringify({
+          type: "permission_decide_result",
+          commandId,
+          instanceId: instance.instanceId,
+          status: "confirmed",
+        }),
+      );
+
+      const res = await response;
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(validatePermissionCommandResult(body)).toBe(true);
+      expect(body).toEqual({ commandId, status: "confirmed" });
+
+      // A confirmed always decision resolves the request exactly like once or
+      // reject: the projection drops it, so a repeat decision is a 409 and no
+      // second command reaches the Plugin.
+      const silence = expectSilence(instance.ws);
+      const again = await decidePermission(alice.token, instance.instanceId, "per_1", {
+        commandId: randomUUID(),
+        decision: "reject",
+      });
+      await silence;
+      expect(again.statusCode).toBe(409);
+      expect((again.json() as { error: { code: string } }).error.code).toBe("CONFLICT");
     });
   });
 

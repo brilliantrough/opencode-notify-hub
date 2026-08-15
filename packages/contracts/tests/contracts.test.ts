@@ -1021,6 +1021,14 @@ describe("Plugin control WebSocket messages", () => {
         type: "permission_decide_command",
         commandId: decideCommandId,
         requestId: "per_1",
+        decision: "always",
+      }),
+    ).toBe(true);
+    expect(
+      validatePluginControlServerMessage({
+        type: "permission_decide_command",
+        commandId: decideCommandId,
+        requestId: "per_1",
         decision: "reject",
       }),
     ).toBe(true);
@@ -1031,10 +1039,10 @@ describe("Plugin control WebSocket messages", () => {
       type: "permission_decide_command",
       commandId: decideCommandId,
       requestId: "per_1",
-      decision: "once",
+      decision: "always",
     };
     expect(validatePluginControlServerMessage(command)).toBe(true);
-    expect(command.decision).toBe("once");
+    expect(command.decision).toBe("always");
   });
 
   it("rejects a malformed permission_decide_command frame", () => {
@@ -1046,7 +1054,6 @@ describe("Plugin control WebSocket messages", () => {
     };
     expect(validatePluginControlServerMessage({ ...command, commandId: "cmd_1" })).toBe(false);
     expect(validatePluginControlServerMessage({ ...command, requestId: "" })).toBe(false);
-    expect(validatePluginControlServerMessage({ ...command, decision: "always" })).toBe(false);
     expect(validatePluginControlServerMessage({ ...command, decision: "allow" })).toBe(false);
     expect(
       validatePluginControlServerMessage({
@@ -1556,8 +1563,8 @@ describe("DecidePermission body", () => {
     expect(validateDecidePermissionBody({ commandId, decision: "reject" })).toBe(true);
   });
 
-  it("rejects the always decision: always allow is a later slice", () => {
-    expect(validateDecidePermissionBody({ commandId, decision: "always" })).toBe(false);
+  it("accepts the always decision", () => {
+    expect(validateDecidePermissionBody({ commandId, decision: "always" })).toBe(true);
   });
 
   it("rejects an unknown decision", () => {

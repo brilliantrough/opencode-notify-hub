@@ -886,6 +886,43 @@ void main() {
       expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
     });
 
+    test('always with the injected command id and confirmed removes the '
+        'interaction', () async {
+      final sender = ScriptedDecisionSender()
+        ..outcome = PermissionDecisionOutcome.confirmed;
+      var loads = 0;
+      final container = decisionContainer(
+        permission: pendingPermission,
+        sender: sender.call,
+        loader: (call) async {
+          loads++;
+          return call == 0 ? [pendingPermission] : const <PendingInteraction>[];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .decidePermission(
+            permission: pendingPermission,
+            decision: PermissionDecision.always,
+          );
+
+      expect(sender.calls, 1);
+      final sent = sender.received.single;
+      expect(sent.commandId, 'cmd-1');
+      expect(sent.instanceId, pendingPermission.instanceId);
+      expect(sent.requestId, 'permission-1');
+      expect(sent.decision, PermissionDecision.always);
+      expect(loads, 2);
+      expect(
+        container.read(permissionSubmissionStatesProvider)['permission-1'],
+        PermissionDecisionState.confirmed,
+      );
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+    });
+
     test(
       'shows submitting while in flight and resolves to confirmed',
       () async {

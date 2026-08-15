@@ -209,10 +209,10 @@ typedef PermissionDecisionSender =
       required PermissionDecision decision,
     });
 
-/// Submits one immediate allow-once or reject decision through the generated
-/// [PendingApi.decidePermission] and maps the gateway's terminal outcome.
-/// Gateway 4xx errors surface as a thrown [DioException]. Always allow is
-/// never submitted here.
+/// Submits one decision (allow once, always allow, or reject) through the
+/// generated [PendingApi.decidePermission] and maps the gateway's terminal
+/// outcome. Gateway 4xx errors surface as a thrown [DioException]. The page
+/// sends [PermissionDecision.always] only after its confirmation dialog.
 final permissionDecisionSenderProvider = Provider<PermissionDecisionSender>((
   ref,
 ) {
@@ -231,6 +231,7 @@ final permissionDecisionSenderProvider = Provider<PermissionDecisionSender>((
         b.decision = switch (decision) {
           PermissionDecision.once => DecidePermissionBodyDecisionEnum.once,
           PermissionDecision.reject => DecidePermissionBodyDecisionEnum.reject,
+          PermissionDecision.always => DecidePermissionBodyDecisionEnum.always,
         };
       }),
     );
@@ -415,8 +416,9 @@ class PendingInteractionsController
     }
   }
 
-  /// Submits an immediate [decision] for [permission] with a fresh
-  /// client-generated command id and drives the per-request submission state.
+  /// Submits a [decision] for [permission] with a fresh client-generated
+  /// command id and drives the per-request submission state. Always allow is
+  /// submitted here only after the page's confirmation dialog.
   ///
   /// Only a confirmed outcome removes the request from the workbench; stale,
   /// upstream-error, and gateway-rejected outcomes keep it and trigger an

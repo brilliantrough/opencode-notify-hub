@@ -28,7 +28,7 @@ abstract class PluginControlServerMessageOneOf3
 
   @BuiltValueField(wireName: r'decision')
   PluginControlServerMessageOneOf3DecisionEnum get decision;
-  // enum decisionEnum {  once,  reject,  };
+  // enum decisionEnum {  once,  reject,  always,  };
 
   @BuiltValueField(wireName: r'requestId')
   String get requestId;
@@ -192,6 +192,9 @@ class PluginControlServerMessageOneOf3DecisionEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'reject')
   static const PluginControlServerMessageOneOf3DecisionEnum reject =
       _$pluginControlServerMessageOneOf3DecisionEnum_reject;
+  @BuiltValueEnumConst(wireName: r'always')
+  static const PluginControlServerMessageOneOf3DecisionEnum always =
+      _$pluginControlServerMessageOneOf3DecisionEnum_always;
 
   static Serializer<PluginControlServerMessageOneOf3DecisionEnum>
   get serializer => _$pluginControlServerMessageOneOf3DecisionEnumSerializer;

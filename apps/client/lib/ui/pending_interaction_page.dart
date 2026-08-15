@@ -144,6 +144,16 @@ class _PendingInteractionPageState
         .decidePermission(permission: permission, decision: decision);
   }
 
+  void _showAlwaysConfirm(PendingPermission permission) {
+    // The highest-risk decision must be dismissed explicitly: a barrier tap
+    // must never silently cancel the confirmation mid-submission.
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _AlwaysConfirmDialog(permission: permission),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final interaction = widget.interaction;
@@ -231,7 +241,9 @@ class _PendingInteractionPageState
             if (!readOnly) ...[
               _PermissionActions(
                 state: permissionState,
+                showAlwaysAllow: permission.always.isNotEmpty,
                 onAllowOnce: () => _decide(permission, PermissionDecision.once),
+                onAlwaysAllow: () => _showAlwaysConfirm(permission),
                 onReject: () => _decide(permission, PermissionDecision.reject),
               ),
               if (permissionSubmitting)
@@ -470,12 +482,16 @@ class _SubmissionBanner extends StatelessWidget {
 class _PermissionActions extends StatelessWidget {
   const _PermissionActions({
     required this.state,
+    required this.showAlwaysAllow,
     required this.onAllowOnce,
+    required this.onAlwaysAllow,
     required this.onReject,
   });
 
   final PermissionDecisionState state;
+  final bool showAlwaysAllow;
   final VoidCallback onAllowOnce;
+  final VoidCallback onAlwaysAllow;
   final VoidCallback onReject;
 
   @override
@@ -483,32 +499,129 @@ class _PermissionActions extends StatelessWidget {
     final locked =
         state == PermissionDecisionState.submitting ||
         state == PermissionDecisionState.confirmed;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: FilledButton.icon(
-              key: const ValueKey('permission-allow-once'),
-              onPressed: locked ? null : onAllowOnce,
-              icon: const Icon(Icons.check_circle_outline),
-              label: const Text('允许一次'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: OutlinedButton.icon(
-              key: const ValueKey('permission-reject'),
-              onPressed: locked ? null : onReject,
-              icon: const Icon(Icons.block_outlined),
-              label: const Text('拒绝'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.error,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  key: const ValueKey('permission-allow-once'),
+                  onPressed: locked ? null : onAllowOnce,
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('允许一次'),
+                ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const ValueKey('permission-reject'),
+                  onPressed: locked ? null : onReject,
+                  icon: const Icon(Icons.block_outlined),
+                  label: const Text('拒绝'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (showAlwaysAllow)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: OutlinedButton.icon(
+              key: const ValueKey('permission-allow-always'),
+              onPressed: locked ? null : onAlwaysAllow,
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('始终允许'),
             ),
           ),
-        ],
+      ],
+    );
+  }
+}
+
+/// Confirmation for the always-allow decision. OpenCode saves the exact
+/// patterns shown here and a matching command in a future session may be
+/// authorized without asking. Nothing is submitted until [确认保存] is tapped;
+/// [取消] leaves OpenCode untouched.
+class _AlwaysConfirmDialog extends ConsumerStatefulWidget {
+  const _AlwaysConfirmDialog({required this.permission});
+
+  final PendingPermission permission;
+
+  @override
+  ConsumerState<_AlwaysConfirmDialog> createState() =>
+      _AlwaysConfirmDialogState();
+}
+
+class _AlwaysConfirmDialogState extends ConsumerState<_AlwaysConfirmDialog> {
+  bool _inFlight = false;
+
+  Future<void> _confirm() async {
+    if (_inFlight) return;
+    setState(() => _inFlight = true);
+    final navigator = Navigator.of(context);
+    await ref
+        .read(pendingInteractionsProvider.notifier)
+        .decidePermission(
+          permission: widget.permission,
+          decision: PermissionDecision.always,
+        );
+    if (mounted) {
+      navigator.pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final permission = widget.permission;
+    final state =
+        ref.watch(permissionSubmissionStatesProvider)[permission.requestId] ??
+        PermissionDecisionState.idle;
+    final locked =
+        _inFlight ||
+        state == PermissionDecisionState.submitting ||
+        state == PermissionDecisionState.confirmed;
+    return AlertDialog(
+      key: const ValueKey('permission-always-confirm'),
+      title: const Text('始终允许'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('OpenCode 将保存以下规则，未来匹配的会话可能自动获得授权：'),
+            ),
+            for (var index = 0; index < permission.always.length; index++)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.save_outlined),
+                title: SelectableText(
+                  permission.always[index],
+                  key: ValueKey('permission-always-confirm-pattern-$index'),
+                ),
+              ),
+          ],
+        ),
       ),
+      actions: [
+        TextButton(
+          key: const ValueKey('permission-always-cancel'),
+          onPressed: _inFlight ? null : () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const ValueKey('permission-always-save'),
+          onPressed: locked ? null : _confirm,
+          child: const Text('确认保存'),
+        ),
+      ],
     );
   }
 }

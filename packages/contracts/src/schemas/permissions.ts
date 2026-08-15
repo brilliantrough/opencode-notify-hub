@@ -1,12 +1,12 @@
 import type { JSONSchema } from "json-schema-to-ts";
 
 // Immediate decisions a user may make for one pending OpenCode permission
-// request. `once` allows the exact request and `reject` denies it. There is
-// deliberately no `always` here: always allow is a later slice with its own
-// confirmation because it persists a reusable pattern.
+// request. `once` allows the exact request, `always` allows the request and
+// persists a reusable pattern for future matching requests, and `reject`
+// denies it.
 export const permissionDecisionSchema = {
   type: "string",
-  enum: ["once", "reject"],
+  enum: ["once", "reject", "always"],
 } as const satisfies JSONSchema;
 
 // Terminal outcomes of one client-generated decision command. `confirmed`

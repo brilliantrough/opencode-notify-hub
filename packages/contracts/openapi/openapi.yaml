@@ -61,6 +61,7 @@ components:
           enum:
             - once
             - reject
+            - always
           type: string
       required:
         - commandId
@@ -1296,6 +1297,7 @@ components:
               enum:
                 - once
                 - reject
+                - always
               type: string
             requestId:
               minLength: 1
@@ -2441,7 +2443,7 @@ paths:
         - pending
   /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision:
     post:
-      description: "Validates and submits one immediate allow-once or reject decision for a pending permission owned by the authenticated account and routes the command to the exact Plugin instance. The response carries the client-generated commandId and the terminal outcome; it confirms gateway routing, not that OpenCode applied the decision. Always-allow is not part of this operation: it is a later slice with its own confirmation. Leaving the request undecided has no OpenCode side effect."
+      description: Validates and submits one immediate allow-once, always-allow, or reject decision for a pending permission owned by the authenticated account and routes the command to the exact Plugin instance. The response carries the client-generated commandId and the terminal outcome; it confirms gateway routing, not that OpenCode applied the decision. Leaving the request undecided has no OpenCode side effect.
       operationId: decidePermission
       parameters:
         - description: OpenCode instance identifier.

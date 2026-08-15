@@ -8,10 +8,10 @@
  * `PermissionCommandStatus`.
  *
  * Guarantees:
- * - **Exact pass-through.** The `decision` (`"once"` | `"reject"`) is
- *   handed to the SDK verbatim. The adapter only ever passes `once` or
- *   `reject`; it never passes `"always"`, which is a later slice with its
- *   own confirmation because it persists a reusable pattern.
+ * - **Exact pass-through.** The `decision` (`"once"` | `"always"` | `"reject"`)
+ *   is handed to the SDK verbatim. The installed V2 SDK declares the reply
+ *   body as `"once" | "always" | "reject"`, so `always` needs no special
+ *   handling here beyond passing it through.
  * - **Instance-scoped.** Every reply call passes the plugin's own
  *   `directory`, so one machine with several Servers never answers another
  *   Server's request.

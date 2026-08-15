@@ -519,9 +519,9 @@ interface DecideCommand {
 
 /**
  * Structurally validate a `permission_decide_command` frame against the
- * contract's shape (uuid commandId, nonempty requestId, `once`|`reject`
- * decision). Returns null for anything malformed so the channel ignores it
- * without a reply.
+ * contract's shape (uuid commandId, nonempty requestId, `once`|`reject`|
+ * `always` decision). Returns null for anything malformed so the channel
+ * ignores it without a reply.
  */
 function parseDecisionCommand(frame: Record<string, unknown>): DecideCommand | null {
   if (!isUuid(frame.commandId)) {
@@ -531,7 +531,7 @@ function parseDecisionCommand(frame: Record<string, unknown>): DecideCommand | n
     return null;
   }
   const decision = frame.decision;
-  if (decision !== "once" && decision !== "reject") {
+  if (decision !== "once" && decision !== "reject" && decision !== "always") {
     return null;
   }
   return {

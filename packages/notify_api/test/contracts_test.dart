@@ -418,10 +418,11 @@ void main() {
   });
 
   group('Permission decision command', () {
-    test('DecidePermissionBody round-trips once and reject decisions', () {
+    test('DecidePermissionBody round-trips every decision', () {
       const decisions = [
         (DecidePermissionBodyDecisionEnum.once, 'once'),
         (DecidePermissionBodyDecisionEnum.reject, 'reject'),
+        (DecidePermissionBodyDecisionEnum.always, 'always'),
       ];
       for (final (decision, wire) in decisions) {
         final body = DecidePermissionBody((b) {
@@ -445,23 +446,6 @@ void main() {
         expect(restored.commandId, 'cmd-42');
         expect(restored.decision, decision);
       }
-    });
-
-    test('DecidePermissionBody rejects an always decision', () {
-      final always = {'commandId': 'cmd-42', 'decision': 'always'};
-      expect(
-        () => standardSerializers.deserializeWith(
-          DecidePermissionBody.serializer,
-          always,
-        ),
-        throwsA(
-          isA<Object>().having(
-            (error) => error.toString(),
-            'message',
-            contains('Invalid argument(s): always'),
-          ),
-        ),
-      );
     });
 
     test('PermissionCommandResult round-trips every terminal status', () {

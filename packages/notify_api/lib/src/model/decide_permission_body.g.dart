@@ -11,6 +11,9 @@ const DecidePermissionBodyDecisionEnum _$decidePermissionBodyDecisionEnum_once =
 const DecidePermissionBodyDecisionEnum
 _$decidePermissionBodyDecisionEnum_reject =
     const DecidePermissionBodyDecisionEnum._('reject');
+const DecidePermissionBodyDecisionEnum
+_$decidePermissionBodyDecisionEnum_always =
+    const DecidePermissionBodyDecisionEnum._('always');
 
 DecidePermissionBodyDecisionEnum _$decidePermissionBodyDecisionEnumValueOf(
   String name,
@@ -20,6 +23,8 @@ DecidePermissionBodyDecisionEnum _$decidePermissionBodyDecisionEnumValueOf(
       return _$decidePermissionBodyDecisionEnum_once;
     case 'reject':
       return _$decidePermissionBodyDecisionEnum_reject;
+    case 'always':
+      return _$decidePermissionBodyDecisionEnum_always;
     default:
       throw ArgumentError(name);
   }
@@ -31,6 +36,7 @@ _$decidePermissionBodyDecisionEnumValues =
       const <DecidePermissionBodyDecisionEnum>[
         _$decidePermissionBodyDecisionEnum_once,
         _$decidePermissionBodyDecisionEnum_reject,
+        _$decidePermissionBodyDecisionEnum_always,
       ],
     );
 
@@ -43,10 +49,12 @@ class _$DecidePermissionBodyDecisionEnumSerializer
   static const Map<String, Object> _toWire = const <String, Object>{
     'once': 'once',
     'reject': 'reject',
+    'always': 'always',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'once': 'once',
     'reject': 'reject',
+    'always': 'always',
   };
 
   @override

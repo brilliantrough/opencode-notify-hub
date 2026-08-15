@@ -56,14 +56,18 @@ describe("PermissionReplyAdapter", () => {
     );
   });
 
-  it("never passes the always decision to the SDK", async () => {
+  it("passes an always decision through verbatim and reports confirmed", async () => {
     const { client, reply } = makeClient(() => ({ data: true }));
     const adapter = makeAdapter(client);
 
-    const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
+    const status = await adapter.reply(REQUEST_ID, DIRECTORY, "always", new AbortController().signal);
 
     expect(status).toBe("confirmed");
-    expect(reply.mock.calls[0][0].reply).not.toBe("always");
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(reply).toHaveBeenCalledWith(
+      { requestID: REQUEST_ID, directory: DIRECTORY, reply: "always" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("forwards the caller's abort signal to the SDK call", async () => {

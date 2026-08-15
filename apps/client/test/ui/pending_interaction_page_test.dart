@@ -64,6 +64,38 @@ PendingPermission permission() => PendingPermission(
   metadata: const {'command': 'docker build .', 'path': '/work/shop-api'},
 );
 
+PendingPermission permissionWithoutAlways() => PendingPermission(
+  instanceId: '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+  machine: 'build-host',
+  project: 'shop-api',
+  directory: '/work/shop-api',
+  sessionId: 'ses-2',
+  sessionTitle: 'Release build',
+  requestId: 'permission-1',
+  occurredAt: DateTime.utc(2026, 8, 14, 9),
+  tool: const PendingTool(messageId: 'msg-2', callId: 'call-2'),
+  permission: 'bash',
+  patterns: const ['printf prototype-always'],
+  always: const [],
+  metadata: const {'command': 'printf prototype-always'},
+);
+
+PendingPermission widenedPermission() => PendingPermission(
+  instanceId: '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+  machine: 'build-host',
+  project: 'shop-api',
+  directory: '/work/shop-api',
+  sessionId: 'ses-2',
+  sessionTitle: 'Release build',
+  requestId: 'permission-1',
+  occurredAt: DateTime.utc(2026, 8, 14, 9),
+  tool: const PendingTool(messageId: 'msg-2', callId: 'call-2'),
+  permission: 'bash',
+  patterns: const ['printf prototype-always'],
+  always: const ['printf *'],
+  metadata: const {'command': 'printf prototype-always'},
+);
+
 class ScriptedAnswerSender {
   int calls = 0;
   final List<
@@ -236,6 +268,20 @@ bool allowOnceEnabled(WidgetTester tester) {
 bool rejectEnabled(WidgetTester tester) {
   final button = tester.widget<OutlinedButton>(
     find.byKey(const ValueKey('permission-reject')),
+  );
+  return button.onPressed != null;
+}
+
+bool alwaysEnabled(WidgetTester tester) {
+  final button = tester.widget<OutlinedButton>(
+    find.byKey(const ValueKey('permission-allow-always')),
+  );
+  return button.onPressed != null;
+}
+
+bool alwaysSaveEnabled(WidgetTester tester) {
+  final button = tester.widget<FilledButton>(
+    find.byKey(const ValueKey('permission-always-save')),
   );
   return button.onPressed != null;
 }
@@ -456,8 +502,8 @@ void main() {
   });
 
   testWidgets(
-    'permission page renders the complete authorization object with only '
-    'allow-once and reject actions',
+    'permission page renders the complete authorization object with allow-'
+    'once, always-allow, and reject actions',
     (tester) async {
       await pumpPage(
         tester,
@@ -494,27 +540,156 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('permission-reject')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('permission-allow-always')),
+        findsOneWidget,
+      );
       expect(find.text('允许一次'), findsOneWidget);
       expect(find.text('拒绝'), findsOneWidget);
+      expect(find.text('始终允许'), findsOneWidget);
       expect(find.byKey(const ValueKey('submit-answer')), findsNothing);
       expect(find.byType(TextField), findsNothing);
     },
   );
 
-  testWidgets('permission page never offers an always-allow action', (
-    tester,
-  ) async {
+  testWidgets(
+    'always allow is absent when the request has no reusable patterns',
+    (tester) async {
+      await pumpPage(
+        tester,
+        interaction: permissionWithoutAlways(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: ScriptedDecisionSender().call,
+      );
+
+      expect(
+        find.byKey(const ValueKey('permission-allow-always')),
+        findsNothing,
+      );
+      expect(find.text('始终允许'), findsNothing);
+      expect(find.textContaining('Always allow'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('permission-always-confirm')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'tapping always allow opens a confirmation listing every pattern verbatim '
+    'including the widened saved pattern',
+    (tester) async {
+      await pumpPage(
+        tester,
+        interaction: widenedPermission(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: ScriptedDecisionSender().call,
+      );
+
+      expect(
+        find.byKey(const ValueKey('permission-allow-always')),
+        findsOneWidget,
+      );
+      expect(alwaysEnabled(tester), isTrue);
+      await tester.tap(find.byKey(const ValueKey('permission-allow-always')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('permission-always-confirm')),
+        findsOneWidget,
+      );
+      expect(find.text('printf prototype-always'), findsOneWidget);
+      expect(find.text('printf *'), findsWidgets);
+      expect(
+        find.byKey(const ValueKey('permission-always-confirm-pattern-0')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('将保存以下规则'), findsOneWidget);
+      expect(find.textContaining('未来匹配的会话可能自动获得授权'), findsOneWidget);
+      expect(find.text('取消'), findsOneWidget);
+      expect(find.text('确认保存'), findsOneWidget);
+    },
+  );
+
+  testWidgets('cancelling always allow sends nothing and leaves the request '
+      'untouched', (tester) async {
+    final sender = ScriptedDecisionSender();
     await pumpPage(
       tester,
       interaction: permission(),
       sender: ScriptedAnswerSender().call,
-      decisionSender: ScriptedDecisionSender().call,
+      decisionSender: sender.call,
     );
 
-    expect(find.byKey(const ValueKey('permission-always-allow')), findsNothing);
-    expect(find.textContaining('始终允许'), findsNothing);
-    expect(find.textContaining('Always allow'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('permission-allow-always')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('permission-always-cancel')));
+    await tester.pumpAndSettle();
+
+    expect(sender.calls, 0);
+    expect(
+      find.byKey(const ValueKey('permission-always-confirm')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('permission-allow-always')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('permission-allow-once')), findsOneWidget);
   });
+
+  testWidgets(
+    'confirming always allow submits exactly once and duplicate taps are '
+    'inert while the command is in flight',
+    (tester) async {
+      final sender = ScriptedDecisionSender()
+        ..gate = Completer<PermissionDecisionResult>();
+      await pumpPage(
+        tester,
+        interaction: permission(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: sender.call,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('permission-allow-always')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('permission-always-save')));
+      await tester.pump();
+
+      expect(sender.calls, 1);
+      expect(sender.received.single.decision, PermissionDecision.always);
+      expect(
+        find.byKey(const ValueKey('permission-always-confirm')),
+        findsOneWidget,
+      );
+      expect(alwaysSaveEnabled(tester), isFalse);
+      expect(alwaysEnabled(tester), isFalse);
+      expect(allowOnceEnabled(tester), isFalse);
+      expect(rejectEnabled(tester), isFalse);
+
+      await tester.tap(
+        find.byKey(const ValueKey('permission-always-save')),
+        warnIfMissed: false,
+      );
+      await tester.pump();
+      expect(sender.calls, 1);
+
+      sender.gate!.complete(
+        const PermissionDecisionResult(
+          commandId: 'cmd-1',
+          outcome: PermissionDecisionOutcome.confirmed,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(sender.calls, 1);
+      expect(
+        find.byKey(const ValueKey('permission-always-confirm')),
+        findsNothing,
+      );
+      expect(find.textContaining('已确认'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'allow once shows submitting then confirmed and never resubmits',
@@ -571,6 +746,124 @@ void main() {
     expect(sender.calls, 1);
     expect(sender.received.single.decision, PermissionDecision.reject);
     expect(find.textContaining('已确认'), findsOneWidget);
+  });
+
+  testWidgets(
+    'confirming always allow shows submitting then confirmed with the request '
+    'resolved',
+    (tester) async {
+      final sender = ScriptedDecisionSender()
+        ..gate = Completer<PermissionDecisionResult>();
+      await pumpPage(
+        tester,
+        interaction: permission(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: sender.call,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('permission-allow-always')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('permission-always-save')));
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('permission-submitting')),
+        findsOneWidget,
+      );
+      expect(find.text('正在提交权限决定…'), findsOneWidget);
+
+      sender.gate!.complete(
+        const PermissionDecisionResult(
+          commandId: 'cmd-1',
+          outcome: PermissionDecisionOutcome.confirmed,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('permission-always-confirm')),
+        findsNothing,
+      );
+      expect(find.textContaining('已确认'), findsOneWidget);
+      expect(sender.calls, 1);
+      expect(sender.received.single.decision, PermissionDecision.always);
+    },
+  );
+
+  for (final scenario in [
+    (
+      name: 'stale',
+      outcome: PermissionDecisionOutcome.stale,
+      text: '该权限请求已失效，可能已在其他设备处理。',
+    ),
+    (
+      name: 'upstream error',
+      outcome: PermissionDecisionOutcome.upstreamError,
+      text: '上游 OpenCode 返回错误，决定未被应用。',
+    ),
+    (
+      name: 'result unknown',
+      outcome: PermissionDecisionOutcome.resultUnknown,
+      text: '结果未知，权限请求仍在等待。',
+    ),
+  ]) {
+    testWidgets('a ${scenario.name} always outcome keeps the permission '
+        'visible with retry enabled', (tester) async {
+      final sender = ScriptedDecisionSender()..outcome = scenario.outcome;
+      await pumpPage(
+        tester,
+        interaction: permission(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: sender.call,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('permission-allow-always')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('permission-always-save')));
+      await tester.pumpAndSettle();
+
+      expect(find.text(scenario.text), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('permission-always-confirm')),
+        findsNothing,
+      );
+      expect(find.text('bash'), findsOneWidget);
+      expect(alwaysEnabled(tester), isTrue);
+      expect(allowOnceEnabled(tester), isTrue);
+      expect(rejectEnabled(tester), isTrue);
+    });
+  }
+
+  testWidgets('a 4xx rejection of an always decision keeps the request '
+      'visible', (tester) async {
+    final sender = ScriptedDecisionSender()
+      ..throwError = DioException(
+        requestOptions: RequestOptions(
+          path: '/v1/pending-interactions/i/permissions/p/decision',
+        ),
+        response: Response(
+          requestOptions: RequestOptions(path: ''),
+          statusCode: 409,
+        ),
+        type: DioExceptionType.badResponse,
+      );
+    await pumpPage(
+      tester,
+      interaction: permission(),
+      sender: ScriptedAnswerSender().call,
+      decisionSender: sender.call,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('permission-allow-always')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('permission-always-save')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('网关拒绝了该决定，请求可能已失效。'), findsOneWidget);
+    expect(find.text('bash'), findsOneWidget);
+    expect(alwaysEnabled(tester), isTrue);
+    expect(allowOnceEnabled(tester), isTrue);
+    expect(rejectEnabled(tester), isTrue);
   });
 
   for (final scenario in [
@@ -727,8 +1020,13 @@ void main() {
           findsNothing,
         );
         expect(find.byKey(const ValueKey('permission-reject')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('permission-allow-always')),
+          findsNothing,
+        );
         expect(find.text('允许一次'), findsNothing);
         expect(find.text('拒绝'), findsNothing);
+        expect(find.text('始终允许'), findsNothing);
       },
     );
 

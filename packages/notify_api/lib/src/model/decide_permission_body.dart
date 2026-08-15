@@ -22,7 +22,7 @@ abstract class DecidePermissionBody
 
   @BuiltValueField(wireName: r'decision')
   DecidePermissionBodyDecisionEnum get decision;
-  // enum decisionEnum {  once,  reject,  };
+  // enum decisionEnum {  once,  reject,  always,  };
 
   DecidePermissionBody._();
 
@@ -146,6 +146,9 @@ class DecidePermissionBodyDecisionEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'reject')
   static const DecidePermissionBodyDecisionEnum reject =
       _$decidePermissionBodyDecisionEnum_reject;
+  @BuiltValueEnumConst(wireName: r'always')
+  static const DecidePermissionBodyDecisionEnum always =
+      _$decidePermissionBodyDecisionEnum_always;
 
   static Serializer<DecidePermissionBodyDecisionEnum> get serializer =>
       _$decidePermissionBodyDecisionEnumSerializer;

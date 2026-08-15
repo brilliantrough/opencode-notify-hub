@@ -966,6 +966,50 @@ describe("ControlChannel", () => {
     );
   });
 
+  it("passes an always decision verbatim, the owning directory, and a bounded signal to the decision seam", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const decidePermission = vi.fn(async () => "confirmed" as const);
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      decidePermission,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "permission_decide_command",
+        commandId: decisionCommandId,
+        requestId: "per_req_1",
+        decision: "always",
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(decidePermission).toHaveBeenCalledTimes(1);
+    expect(decidePermission).toHaveBeenCalledWith(
+      "per_req_1",
+      "/work/notify",
+      "always",
+      expect.any(AbortSignal),
+    );
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "permission_decide_result",
+      commandId: decisionCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "confirmed",
+    });
+  });
+
   it("does not coalesce concurrent decision commands with different commandIds", async () => {
     vi.useFakeTimers();
     const socket = new FakeSocket();
@@ -1086,7 +1130,6 @@ describe("ControlChannel", () => {
       { ...valid, commandId: 7 },
       { ...valid, requestId: "" },
       { ...valid, requestId: 7 },
-      { ...valid, decision: "always" },
       { ...valid, decision: "" },
       { ...valid, decision: 1 },
       { ...valid, decision: null },

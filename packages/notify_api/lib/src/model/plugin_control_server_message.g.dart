@@ -87,6 +87,9 @@ _$pluginControlServerMessageDecisionEnum_once =
 const PluginControlServerMessageDecisionEnum
 _$pluginControlServerMessageDecisionEnum_reject =
     const PluginControlServerMessageDecisionEnum._('reject');
+const PluginControlServerMessageDecisionEnum
+_$pluginControlServerMessageDecisionEnum_always =
+    const PluginControlServerMessageDecisionEnum._('always');
 
 PluginControlServerMessageDecisionEnum
 _$pluginControlServerMessageDecisionEnumValueOf(String name) {
@@ -95,6 +98,8 @@ _$pluginControlServerMessageDecisionEnumValueOf(String name) {
       return _$pluginControlServerMessageDecisionEnum_once;
     case 'reject':
       return _$pluginControlServerMessageDecisionEnum_reject;
+    case 'always':
+      return _$pluginControlServerMessageDecisionEnum_always;
     default:
       throw ArgumentError(name);
   }
@@ -106,6 +111,7 @@ _$pluginControlServerMessageDecisionEnumValues =
       const <PluginControlServerMessageDecisionEnum>[
         _$pluginControlServerMessageDecisionEnum_once,
         _$pluginControlServerMessageDecisionEnum_reject,
+        _$pluginControlServerMessageDecisionEnum_always,
       ],
     );
 
@@ -198,10 +204,12 @@ class _$PluginControlServerMessageDecisionEnumSerializer
   static const Map<String, Object> _toWire = const <String, Object>{
     'once': 'once',
     'reject': 'reject',
+    'always': 'always',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'once': 'once',
     'reject': 'reject',
+    'always': 'always',
   };
 
   @override

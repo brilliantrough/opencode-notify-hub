@@ -145,7 +145,7 @@ class PendingApi {
   }
 
   /// Submit an immediate decision for a pending OpenCode permission.
-  /// Validates and submits one immediate allow-once or reject decision for a pending permission owned by the authenticated account and routes the command to the exact Plugin instance. The response carries the client-generated commandId and the terminal outcome; it confirms gateway routing, not that OpenCode applied the decision. Always-allow is not part of this operation: it is a later slice with its own confirmation. Leaving the request undecided has no OpenCode side effect.
+  /// Validates and submits one immediate allow-once, always-allow, or reject decision for a pending permission owned by the authenticated account and routes the command to the exact Plugin instance. The response carries the client-generated commandId and the terminal outcome; it confirms gateway routing, not that OpenCode applied the decision. Leaving the request undecided has no OpenCode side effect.
   ///
   /// Parameters:
   /// * [instanceId] - OpenCode instance identifier.

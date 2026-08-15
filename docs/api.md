@@ -131,9 +131,11 @@ from logs.
 ### Permission decisions
 
 `POST /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision`
-carries a client-generated UUID `commandId` and `decision: "once" | "reject"`.
-The higher-risk `always` decision is deliberately not part of this contract.
-The same ownership, pending-projection, in-flight, timeout, and
+carries a client-generated UUID `commandId` and `decision: "once" | "always" |
+"reject"`. The `always` decision persists a reusable pattern in OpenCode, so
+the gateway accepts it but never constructs it: the client must have surfaced
+the exact `always` patterns first and confirmed the intent. The same
+ownership, pending-projection, in-flight, timeout, and
 `result_unknown` rules as question answers apply: the owning account's
 connected `controllable` instance only, `404` for unknown/foreign targets,
 `409` for stale/wrong-kind/in-flight commands, and correlated terminal

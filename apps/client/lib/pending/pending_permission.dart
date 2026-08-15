@@ -12,9 +12,10 @@ enum PermissionDecisionOutcome {
   resultUnknown,
 }
 
-/// The immediate decision a user can submit for a pending permission. Always
-/// allow is deliberately absent: it is a later slice with its own confirmation.
-enum PermissionDecision { once, reject }
+/// A decision a user can submit for a pending permission. [always] is never
+/// submitted on a direct tap: the page first surfaces the exact patterns
+/// OpenCode will save and only confirms the intent from a dialog.
+enum PermissionDecision { once, reject, always }
 
 /// The gateway's correlated decision reply, mapped from the generated contract.
 class PermissionDecisionResult {
