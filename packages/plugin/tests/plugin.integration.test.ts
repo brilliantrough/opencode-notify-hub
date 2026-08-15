@@ -175,7 +175,7 @@ async function emit(hooks: Hooks, event: unknown): Promise<void> {
 }
 
 /** Flush pending microtasks (normalization, lookup, envelope, drain). */
-async function settle(times = 20): Promise<void> {
+async function settle(times = 200): Promise<void> {
   for (let i = 0; i < times; i += 1) {
     await Promise.resolve();
   }
@@ -209,8 +209,9 @@ class CapturingSocket {
   }
 }
 
-/** A fetch that records every call and lets the OpenCode reply path respond distinctly. */
+/** A fetch that records every call and serves the V2 pending-question list plus reply path. */
 function makeAnswerFetch(options: {
+  list?: () => Response | Promise<Response>;
   reply?: () => Response | Promise<Response>;
 } = {}): { calls: FetchCall[]; fetchImpl: typeof fetch } {
   const calls: FetchCall[] = [];
@@ -219,17 +220,55 @@ function makeAnswerFetch(options: {
       url !== null && typeof url === "object" && "url" in url
         ? String((url as { url: unknown }).url)
         : String(url);
+    let requestBody: unknown = init?.body;
+    if (url !== null && typeof url === "object" && "body" in url && url.body !== null) {
+      try {
+        requestBody = await (url as Request).text();
+      } catch {
+        requestBody = init?.body;
+      }
+    }
     calls.push({
       url: requestUrl,
-      body: String(init?.body),
+      body: String(requestBody),
       headers: init?.headers as Record<string, string>,
     });
+    if (requestUrl.includes("/api/question/request")) {
+      return (options.list ?? defaultQuestionList)();
+    }
     if (requestUrl.includes("/question/") && requestUrl.includes("/reply")) {
       return (options.reply ?? defaultReply)();
     }
     return new Response("true", { status: 202 });
   }) as unknown as typeof fetch;
   return { calls, fetchImpl };
+}
+
+/** The V2 pending-question list keeps one pending request for `qst_req1`. */
+function defaultQuestionList(): Response {
+  return new Response(
+    JSON.stringify({
+      location: { directory: "/home/dev/project" },
+      data: [
+        {
+          id: "qst_req1",
+          sessionID: "ses_1",
+          questions: [
+            { header: "Database", question: "Which database?", options: [], multiple: false },
+          ],
+        },
+      ],
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/** An empty V2 pending-question list (the request was already resolved). */
+function emptyQuestionList(): Response {
+  return new Response(
+    JSON.stringify({ location: { directory: "/home/dev/project" }, data: [] }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
 }
 
 /** OpenCode's real reply body is JSON `true`; keep the stub's content type honest. */
@@ -281,8 +320,9 @@ function driveAnswerCommand(socket: CapturingSocket): void {
   });
 }
 
-/** A fetch that records every call and lets the OpenCode permission reply path respond distinctly. */
+/** A fetch that records every call and serves the V2 pending-permission list plus reply path. */
 function makePermissionFetch(options: {
+  list?: () => Response | Promise<Response>;
   reply?: () => Response | Promise<Response>;
 } = {}): { calls: FetchCall[]; fetchImpl: typeof fetch } {
   const calls: FetchCall[] = [];
@@ -296,12 +336,36 @@ function makePermissionFetch(options: {
       body: String(init?.body),
       headers: init?.headers as Record<string, string>,
     });
+    if (requestUrl.includes("/api/permission/request")) {
+      return (options.list ?? defaultPermissionList)();
+    }
     if (requestUrl.includes("/permission/") && requestUrl.includes("/reply")) {
       return (options.reply ?? defaultReply)();
     }
     return new Response("true", { status: 202 });
   }) as unknown as typeof fetch;
   return { calls, fetchImpl };
+}
+
+/** The V2 pending-permission list keeps one pending request for `per_req1`. */
+function defaultPermissionList(): Response {
+  return new Response(
+    JSON.stringify({
+      location: { directory: "/home/dev/project" },
+      data: [
+        { id: "per_req1", sessionID: "ses_1", action: "edit", resources: ["iso.ts"], save: [] },
+      ],
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/** An empty V2 pending-permission list (the request was already resolved). */
+function emptyPermissionList(): Response {
+  return new Response(
+    JSON.stringify({ location: { directory: "/home/dev/project" }, data: [] }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
 }
 
 const DECISION_COMMAND_ID = "2a4b8d9c-3e5f-4a6b-9c7d-1e2f3a4b5c6d";
@@ -949,7 +1013,7 @@ describe("SessionNotifyPlugin", () => {
     );
     const { client } = makeClient();
 
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), { serverFetch: fetchImpl });
 
     // Initialization made no pending queries and no self-HTTP: the adapter
     // and its V2 SDK client are only constructed on the first snapshot
@@ -1002,7 +1066,7 @@ describe("SessionNotifyPlugin", () => {
     vi.stubGlobal("WebSocket", WebSocketClass);
     const { client } = makeClient();
 
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), { serverFetch: fetchImpl });
 
     // Initialization made no self-HTTP: the answer adapter and its V2 SDK
     // client are only constructed on the first answer command, never during
@@ -1041,15 +1105,23 @@ describe("SessionNotifyPlugin", () => {
     vi.stubGlobal("WebSocket", WebSocketClass);
     const { client } = makeClient();
 
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), { serverFetch: fetchImpl });
     await vi.advanceTimersByTimeAsync(0);
     driveAnswerCommand(sockets[0]);
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
-    expect(selfCalls).toHaveLength(1);
-    expect(selfCalls[0].url).toContain("/question/qst_req1/reply");
-    expect(selfCalls[0].url).toContain("directory=");
+    // One list read (to confirm the request is pending) then one reply.
+    const listCall = selfCalls.find((call) => call.url.includes("/api/question/request"));
+    const replyCall = selfCalls.find(
+      (call) => call.url.includes("/question/") && call.url.includes("/reply"),
+    );
+    expect(listCall).toBeTruthy();
+    expect(listCall!.url).toContain("location%5Bdirectory%5D=");
+    expect(replyCall).toBeTruthy();
+    expect(replyCall!.url).toContain("/api/session/ses_1/question/qst_req1/reply");
+    // The answers travel through the session-scoped reply body.
+    expect(replyCall!.body).toContain("Postgres");
     // Navigating away or answering never invokes question.reject.
     expect(calls.map((call) => call.url).every((url) => !url.includes("/reject"))).toBe(true);
 
@@ -1075,14 +1147,17 @@ describe("SessionNotifyPlugin", () => {
     vi.stubGlobal("WebSocket", WebSocketClass);
     const { client } = makeClient();
 
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), { serverFetch: fetchImpl });
     await vi.advanceTimersByTimeAsync(0);
     driveAnswerCommand(sockets[0]);
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
-    expect(selfCalls).toHaveLength(1);
-    expect(selfCalls[0].url).toContain("/question/qst_req1/reply");
+    const replyCall = selfCalls.find(
+      (call) => call.url.includes("/question/") && call.url.includes("/reply"),
+    );
+    expect(replyCall).toBeTruthy();
+    expect(replyCall!.url).toContain("/api/session/ses_1/question/qst_req1/reply");
     const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
     expect(frames).toContainEqual(
       expect.objectContaining({
@@ -1096,25 +1171,21 @@ describe("SessionNotifyPlugin", () => {
   });
 
   it("reports stale when OpenCode already resolved the request", async () => {
-    const { calls, fetchImpl } = makeAnswerFetch({
-      reply: () =>
-        new Response(JSON.stringify({ _tag: "QuestionNotFoundError", status: 404 }), {
-          status: 404,
-        }),
-    });
+    const { calls, fetchImpl } = makeAnswerFetch({ list: emptyQuestionList });
     vi.stubGlobal("fetch", fetchImpl);
     const { sockets, WebSocketClass } = makeCapturedSockets();
     vi.stubGlobal("WebSocket", WebSocketClass);
     const { client } = makeClient();
 
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), { serverFetch: fetchImpl });
     await vi.advanceTimersByTimeAsync(0);
     driveAnswerCommand(sockets[0]);
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    // The list confirmed the request is gone; no reply call is ever made.
     expect(selfCalls).toHaveLength(1);
-    expect(selfCalls[0].url).toContain("/question/qst_req1/reply");
+    expect(selfCalls[0].url).toContain("/api/question/request");
     const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
     expect(frames).toContainEqual(
       expect.objectContaining({
@@ -1134,7 +1205,7 @@ describe("SessionNotifyPlugin", () => {
     vi.stubGlobal("WebSocket", WebSocketClass);
     const { client } = makeClient();
 
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), { serverFetch: fetchImpl });
 
     // Initialization made no self-HTTP: the decision adapter and its V2 SDK
     // client are only constructed on the first decision command, never
@@ -1173,16 +1244,22 @@ describe("SessionNotifyPlugin", () => {
     vi.stubGlobal("WebSocket", WebSocketClass);
     const { client } = makeClient();
 
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), { serverFetch: fetchImpl });
     await vi.advanceTimersByTimeAsync(0);
     driveDecisionCommand(sockets[0], "reject");
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
-    expect(selfCalls).toHaveLength(1);
-    expect(selfCalls[0].url).toContain("/permission/per_req1/reply");
-    expect(selfCalls[0].url).toContain("directory=");
-    // The reject decision travels through the reply body; no reject/respond
+    // One list read (to confirm the request is pending) then one reply.
+    const listCall = selfCalls.find((call) => call.url.includes("/api/permission/request"));
+    const replyCall = selfCalls.find(
+      (call) => call.url.includes("/permission/") && call.url.includes("/reply"),
+    );
+    expect(listCall).toBeTruthy();
+    expect(listCall!.url).toContain("location%5Bdirectory%5D=");
+    expect(replyCall).toBeTruthy();
+    expect(replyCall!.url).toContain("/api/session/ses_1/permission/per_req1/reply");
+    // The decision travels through the reply body; no reject/respond
     // endpoint is ever invoked.
     expect(calls.map((call) => call.url).every((url) => !url.includes("/reject"))).toBe(true);
 
@@ -1208,14 +1285,17 @@ describe("SessionNotifyPlugin", () => {
     vi.stubGlobal("WebSocket", WebSocketClass);
     const { client } = makeClient();
 
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), { serverFetch: fetchImpl });
     await vi.advanceTimersByTimeAsync(0);
     driveDecisionCommand(sockets[0]);
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
-    expect(selfCalls).toHaveLength(1);
-    expect(selfCalls[0].url).toContain("/permission/per_req1/reply");
+    const replyCall = selfCalls.find(
+      (call) => call.url.includes("/permission/") && call.url.includes("/reply"),
+    );
+    expect(replyCall).toBeTruthy();
+    expect(replyCall!.url).toContain("/api/session/ses_1/permission/per_req1/reply");
     const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
     expect(frames).toContainEqual(
       expect.objectContaining({
@@ -1229,25 +1309,21 @@ describe("SessionNotifyPlugin", () => {
   });
 
   it("reports stale when OpenCode already resolved the permission request", async () => {
-    const { calls, fetchImpl } = makePermissionFetch({
-      reply: () =>
-        new Response(JSON.stringify({ _tag: "PermissionNotFoundError", status: 404 }), {
-          status: 404,
-        }),
-    });
+    const { calls, fetchImpl } = makePermissionFetch({ list: emptyPermissionList });
     vi.stubGlobal("fetch", fetchImpl);
     const { sockets, WebSocketClass } = makeCapturedSockets();
     vi.stubGlobal("WebSocket", WebSocketClass);
     const { client } = makeClient();
 
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), { serverFetch: fetchImpl });
     await vi.advanceTimersByTimeAsync(0);
     driveDecisionCommand(sockets[0]);
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
+    // The list confirmed the request is gone; no reply call is ever made.
     expect(selfCalls).toHaveLength(1);
-    expect(selfCalls[0].url).toContain("/permission/per_req1/reply");
+    expect(selfCalls[0].url).toContain("/api/permission/request");
     const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
     expect(frames).toContainEqual(
       expect.objectContaining({

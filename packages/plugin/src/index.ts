@@ -35,6 +35,7 @@ import { posix, win32 } from "node:path";
 
 import { loadConfig, type PluginConfig } from "./config.js";
 import { ControlChannel, type PluginControl } from "./control-channel.js";
+import { createLoopbackDirectFetch } from "./direct-fetch.js";
 import {
   EnvelopeFactory,
   type EnvelopeSession,
@@ -79,6 +80,12 @@ export interface SessionNotifyDeps {
   pump?: NotificationPump;
   /** Outbound control seam; defaults to the production WSS channel. */
   control?: PluginControl;
+  /**
+   * Fetch seam for the plugin's OpenCode SDK client (`input.serverUrl`).
+   * Defaults to a loopback-direct fetch that bypasses host HTTP proxies;
+   * tests inject a recording fake.
+   */
+  serverFetch?: typeof fetch;
 }
 
 /** Contract sections require nonempty strings; fall back instead of dropping. */
@@ -160,13 +167,22 @@ export function createSessionNotifyHooks(
   // command, or decision command, long after the plugin initialized, so no
   // self-HTTP happens during startup. One client instance is shared by all
   // adapters and reused across requests so first-observed timestamps stay
-  // stable.
+  // stable. All three seams read through the V2 location-scoped request
+  // lists (`question.request.list` / `permission.request.list`) and reply
+  // through the V2 session-scoped endpoints, matching the natural pending
+  // store of 1.18.18.
+  // Loopback-direct fetch: plugin→OpenCode calls go to `input.serverUrl`
+  // (always a local embedded/serve listener) and must not traverse any
+  // HTTP_PROXY from the host environment (issue #14: a proxy without a
+  // localhost no_proxy answers 502 for loopback, breaking the control path).
+  const loopbackFetch = deps.serverFetch ?? createLoopbackDirectFetch();
   let v2: (PendingListClient & QuestionReplyClient & PermissionReplyClient) | null = null;
   const v2Client = (): PendingListClient & QuestionReplyClient & PermissionReplyClient => {
     v2 ??= createOpencodeClient({
       baseUrl: input.serverUrl.toString(),
       directory,
-    });
+      fetch: loopbackFetch,
+    }).v2;
     return v2;
   };
   let pending: PendingAdapter | null = null;
@@ -194,6 +210,7 @@ export function createSessionNotifyHooks(
             const client = createOpencodeClient({
               baseUrl: input.serverUrl.toString(),
               directory,
+              fetch: loopbackFetch,
             });
             const result = await client.global.health();
             return result.data?.version ?? "unknown";
@@ -476,7 +493,15 @@ export function createSessionNotifyHooks(
  * ingest credential). Construction of the enabled pipeline is equally
  * fail-closed.
  */
-export const SessionNotifyPlugin: Plugin = async (input) => {
+/**
+ * The public plugin entry, with an optional dependency seam used by the
+ * integration tests (e.g. a recording `serverFetch`). Production hosts call
+ * it with exactly one argument, matching the `Plugin` signature.
+ */
+export const SessionNotifyPlugin: (
+  input: PluginInput,
+  deps?: SessionNotifyDeps,
+) => ReturnType<Plugin> = async (input, deps = {}) => {
   const bootstrapLogger = createSafeLogger({
     service: LOG_SERVICE,
     sink: (entry) => input.client.app.log({ body: entry }),
@@ -494,7 +519,7 @@ export const SessionNotifyPlugin: Plugin = async (input) => {
     return {};
   }
   try {
-    return createSessionNotifyHooks(input, config);
+    return createSessionNotifyHooks(input, config, deps);
   } catch {
     bootstrapLogger.error("opencode-notify disabled: notification pipeline failed to initialize");
     return {};

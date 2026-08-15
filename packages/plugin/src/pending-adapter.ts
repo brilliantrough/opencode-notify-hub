@@ -2,17 +2,19 @@
  * Pending-interaction adapter.
  *
  * The read-only slice of remote unblock: this adapter polls the owning
- * OpenCode instance's authoritative `/question` and `/permission` lists
- * through the V2 SDK and maps them onto the strict contract
- * `PendingInteraction` union.
+ * OpenCode instance's authoritative pending-question and pending-permission
+ * request stores through the V2 SDK — `v2.question.request.list` and
+ * `v2.permission.request.list`, both location-scoped — and maps them onto
+ * the strict contract `PendingInteraction` union.
  *
  * Guarantees:
  * - **Instance-scoped.** Every list call passes the plugin's own
- *   `directory`, so one machine with several Servers never sees another
- *   Server's pending requests.
- * - **Never drops authorization context.** Permission `patterns`,
- *   `always`, `metadata`, and tool identity are retained verbatim; question
- *   options keep their full descriptions.
+ *   `directory` under `location`, so one machine with several Servers never
+ *   sees another Server's pending requests.
+ * - **Never drops authorization context.** Permission `patterns`
+ *   (`resources`), `always` (`save`), `metadata`, and tool identity
+ *   (`source.type === "tool"`) are retained verbatim; question options keep
+ *   their full descriptions.
  * - **Normalizes upstream omissions.** A question item without a `multiple`
  *   flag reads as single-select (`false`), and one without a `custom` flag
  *   reads as custom-enabled (`true`) — OpenCode 1.18.18 accepts custom
@@ -21,12 +23,12 @@
  *   a request was seen and stays stable for as long as the request remains
  *   present; when a request disappears, its entry is dropped so a
  *   reappearance starts a fresh wait.
- * - **Fail closed.** A throwing SDK call or an SDK `{ data, error }` error
- *   envelope contributes no interactions; the control channel turns an
- *   unavailable list into an empty snapshot.
+ * - **Fail closed.** A throwing SDK call, an SDK error envelope, or a
+ *   malformed `{ location, data }` payload contributes no interactions; the
+ *   control channel turns an unavailable list into an empty snapshot.
  * - **Provider actions excluded by construction.** The adapter only reads
- *   question and permission endpoints; provider actions are ordinary
- *   notifications and can never enter the pending snapshot.
+ *   question and permission request endpoints; provider actions are
+ *   ordinary notifications and can never enter the pending snapshot.
  *
  * The adapter itself never throws.
  */
@@ -41,24 +43,28 @@ export interface PendingSource {
   directory: string;
 }
 
-/** Minimal structural surface of the OpenCode V2 SDK list endpoints. */
+/** Minimal structural surface of the OpenCode V2 SDK request-list endpoints. */
 export interface PendingListClient {
   question: {
-    list(
-      params?: { directory?: string; workspace?: string },
-      options?: { signal?: AbortSignal },
-    ): Promise<unknown>;
+    request: {
+      list(
+        params?: { location?: { directory?: string; workspace?: string } },
+        options?: { signal?: AbortSignal },
+      ): Promise<unknown>;
+    };
   };
   permission: {
-    list(
-      params?: { directory?: string; workspace?: string },
-      options?: { signal?: AbortSignal },
-    ): Promise<unknown>;
+    request: {
+      list(
+        params?: { location?: { directory?: string; workspace?: string } },
+        options?: { signal?: AbortSignal },
+      ): Promise<unknown>;
+    };
   };
 }
 
 export interface PendingAdapterOptions {
-  /** V2 SDK client exposing `question.list` / `permission.list`. */
+  /** V2 SDK client exposing `question.request.list` / `permission.request.list`. */
   client: PendingListClient;
   /** Best-effort session title lookup; `undefined` becomes `""`. */
   titleForSession: (sessionID: string) => string | undefined;
@@ -84,25 +90,36 @@ function asNonEmptyString(value: unknown): string | null {
 }
 
 /**
- * Extract the SDK `{ data, error }` list payload. Returns `null` for an
- * error envelope or any non-array payload so the adapter fails closed.
+ * Extract the request array from an SDK `{ data, error }` envelope whose
+ * `data` is the `{ location, data }` list payload. Returns `null` for an
+ * error envelope or any malformed shape so the adapter fails closed.
  */
 function listPayload(response: unknown): unknown[] | null {
-  if (Array.isArray(response)) {
-    return response;
-  }
   if (!isRecord(response)) {
     return null;
   }
   if (response.error != null) {
     return null;
   }
-  return Array.isArray(response.data) ? response.data : null;
+  if (!isRecord(response.data)) {
+    return null;
+  }
+  if (response.data.error != null) {
+    return null;
+  }
+  return Array.isArray(response.data.data) ? response.data.data : null;
 }
 
-/** Rename the upstream tool fields to the contract's lower-camel names. */
+/**
+ * Rename the upstream tool fields to the contract's lower-camel names. For
+ * a `PermissionV2Source` (which discriminates on `type`) only `type:
+ * "tool"` sources carry tool identity; anything else has none.
+ */
 function mapTool(tool: unknown): { messageId: string; callId: string } | undefined {
   if (!isRecord(tool)) {
+    return undefined;
+  }
+  if (tool.type !== undefined && tool.type !== "tool") {
     return undefined;
   }
   const messageId = asNonEmptyString(tool.messageID);
@@ -136,13 +153,14 @@ export class PendingAdapter {
     let permissionResponse: unknown;
     try {
       const options = signal === undefined ? undefined : { signal };
+      const location = { directory: source.directory };
       [questionResponse, permissionResponse] = await Promise.all([
         options === undefined
-          ? this.client.question.list({ directory: source.directory })
-          : this.client.question.list({ directory: source.directory }, options),
+          ? this.client.question.request.list({ location })
+          : this.client.question.request.list({ location }, options),
         options === undefined
-          ? this.client.permission.list({ directory: source.directory })
-          : this.client.permission.list({ directory: source.directory }, options),
+          ? this.client.permission.request.list({ location })
+          : this.client.permission.request.list({ location }, options),
       ]);
     } catch {
       return [];
@@ -244,19 +262,18 @@ export class PendingAdapter {
     }
     const id = asNonEmptyString(raw.id);
     const sessionID = asNonEmptyString(raw.sessionID);
-    const permission = asNonEmptyString(raw.permission);
+    const permission = asNonEmptyString(raw.action);
     if (
       id === null ||
       sessionID === null ||
       permission === null ||
-      !Array.isArray(raw.patterns) ||
-      !Array.isArray(raw.always)
+      !Array.isArray(raw.resources)
     ) {
       return null;
     }
     const strings = (value: unknown): string[] =>
       Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
-    const mappedTool = mapTool(raw.tool);
+    const mappedTool = mapTool(raw.source);
     return {
       kind: "permission",
       instanceId: source.instanceId,
@@ -268,8 +285,8 @@ export class PendingAdapter {
       requestId: id,
       occurredAt: "",
       permission,
-      patterns: strings(raw.patterns),
-      always: strings(raw.always),
+      patterns: strings(raw.resources),
+      always: strings(raw.save),
       metadata: isRecord(raw.metadata) ? raw.metadata : {},
       ...(mappedTool !== undefined ? { tool: mappedTool } : {}),
     };

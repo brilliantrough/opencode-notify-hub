@@ -46,11 +46,11 @@ function permissionRequest(overrides: Record<string, unknown> = {}): Record<stri
   return {
     id: "per_req1",
     sessionID: "ses_1",
-    permission: "bash",
-    patterns: ["rm -rf build/"],
-    always: ["printf *"],
+    action: "bash",
+    resources: ["rm -rf build/"],
+    save: ["printf *"],
     metadata: { source: "interactive", command: "pnpm test" },
-    tool: { messageID: "msg_2", callID: "call_2" },
+    source: { type: "tool", messageID: "msg_2", callID: "call_2" },
     ...overrides,
   };
 }
@@ -61,14 +61,28 @@ interface FakeListClient {
   permissionList: ReturnType<typeof vi.fn>;
 }
 
+/** Wrap a request array in the V2 `{ location, data }` list envelope. */
+function listEnvelope(directory: string, data: unknown[]): unknown {
+  return { location: { directory }, data };
+}
+
 function makeClient(
   questionData: unknown[] = [],
   permissionData: unknown[] = [],
 ): FakeListClient {
-  const questionList = vi.fn(async () => ({ data: questionData, error: undefined }));
-  const permissionList = vi.fn(async () => ({ data: permissionData, error: undefined }));
+  const questionList = vi.fn(async () => ({
+    data: listEnvelope("/work/api", questionData),
+    error: undefined,
+  }));
+  const permissionList = vi.fn(async () => ({
+    data: listEnvelope("/work/api", permissionData),
+    error: undefined,
+  }));
   return {
-    client: { question: { list: questionList }, permission: { list: permissionList } },
+    client: {
+      question: { request: { list: questionList } },
+      permission: { request: { list: permissionList } },
+    },
     questionList,
     permissionList,
   };
@@ -158,9 +172,28 @@ describe("PendingAdapter", () => {
     await adapter.list(SOURCE);
 
     expect(questionList).toHaveBeenCalledTimes(1);
-    expect(questionList).toHaveBeenCalledWith({ directory: "/work/api" });
+    expect(questionList).toHaveBeenCalledWith({ location: { directory: "/work/api" } });
     expect(permissionList).toHaveBeenCalledTimes(1);
-    expect(permissionList).toHaveBeenCalledWith({ directory: "/work/api" });
+    expect(permissionList).toHaveBeenCalledWith({ location: { directory: "/work/api" } });
+  });
+
+  it("forwards the caller's abort signal to both V2 list calls", async () => {
+    const { client, questionList, permissionList } = makeClient([questionRequest()], [permissionRequest()]);
+    const adapter = makeAdapter(client);
+    const signal = new AbortController().signal;
+
+    await adapter.list(SOURCE, signal);
+
+    expect(questionList).toHaveBeenCalledTimes(1);
+    expect(questionList).toHaveBeenCalledWith(
+      { location: { directory: "/work/api" } },
+      { signal },
+    );
+    expect(permissionList).toHaveBeenCalledTimes(1);
+    expect(permissionList).toHaveBeenCalledWith(
+      { location: { directory: "/work/api" } },
+      { signal },
+    );
   });
 
   it("supplies a best-effort session title and an empty fallback", async () => {
@@ -174,9 +207,18 @@ describe("PendingAdapter", () => {
 
   it("maintains a stable first-observed occurredAt while the request is present", async () => {
     const questionData = [questionRequest()];
-    const questionList = vi.fn(async () => ({ data: questionData, error: undefined }));
-    const permissionList = vi.fn(async () => ({ data: [], error: undefined }));
-    const client = { question: { list: questionList }, permission: { list: permissionList } };
+    const questionList = vi.fn(async () => ({
+      data: listEnvelope("/work/api", questionData),
+      error: undefined,
+    }));
+    const permissionList = vi.fn(async () => ({
+      data: listEnvelope("/work/api", []),
+      error: undefined,
+    }));
+    const client = {
+      question: { request: { list: questionList } },
+      permission: { request: { list: permissionList } },
+    };
     let current = new Date(FIXED_NOW);
     const adapter = new PendingAdapter({
       client,
@@ -198,9 +240,18 @@ describe("PendingAdapter", () => {
 
   it("drops the first-observed entry once the request disappears, then restarts it", async () => {
     const questionData: unknown[] = [questionRequest()];
-    const questionList = vi.fn(async () => ({ data: questionData, error: undefined }));
-    const permissionList = vi.fn(async () => ({ data: [], error: undefined }));
-    const client = { question: { list: questionList }, permission: { list: permissionList } };
+    const questionList = vi.fn(async () => ({
+      data: listEnvelope("/work/api", questionData),
+      error: undefined,
+    }));
+    const permissionList = vi.fn(async () => ({
+      data: listEnvelope("/work/api", []),
+      error: undefined,
+    }));
+    const client = {
+      question: { request: { list: questionList } },
+      permission: { request: { list: permissionList } },
+    };
     let current = new Date(FIXED_NOW);
     const adapter = new PendingAdapter({
       client,
@@ -222,8 +273,14 @@ describe("PendingAdapter", () => {
 
   it("recognizes an SDK error envelope as no available list (fail closed)", async () => {
     const questionList = vi.fn(async () => ({ data: undefined, error: { _tag: "BadRequestError" } }));
-    const permissionList = vi.fn(async () => ({ data: [permissionRequest()], error: undefined }));
-    const client = { question: { list: questionList }, permission: { list: permissionList } };
+    const permissionList = vi.fn(async () => ({
+      data: listEnvelope("/work/api", [permissionRequest()]),
+      error: undefined,
+    }));
+    const client = {
+      question: { request: { list: questionList } },
+      permission: { request: { list: permissionList } },
+    };
     const adapter = makeAdapter(client);
 
     const interactions = await adapter.list(SOURCE);
@@ -236,8 +293,14 @@ describe("PendingAdapter", () => {
     const questionList = vi.fn(async () => {
       throw new Error("sdk unreachable");
     });
-    const permissionList = vi.fn(async () => ({ data: [permissionRequest()], error: undefined }));
-    const client = { question: { list: questionList }, permission: { list: permissionList } };
+    const permissionList = vi.fn(async () => ({
+      data: listEnvelope("/work/api", [permissionRequest()]),
+      error: undefined,
+    }));
+    const client = {
+      question: { request: { list: questionList } },
+      permission: { request: { list: permissionList } },
+    };
     const adapter = makeAdapter(client);
 
     const interactions = await adapter.list(SOURCE);
@@ -253,17 +316,87 @@ describe("PendingAdapter", () => {
         null,
         42,
       ],
-      [permissionRequest(), { id: "per_bad", sessionID: "ses_1", permission: "" }],
+      [
+        permissionRequest(),
+        { id: "per_bad", sessionID: "ses_1", action: "" },
+        { id: "per_nosrc", sessionID: "ses_1", action: "bash", resources: ["x.ts"] },
+      ],
     );
     const adapter = makeAdapter(client);
 
     const interactions = await adapter.list(SOURCE);
 
-    expect(interactions).toHaveLength(2);
+    expect(interactions).toHaveLength(3);
     expect(interactions.map((interaction) => interaction.requestId)).toEqual([
       "qst_req1",
       "per_req1",
+      "per_nosrc",
     ]);
+    // A permission without a tool source simply has no tool identity.
+    const nosrc = interactions.find((interaction) => interaction.requestId === "per_nosrc");
+    expect(nosrc).toMatchObject({
+      kind: "permission",
+      permission: "bash",
+      patterns: ["x.ts"],
+      always: [],
+      metadata: {},
+    });
+    expect(nosrc).not.toHaveProperty("tool");
+  });
+
+  it("maps a PermissionV2Request preserving action/resources/save/metadata/source", async () => {
+    const { client } = makeClient([], [
+      permissionRequest({
+        action: "edit",
+        resources: ["src/api.ts", "src/util.ts"],
+        save: ["src/**"],
+        metadata: { origin: "cli" },
+        source: { type: "tool", messageID: "msg_9", callID: "call_9" },
+      }),
+    ]);
+    const adapter = makeAdapter(client);
+
+    const interactions = await adapter.list(SOURCE);
+
+    expect(interactions[0]).toMatchObject({
+      kind: "permission",
+      permission: "edit",
+      patterns: ["src/api.ts", "src/util.ts"],
+      always: ["src/**"],
+      metadata: { origin: "cli" },
+      tool: { messageId: "msg_9", callId: "call_9" },
+    });
+  });
+
+  it("falls back save/metadata to [] / {} and drops a non-tool source", async () => {
+    const { client } = makeClient([], [
+      permissionRequest({
+        save: undefined,
+        metadata: undefined,
+        source: { type: "local", messageID: "msg_9", callID: "call_9" },
+      }),
+    ]);
+    const adapter = makeAdapter(client);
+
+    const interactions = await adapter.list(SOURCE);
+
+    expect(interactions[0]).toMatchObject({
+      kind: "permission",
+      always: [],
+      metadata: {},
+    });
+    expect(interactions[0]).not.toHaveProperty("tool");
+  });
+
+  it("requires resources to be an array (fail closed on malformed permission)", async () => {
+    const { client } = makeClient([], [
+      permissionRequest({ resources: "rm -rf build/" }),
+    ]);
+    const adapter = makeAdapter(client);
+
+    const interactions = await adapter.list(SOURCE);
+
+    expect(interactions).toEqual([]);
   });
 
   it("normalizes a question item without multiple/custom flags to false/true", async () => {

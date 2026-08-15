@@ -36,6 +36,11 @@ export interface ControlChannelOptions {
   random?: () => number;
   versionTimeoutMs?: number;
   /**
+   * Bounded window to retry the version probe before registering as
+   * "unknown"; defaults to 60 seconds (issue #14 TUI startup race).
+   */
+  versionReadyTimeoutMs?: number;
+  /**
    * Injected pending-interaction seam. When set, a `pending_snapshot_request`
    * server frame (after registration) is answered with a
    * `pending_snapshot_response` carrying the channel's stable instanceId.
@@ -101,6 +106,14 @@ const QUESTION_ANSWER_TIMEOUT_MS = 8_000;
  */
 const PERMISSION_DECIDE_TIMEOUT_MS = 8_000;
 
+/**
+ * Bounded wait for the OpenCode version probe to succeed before the first
+ * registration (issue #14). Interactive hosts invoke the plugin factory
+ * before their HTTP server is ready; retrying for up to this window keeps
+ * the instance out of a permanent `incompatible` state.
+ */
+const VERSION_READY_TIMEOUT_MS = 60_000;
+
 /** Never-throw outbound Plugin control connection. */
 export class ControlChannel implements PluginControl {
   private readonly options: ControlChannelOptions;
@@ -151,11 +164,29 @@ export class ControlChannel implements PluginControl {
       return;
     }
     if (this.openCodeVersion === null) {
-      try {
-        const version = await this.resolveVersion();
-        this.openCodeVersion = version.trim().length > 0 ? version.trim() : "unknown";
-      } catch {
-        this.openCodeVersion = "unknown";
+      // The plugin factory can be invoked before the OpenCode HTTP server is
+      // ready (observed on the 1.18.18 TUI: the embedded server 502s for the
+      // first seconds). A failed probe must not stick: retry with backoff
+      // until the deadline, and only then register as "unknown". A permanent
+      // "unknown" cache was the incompatible-forever bug.
+      const deadline = Date.now() + (this.options.versionReadyTimeoutMs ?? VERSION_READY_TIMEOUT_MS);
+      let delay = 500;
+      while (this.running && this.openCodeVersion === null) {
+        try {
+          const version = await this.resolveVersion();
+          if (version.trim().length > 0 && version.trim() !== "unknown") {
+            this.openCodeVersion = version.trim();
+            break;
+          }
+        } catch {
+          // Not ready yet; fall through to the retry wait.
+        }
+        if (Date.now() >= deadline) {
+          this.openCodeVersion = "unknown";
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 5_000);
       }
     }
     if (!this.running) {

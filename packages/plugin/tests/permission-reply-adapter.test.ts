@@ -8,19 +8,63 @@ import {
 const REQUEST_ID = "per_req_1";
 const DIRECTORY = "/work/api";
 
+/** A V2 `PermissionV2Request` entry for the pending list. */
+function permissionRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: REQUEST_ID,
+    sessionID: "ses_1",
+    action: "bash",
+    resources: ["echo hi"],
+    save: [],
+    source: { type: "tool", messageID: "msg_2", callID: "call_2" },
+    ...overrides,
+  };
+}
+
 interface FakeReplyClient {
   client: PermissionReplyClient & {
-    permission: { reply: ReturnType<typeof vi.fn>; reject: ReturnType<typeof vi.fn> };
+    permission: {
+      request: { list: ReturnType<typeof vi.fn> };
+      reject: ReturnType<typeof vi.fn>;
+    };
+    session: { permission: { reply: ReturnType<typeof vi.fn>; reject: ReturnType<typeof vi.fn> } };
   };
+  list: ReturnType<typeof vi.fn>;
   reply: ReturnType<typeof vi.fn>;
   reject: ReturnType<typeof vi.fn>;
 }
 
-function makeClient(replyImpl: (...args: unknown[]) => unknown): FakeReplyClient {
+function makeClient(
+  listImpl: () => unknown,
+  replyImpl: (...args: unknown[]) => unknown,
+): FakeReplyClient {
+  const list = vi.fn(async () => listImpl());
   const reply = vi.fn(async (...args: unknown[]) => replyImpl(...args));
   const reject = vi.fn();
-  const client = { permission: { reply, reject } } as FakeReplyClient["client"];
-  return { client, reply, reject };
+  const client = {
+    permission: { request: { list }, reject },
+    session: { permission: { reply, reject } },
+  } as FakeReplyClient["client"];
+  return { client, list, reply, reject };
+}
+
+/** A V2 location-scoped list envelope carrying one pending permission. */
+function pendingEnvelope(): unknown {
+  return {
+    data: {
+      location: { directory: DIRECTORY },
+      data: [permissionRequest()],
+    },
+    error: undefined,
+  };
+}
+
+/** An empty V2 location-scoped list envelope. */
+function emptyEnvelope(): unknown {
+  return {
+    data: { location: { directory: DIRECTORY }, data: [] },
+    error: undefined,
+  };
 }
 
 function makeAdapter(client: PermissionReplyClient): PermissionReplyAdapter {
@@ -28,36 +72,39 @@ function makeAdapter(client: PermissionReplyClient): PermissionReplyAdapter {
 }
 
 describe("PermissionReplyAdapter", () => {
-  it("passes a once decision through verbatim and reports confirmed", async () => {
-    const { client, reply } = makeClient(() => ({ data: true }));
+  it("lists pending permissions, then passes a once decision verbatim and reports confirmed", async () => {
+    const { client, list, reply } = makeClient(pendingEnvelope, () => ({ data: true }));
     const adapter = makeAdapter(client);
     const signal = new AbortController().signal;
 
     const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", signal);
 
     expect(status).toBe("confirmed");
+    // Reads the pending list first to confirm the request and learn the session.
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledWith({ location: { directory: DIRECTORY } }, { signal });
     expect(reply).toHaveBeenCalledTimes(1);
     expect(reply).toHaveBeenCalledWith(
-      { requestID: REQUEST_ID, directory: DIRECTORY, reply: "once" },
+      { sessionID: "ses_1", requestID: REQUEST_ID, reply: "once" },
       { signal },
     );
   });
 
   it("passes a reject decision through verbatim and reports confirmed", async () => {
-    const { client, reply } = makeClient(() => ({ data: true }));
+    const { client, reply } = makeClient(pendingEnvelope, () => ({ data: true }));
     const adapter = makeAdapter(client);
 
     const status = await adapter.reply(REQUEST_ID, DIRECTORY, "reject", new AbortController().signal);
 
     expect(status).toBe("confirmed");
     expect(reply).toHaveBeenCalledWith(
-      { requestID: REQUEST_ID, directory: DIRECTORY, reply: "reject" },
+      { sessionID: "ses_1", requestID: REQUEST_ID, reply: "reject" },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
   it("passes an always decision through verbatim and reports confirmed", async () => {
-    const { client, reply } = makeClient(() => ({ data: true }));
+    const { client, reply } = makeClient(pendingEnvelope, () => ({ data: true }));
     const adapter = makeAdapter(client);
 
     const status = await adapter.reply(REQUEST_ID, DIRECTORY, "always", new AbortController().signal);
@@ -65,13 +112,13 @@ describe("PermissionReplyAdapter", () => {
     expect(status).toBe("confirmed");
     expect(reply).toHaveBeenCalledTimes(1);
     expect(reply).toHaveBeenCalledWith(
-      { requestID: REQUEST_ID, directory: DIRECTORY, reply: "always" },
+      { sessionID: "ses_1", requestID: REQUEST_ID, reply: "always" },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
-  it("forwards the caller's abort signal to the SDK call", async () => {
-    const { client, reply } = makeClient(() => ({ data: true }));
+  it("forwards the caller's abort signal to the list and reply calls", async () => {
+    const { client, reply } = makeClient(pendingEnvelope, () => ({ data: true }));
     const adapter = makeAdapter(client);
     const signal = new AbortController().signal;
 
@@ -81,18 +128,18 @@ describe("PermissionReplyAdapter", () => {
   });
 
   it("maps non-error success envelopes to confirmed except a false body", async () => {
-    // The installed SDK declares a bare boolean body, but some versions
-    // return a data object instead; every non-error envelope confirms,
-    // except `data: false`, whose meaning is not confirmation.
+    // The V2 reply is a 204 with no body, so `data` may be undefined or
+    // empty; every non-error envelope confirms, except `data: false`.
     const envelopes = [
       { data: true },
       { data: true, request: {}, response: {} },
       { data: {} },
       { data: "ok" },
       { data: undefined, error: undefined },
+      { data: [], error: undefined },
     ];
     for (const envelope of envelopes) {
-      const { client } = makeClient(() => envelope);
+      const { client } = makeClient(pendingEnvelope, () => envelope);
       const adapter = makeAdapter(client);
 
       const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
@@ -102,7 +149,7 @@ describe("PermissionReplyAdapter", () => {
   });
 
   it("maps a false success body to result_unknown instead of confirming", async () => {
-    const { client } = makeClient(() => ({ data: false }));
+    const { client } = makeClient(pendingEnvelope, () => ({ data: false }));
     const adapter = makeAdapter(client);
 
     const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
@@ -111,8 +158,19 @@ describe("PermissionReplyAdapter", () => {
   });
 
   it("maps a PermissionNotFoundError envelope to stale", async () => {
-    const { client } = makeClient(() => ({
+    const { client } = makeClient(pendingEnvelope, () => ({
       error: { _tag: "PermissionNotFoundError", status: 404 },
+    }));
+    const adapter = makeAdapter(client);
+
+    const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
+
+    expect(status).toBe("stale");
+  });
+
+  it("maps a SessionNotFoundError envelope to stale", async () => {
+    const { client } = makeClient(pendingEnvelope, () => ({
+      error: { _tag: "SessionNotFoundError", status: 404 },
     }));
     const adapter = makeAdapter(client);
 
@@ -124,7 +182,7 @@ describe("PermissionReplyAdapter", () => {
   it.each(["BadRequestError", "InvalidRequestError", "InternalError"])(
     "maps other SDK error envelopes (%s) to upstream_error",
     async (tag) => {
-      const { client } = makeClient(() => ({ error: { _tag: tag } }));
+      const { client } = makeClient(pendingEnvelope, () => ({ error: { _tag: tag } }));
       const adapter = makeAdapter(client);
 
       const status = await adapter.reply(
@@ -138,8 +196,80 @@ describe("PermissionReplyAdapter", () => {
     },
   );
 
-  it("maps a thrown SDK call to result_unknown", async () => {
-    const { client } = makeClient(() => {
+  it("reports stale without replying when the request is no longer pending", async () => {
+    const { client, reply } = makeClient(emptyEnvelope, () => ({ data: true }));
+    const adapter = makeAdapter(client);
+
+    const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
+
+    expect(status).toBe("stale");
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it("reports stale without replying when the list only holds other requests", async () => {
+    const { client, reply } = makeClient(() => ({
+      data: {
+        location: { directory: DIRECTORY },
+        data: [permissionRequest({ id: "per_other" })],
+      },
+      error: undefined,
+    }), () => ({ data: true }));
+    const adapter = makeAdapter(client);
+
+    const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
+
+    expect(status).toBe("stale");
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it("maps a thrown list call to result_unknown without replying", async () => {
+    const { client, reply } = makeClient(() => {
+      throw new Error("sdk unreachable");
+    }, () => ({ data: true }));
+    const adapter = makeAdapter(client);
+
+    const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
+
+    expect(status).toBe("result_unknown");
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it("maps a list error envelope to result_unknown", async () => {
+    const { client } = makeClient(() => ({ data: undefined, error: { _tag: "BadRequestError" } }), () => ({ data: true }));
+    const adapter = makeAdapter(client);
+
+    const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
+
+    expect(status).toBe("result_unknown");
+  });
+
+  it("maps a malformed list payload to result_unknown", async () => {
+    const malformed: unknown[] = [
+      null,
+      42,
+      "nope",
+      true,
+      { data: undefined, error: undefined },
+      { data: { error: { _tag: "InternalError" } }, error: undefined },
+      { data: { location: {}, data: "nope" }, error: undefined },
+    ];
+    for (const payload of malformed) {
+      const { client } = makeClient(() => payload, () => ({ data: true }));
+      const adapter = makeAdapter(client);
+
+      const status = await adapter.reply(
+        REQUEST_ID,
+        DIRECTORY,
+        "once",
+        new AbortController().signal,
+      );
+
+      expect(status).toBe("result_unknown");
+    }
+  });
+
+  it("maps a thrown reply call to result_unknown", async () => {
+    const { client } = makeClient(pendingEnvelope, () => {
       throw new Error("sdk exploded");
     });
     const adapter = makeAdapter(client);
@@ -150,7 +280,7 @@ describe("PermissionReplyAdapter", () => {
   });
 
   it("maps an aborted SDK call to result_unknown", async () => {
-    const { client } = makeClient(() => {
+    const { client } = makeClient(pendingEnvelope, () => {
       throw new DOMException("The operation was aborted", "AbortError");
     });
     const adapter = makeAdapter(client);
@@ -161,7 +291,7 @@ describe("PermissionReplyAdapter", () => {
   });
 
   it("maps a transport-failure error envelope (no _tag) to result_unknown", async () => {
-    const { client } = makeClient(() => ({ error: new TypeError("fetch failed") }));
+    const { client } = makeClient(pendingEnvelope, () => ({ error: new TypeError("fetch failed") }));
     const adapter = makeAdapter(client);
 
     const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
@@ -170,7 +300,7 @@ describe("PermissionReplyAdapter", () => {
   });
 
   it("maps a non-record response to result_unknown", async () => {
-    const { client } = makeClient(() => true);
+    const { client } = makeClient(pendingEnvelope, () => true);
     const adapter = makeAdapter(client);
 
     const status = await adapter.reply(REQUEST_ID, DIRECTORY, "once", new AbortController().signal);
@@ -179,7 +309,7 @@ describe("PermissionReplyAdapter", () => {
   });
 
   it("never calls a permission reject API", async () => {
-    const { client, reject } = makeClient(() => ({ data: true }));
+    const { client, reject } = makeClient(pendingEnvelope, () => ({ data: true }));
     const adapter = makeAdapter(client);
 
     await adapter.reply(REQUEST_ID, DIRECTORY, "reject", new AbortController().signal);
@@ -188,9 +318,9 @@ describe("PermissionReplyAdapter", () => {
   });
 
   it("never exposes decision bodies in its output", async () => {
-    // A hostile reply that embeds the decision in its failure still only
-    // yields a terminal status enum value: no body text can escape.
-    const { client } = makeClient(() => {
+    // A hostile list or reply that embeds the decision in its failure still
+    // only yields a terminal status enum value: no body text escapes.
+    const { client } = makeClient(pendingEnvelope, () => {
       throw new Error("leak: SECRET-DECISION");
     });
     const adapter = makeAdapter(client);

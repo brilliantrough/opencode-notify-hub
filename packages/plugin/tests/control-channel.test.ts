@@ -187,6 +187,63 @@ describe("ControlChannel", () => {
     expect(JSON.parse(socket.sent[0])).toMatchObject({ openCodeVersion: "unknown" });
   });
 
+  it("retries the version probe until the host server is ready (TUI startup race)", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    let calls = 0;
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => {
+        calls++;
+        if (calls < 3) {
+          throw new Error("502 bad gateway: server not ready");
+        }
+        return "1.18.18";
+      },
+      versionReadyTimeoutMs: 30_000,
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+    });
+
+    channel.start();
+    await vi.runAllTimersAsync();
+    socket.emit("open");
+
+    expect(calls).toBeGreaterThanOrEqual(3);
+    expect(JSON.parse(socket.sent[0])).toMatchObject({ openCodeVersion: "1.18.18" });
+  });
+
+  it("treats an unknown probe result as not-ready and keeps retrying", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    let calls = 0;
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => {
+        calls++;
+        return calls < 2 ? "unknown" : "1.18.18";
+      },
+      versionReadyTimeoutMs: 30_000,
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+    });
+
+    channel.start();
+    await vi.runAllTimersAsync();
+    socket.emit("open");
+
+    expect(calls).toBe(2);
+    expect(JSON.parse(socket.sent[0])).toMatchObject({ openCodeVersion: "1.18.18" });
+  });
+
   it("answers a pending_snapshot_request with the stable instanceId and the seam's interactions", async () => {
     vi.useFakeTimers();
     const socket = new FakeSocket();
