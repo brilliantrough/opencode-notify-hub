@@ -650,6 +650,67 @@ describe("WebSocket routing", () => {
     });
   });
 
+  describe("notification-only plugin", () => {
+    it("ingests and delivers notifications end to end when the plugin never opens the control socket", async () => {
+      const alice = await createUser("no-control@example.com");
+      const credential = await createIngestCredential(alice.token);
+      const desktop = await connect(`Bearer ${alice.token}`);
+
+      // The Plugin key is used for signed ingest only: no `/v1/plugin/ws`
+      // socket is ever opened, and no instance is ever registered.
+      const eventId = randomUUID();
+      const question = "SENTINEL-NO-CONTROL-QUESTION-1a2b3c4d";
+      const delivery = nextMessage(desktop);
+      const rawBody = JSON.stringify({
+        eventId,
+        type: "action_required",
+        occurredAt: "2026-08-10T12:00:00.000Z",
+        source: { machine: "workstation", project: "notify", directory: "/repo" },
+        session: { id: "session-1", title: "Coding" },
+        payload: {
+          requestId: "req-1",
+          kind: "question",
+          questions: [{ question }],
+        },
+      });
+      const timestamp = String(clock.nowMs());
+      const secret = credential.slice(credential.indexOf(".") + 1);
+      const signature = createHmac("sha256", secret)
+        .update(`${timestamp}.${rawBody}`)
+        .digest("hex");
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/events",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${credential}`,
+          "x-notify-timestamp": timestamp,
+          "x-notify-signature": signature,
+        },
+        payload: rawBody,
+      });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ eventId, deduplicated: false });
+
+      const message = (await delivery) as {
+        type: string;
+        event: {
+          eventId: string;
+          payload: { kind: string; questions: { question: string }[] };
+        };
+      };
+      expect(validateWsServerMessage(message)).toBe(true);
+      expect(message.type).toBe("event");
+      expect(message.event.eventId).toBe(eventId);
+      // The full notification content is delivered, control channel or not.
+      expect(message.event.payload.kind).toBe("question");
+      expect(message.event.payload.questions[0].question).toBe(question);
+
+      // Without a control socket no presence snapshot is ever published.
+      await expectSilence(desktop, 300);
+    });
+  });
+
   describe("heartbeat", () => {
     it("pings connected sockets and keeps them open while they pong", async () => {
       const { token } = await createUser("alice@example.com");
