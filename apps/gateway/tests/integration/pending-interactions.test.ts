@@ -409,6 +409,8 @@ describe("pending interactions", () => {
       expect(validatePendingSnapshot(body)).toBe(true);
       const interactions = body.interactions as Record<string, unknown>[];
       expect(interactions).toHaveLength(3);
+      // Every queried controllable instance is named, in query order.
+      expect(body.queriedInstanceIds).toEqual([first.instanceId, second.instanceId]);
 
       const firstInteraction = interactions.find(
         (interaction) => interaction.instanceId === first.instanceId,
@@ -457,6 +459,7 @@ describe("pending interactions", () => {
       expect(res.json()).toEqual({
         generatedAt: new Date(T0).toISOString(),
         interactions: [],
+        queriedInstanceIds: [],
       });
     });
 
@@ -475,6 +478,7 @@ describe("pending interactions", () => {
       expect(bobRes.json()).toEqual({
         generatedAt: new Date(T0).toISOString(),
         interactions: [],
+        queriedInstanceIds: [],
       });
 
       // Only Alice's own request queries her instance.
@@ -493,10 +497,12 @@ describe("pending interactions", () => {
       expect(aliceRes.statusCode).toBe(200);
       expect(aliceRes.json().interactions).toHaveLength(1);
       expect(aliceRes.json().interactions[0].instanceId).toBe(aliceInstance.instanceId);
+      expect(aliceRes.json().queriedInstanceIds).toEqual([aliceInstance.instanceId]);
 
       // Bob is never granted sight of Alice's interactions.
       const bobAgain = await getPendingInteractions(bob.token);
       expect(bobAgain.json().interactions).toHaveLength(0);
+      expect(bobAgain.json().queriedInstanceIds).toEqual([]);
     });
   });
 
@@ -551,7 +557,11 @@ describe("pending interactions", () => {
       const res = await response;
       await Promise.all([conflictSilence, incompatibleSilence]);
       expect(res.statusCode).toBe(200);
-      const interactions = res.json().interactions as Record<string, unknown>[];
+      const body = res.json();
+      // Only the controllable owner was issued a snapshot request: conflicting,
+      // incompatible, and offline instances are excluded from the query scope.
+      expect(body.queriedInstanceIds).toEqual([owner.instanceId]);
+      const interactions = body.interactions as Record<string, unknown>[];
       expect(interactions).toHaveLength(1);
       expect(interactions[0].instanceId).toBe(owner.instanceId);
       expect(interactions[0]).toMatchObject({
@@ -596,6 +606,8 @@ describe("pending interactions", () => {
       expect(validatePendingSnapshot(body)).toBe(true);
       expect(body.interactions).toHaveLength(1);
       expect(body.interactions[0].instanceId).toBe(responder.instanceId);
+      // Both instances were queried; the silent one simply never answered.
+      expect(body.queriedInstanceIds).toEqual([responder.instanceId, silent.instanceId]);
       // The silent instance's requestId was issued but never resolved.
       expect(silentMsg.requestId).toBeDefined();
     });
@@ -614,6 +626,8 @@ describe("pending interactions", () => {
       const requestMsg = (await request) as { requestId: string };
       const res = await response;
       expect(res.json().interactions).toHaveLength(0);
+      // The instance was still queried even though it never answered.
+      expect(res.json().queriedInstanceIds).toEqual([silent.instanceId]);
 
       // A late answer for the now-settled request must be ignored silently and
       // must not disturb the connection.

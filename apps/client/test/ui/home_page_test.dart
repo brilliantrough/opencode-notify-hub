@@ -123,7 +123,7 @@ Future<void> pumpAnswerableHome(
           ),
         ),
         pendingInteractionLoaderProvider.overrideWithValue(() async {
-          return loader();
+          return (interactions: loader(), queriedInstanceIds: null);
         }),
         questionAnswerSenderProvider.overrideWithValue(script.call),
         if (decide != null)

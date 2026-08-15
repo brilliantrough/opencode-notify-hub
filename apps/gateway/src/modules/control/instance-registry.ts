@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import {
   validatePluginControlClientMessage,
+  type CommandKind,
+  type CommandOutcome,
+  type CommandOutcomeStatus,
   type InstancePresence,
   type PendingInteraction,
   type PendingSnapshot,
@@ -48,6 +51,24 @@ export const ANSWER_TIMEOUT_MS = 10_000;
  * per-instance memory constant regardless of request churn.
  */
 export const MAX_STALE_REQUEST_IDS = 256;
+
+/**
+ * Default lifetime of one in-memory command outcome correlation (issue #13).
+ * Injectable through {@link InstanceRegistryDeps.outcomeTtlMs}; tests inject
+ * a tiny TTL. Expiry is enforced lazily on access and eagerly on write, so
+ * the body-free cache stays bounded without a background sweeper.
+ */
+export const COMMAND_OUTCOME_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Ceiling on in-memory command outcome correlations (issue #13). Newest
+ * entries survive and the oldest (Map insertion order) are evicted once the
+ * cache outgrows the bound, alongside the TTL prune — a second ceiling so
+ * the body-free cache stays constant even under command-id churn that never
+ * reaches the TTL. Injectable through
+ * {@link InstanceRegistryDeps.maxCommandOutcomes}; tests shrink it.
+ */
+export const MAX_COMMAND_OUTCOMES = 1024;
 
 const READY_OPEN = 1;
 const SUPPORTED_OPENCODE_VERSION = "1.18.18";
@@ -131,6 +152,26 @@ type PermissionDecideResultMessage = Extract<
   { type: "permission_decide_result" }
 >;
 
+/**
+ * Issue #13: one body-free, in-memory command outcome correlation keyed by the
+ * client-generated commandId. It carries only correlation and lifecycle
+ * metadata — never question answers, permission decisions, or any other
+ * interaction payload. `userId` is internal ownership metadata stripped before
+ * any outcome leaves the registry; `expiresAtMs` is the clock-based sweep
+ * bound for the lazy/prune expiry.
+ */
+interface CommandOutcomeEntry {
+  readonly userId: string;
+  readonly commandId: string;
+  readonly requestId: string;
+  readonly instanceId: string;
+  readonly kind: CommandKind;
+  status: CommandOutcomeStatus;
+  /** ISO timestamp of the last transition; echoed in the CommandOutcome. */
+  updatedAt: string;
+  readonly expiresAtMs: number;
+}
+
 export interface InstanceRegistryDeps {
   clock: Clock;
   publish(userId: string, message: WsServerMessage): void;
@@ -139,6 +180,10 @@ export interface InstanceRegistryDeps {
   snapshotTimeoutMs?: number;
   /** Defaults to {@link ANSWER_TIMEOUT_MS}; tests inject a short wait. */
   answerTimeoutMs?: number;
+  /** Defaults to {@link COMMAND_OUTCOME_TTL_MS}; tests inject a tiny TTL. */
+  outcomeTtlMs?: number;
+  /** Defaults to {@link MAX_COMMAND_OUTCOMES}; tests inject a small bound. */
+  maxCommandOutcomes?: number;
 }
 
 /**
@@ -189,6 +234,14 @@ export type DecidePermissionOutcome =
  * connection+commandId, and a confirmed decision removes the projected
  * request. Late or unknown responses and results are ignored; malformed
  * frames and registration violations still close the control connection.
+ * Issue #13 adds a body-free in-memory command outcome correlation keyed by
+ * the client-generated commandId: it is recorded the moment a command is
+ * sent, updated on every terminal transition (confirmed/stale/upstream_error
+ * plugin results, timeout, disconnect), owner-scoped on query, and expired
+ * after {@link COMMAND_OUTCOME_TTL_MS} or evicted once the cache outgrows
+ * {@link MAX_COMMAND_OUTCOMES} (oldest first). First write wins — a replayed
+ * commandId never clobbers a live outcome, only a terminal transition
+ * advances it. The correlation never carries answers, decisions, or payloads.
  */
 export class InstanceRegistry {
   private readonly records = new Map<string, InstanceRecord>();
@@ -197,11 +250,14 @@ export class InstanceRegistry {
   private readonly pendingRequests = new Map<string, PendingSnapshotRequest>();
   private readonly pendingAnswerCommands = new Map<string, PendingAnswerCommand>();
   private readonly pendingDecideCommands = new Map<string, PendingDecideCommand>();
+  private readonly commandOutcomes = new Map<string, CommandOutcomeEntry>();
   private readonly clock: Clock;
   private readonly publish: InstanceRegistryDeps["publish"];
   private readonly pingIntervalMs: number;
   private readonly snapshotTimeoutMs: number;
   private readonly answerTimeoutMs: number;
+  private readonly outcomeTtlMs: number;
+  private readonly maxCommandOutcomes: number;
   private nextSequence = 0;
   private nextConnectionUid = 0;
 
@@ -211,6 +267,8 @@ export class InstanceRegistry {
     this.pingIntervalMs = deps.pingIntervalMs ?? WS_PING_INTERVAL_MS;
     this.snapshotTimeoutMs = deps.snapshotTimeoutMs ?? PENDING_SNAPSHOT_TIMEOUT_MS;
     this.answerTimeoutMs = deps.answerTimeoutMs ?? ANSWER_TIMEOUT_MS;
+    this.outcomeTtlMs = deps.outcomeTtlMs ?? COMMAND_OUTCOME_TTL_MS;
+    this.maxCommandOutcomes = deps.maxCommandOutcomes ?? MAX_COMMAND_OUTCOMES;
   }
 
   add(auth: VerifiedIngestKey, socket: RealtimeSocket): void {
@@ -260,7 +318,11 @@ export class InstanceRegistry {
    * Only connected, `controllable` instances of the user are queried; every
    * other account's instances are invisible. Each instance gets its own UUID
    * correlation and settles after {@link PENDING_SNAPSHOT_TIMEOUT_MS}, so the
-   * result is a partial 200 snapshot when some instances never answer.
+   * result is a partial 200 snapshot when some instances never answer. The
+   * snapshot names every target instance the gateway actually issued a
+   * `pending_snapshot_request` to (`queriedInstanceIds`), so clients can tell
+   * a query that was skipped (empty target set, non-controllable instance)
+   * from one that was asked and timed out.
    * Interaction source identity (instanceId/machine/project/directory) is
    * always overwritten from the registered record, never trusted from the
    * wire.
@@ -273,8 +335,13 @@ export class InstanceRegistry {
         record.connection !== undefined &&
         record.connection.socket.readyState === READY_OPEN,
     );
+    const queriedInstanceIds = targets.map((record) => record.registration.instanceId);
     if (targets.length === 0) {
-      return { generatedAt: this.clock.now().toISOString(), interactions: [] };
+      return {
+        generatedAt: this.clock.now().toISOString(),
+        interactions: [],
+        queriedInstanceIds,
+      };
     }
     const batches = await Promise.all(
       targets.map((record) => this.queryPendingSnapshot(record)),
@@ -282,6 +349,7 @@ export class InstanceRegistry {
     return {
       generatedAt: this.clock.now().toISOString(),
       interactions: batches.flat(),
+      queriedInstanceIds,
     };
   }
 
@@ -335,12 +403,20 @@ export class InstanceRegistry {
     }
     const result = await new Promise<QuestionCommandResult>((resolve) => {
       const key = this.commandKey(connection, commandId);
+      this.recordOutcome({
+        userId,
+        commandId,
+        requestId,
+        instanceId: record.registration.instanceId,
+        kind: "question",
+      });
       const entry: PendingAnswerCommand = {
         connection,
         requestId,
         commandId,
         timer: setTimeout(() => {
           this.pendingAnswerCommands.delete(key);
+          this.settleOutcome(commandId, "result_unknown");
           resolve({ commandId, status: "result_unknown" });
         }, this.answerTimeoutMs),
         resolve,
@@ -405,12 +481,20 @@ export class InstanceRegistry {
     }
     const result = await new Promise<PermissionCommandResult>((resolve) => {
       const key = this.commandKey(connection, commandId);
+      this.recordOutcome({
+        userId,
+        commandId,
+        requestId,
+        instanceId: record.registration.instanceId,
+        kind: "permission",
+      });
       const entry: PendingDecideCommand = {
         connection,
         requestId,
         commandId,
         timer: setTimeout(() => {
           this.pendingDecideCommands.delete(key);
+          this.settleOutcome(commandId, "result_unknown");
           resolve({ commandId, status: "result_unknown" });
         }, this.answerTimeoutMs),
         resolve,
@@ -424,6 +508,31 @@ export class InstanceRegistry {
       });
     });
     return { ok: true, result };
+  }
+
+  /**
+   * Issue #13: return the body-free outcome correlation for one client-
+   * generated commandId, but only when the authenticated user owns it.
+   * Unknown command ids, entries owned by another account, and entries that
+   * expired under {@link COMMAND_OUTCOME_TTL_MS} all answer `undefined` (the
+   * route maps them to the same uniform 404). Expired entries are swept
+   * lazily on this access.
+   */
+  outcomeFor(userId: string, commandId: string): CommandOutcome | undefined {
+    const nowMs = this.clock.nowMs();
+    this.pruneExpiredOutcomes(nowMs);
+    const entry = this.commandOutcomes.get(commandId);
+    if (entry === undefined || entry.userId !== userId || nowMs >= entry.expiresAtMs) {
+      return undefined;
+    }
+    return {
+      commandId: entry.commandId,
+      requestId: entry.requestId,
+      instanceId: entry.instanceId,
+      kind: entry.kind,
+      status: entry.status,
+      updatedAt: entry.updatedAt,
+    };
   }
 
   revokeKey(ingestKeyId: string): void {
@@ -562,6 +671,7 @@ export class InstanceRegistry {
         this.rememberStale(record, pending.requestId);
       }
     }
+    this.settleOutcome(pending.commandId, message.status);
     pending.resolve({ commandId: pending.commandId, status: message.status });
   }
 
@@ -596,6 +706,7 @@ export class InstanceRegistry {
         this.rememberStale(record, pending.requestId);
       }
     }
+    this.settleOutcome(pending.commandId, message.status);
     pending.resolve({ commandId: pending.commandId, status: message.status });
   }
 
@@ -633,6 +744,87 @@ export class InstanceRegistry {
         return;
       }
       record.staleRequests.delete(oldest);
+    }
+  }
+
+  /**
+   * Record one body-free command outcome as `accepted`, keyed by commandId.
+   * Called the moment a command is about to be sent, after every gate passed,
+   * so a command that was never routed (404/409, in-flight conflict) never
+   * creates an entry. First write wins: a commandId that already has a live
+   * entry (for example a replay of a client-generated commandId across a
+   * different connection) never overwrites the recorded outcome — only
+   * {@link settleOutcome} advances a live entry. Prunes already-expired
+   * entries on this write, then evicts the oldest surviving entries once the
+   * cache outgrows {@link MAX_COMMAND_OUTCOMES}.
+   */
+  private recordOutcome(entry: {
+    userId: string;
+    commandId: string;
+    requestId: string;
+    instanceId: string;
+    kind: CommandKind;
+  }): void {
+    const nowMs = this.clock.nowMs();
+    this.pruneExpiredOutcomes(nowMs);
+    if (this.commandOutcomes.has(entry.commandId)) {
+      // First write wins: a replay must not clobber the settled outcome.
+      return;
+    }
+    this.commandOutcomes.set(entry.commandId, {
+      userId: entry.userId,
+      commandId: entry.commandId,
+      requestId: entry.requestId,
+      instanceId: entry.instanceId,
+      kind: entry.kind,
+      status: "accepted",
+      updatedAt: this.clock.now().toISOString(),
+      expiresAtMs: nowMs + this.outcomeTtlMs,
+    });
+    this.evictOldestOutcomes();
+  }
+
+  /**
+   * Enforce the {@link MAX_COMMAND_OUTCOMES} ceiling alongside the TTL prune:
+   * while the cache holds more live entries than the bound, drop the oldest
+   * surviving entries. The map preserves insertion order, and
+   * {@link recordOutcome} never re-inserts an existing commandId, so the
+   * first inserted keys are exactly the oldest commands.
+   */
+  private evictOldestOutcomes(): void {
+    while (this.commandOutcomes.size > this.maxCommandOutcomes) {
+      const oldest = this.commandOutcomes.keys().next().value;
+      if (oldest === undefined) {
+        return;
+      }
+      this.commandOutcomes.delete(oldest);
+    }
+  }
+
+  /**
+   * Advance one command outcome to a terminal status (plugin
+   * confirmed/stale/upstream_error/result_unknown, or gateway
+   * result_unknown on timeout/disconnect). Already-expired entries are
+   * dropped rather than updated.
+   */
+  private settleOutcome(commandId: string, status: CommandOutcomeStatus): void {
+    const entry = this.commandOutcomes.get(commandId);
+    if (entry === undefined || this.clock.nowMs() >= entry.expiresAtMs) {
+      if (entry !== undefined) {
+        this.commandOutcomes.delete(commandId);
+      }
+      return;
+    }
+    entry.status = status;
+    entry.updatedAt = this.clock.now().toISOString();
+  }
+
+  /** Drop every command outcome whose {@link CommandOutcomeEntry.expiresAtMs} passed. */
+  private pruneExpiredOutcomes(nowMs: number): void {
+    for (const [commandId, entry] of this.commandOutcomes) {
+      if (nowMs >= entry.expiresAtMs) {
+        this.commandOutcomes.delete(commandId);
+      }
     }
   }
 
@@ -716,6 +908,7 @@ export class InstanceRegistry {
       if (pending.connection === connection) {
         this.pendingAnswerCommands.delete(key);
         clearTimeout(pending.timer);
+        this.settleOutcome(pending.commandId, "result_unknown");
         pending.resolve({ commandId: pending.commandId, status: "result_unknown" });
       }
     }
@@ -723,6 +916,7 @@ export class InstanceRegistry {
       if (pending.connection === connection) {
         this.pendingDecideCommands.delete(key);
         clearTimeout(pending.timer);
+        this.settleOutcome(pending.commandId, "result_unknown");
         pending.resolve({ commandId: pending.commandId, status: "result_unknown" });
       }
     }

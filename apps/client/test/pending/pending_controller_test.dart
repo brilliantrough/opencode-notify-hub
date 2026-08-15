@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
+import 'package:client/pending/command_outcome.dart';
 import 'package:client/pending/pending_answer.dart';
 import 'package:client/pending/pending_controller.dart';
 import 'package:client/pending/pending_interaction.dart';
@@ -151,6 +152,7 @@ ProviderContainer answerContainer({
   required PendingQuestion question,
   required QuestionAnswerSender sender,
   Future<List<PendingInteraction>> Function(int call)? loader,
+  CommandOutcomeLoader? outcomeLoader,
   String Function()? commandId,
 }) {
   var calls = 0;
@@ -166,9 +168,13 @@ ProviderContainer answerContainer({
       ),
       pendingInteractionLoaderProvider.overrideWithValue(() async {
         final call = calls++;
-        return loader?.call(call) ?? [question];
+        final loaded = await (loader?.call(call) ?? Future.value([question]));
+        return (interactions: loaded, queriedInstanceIds: null);
       }),
       questionAnswerSenderProvider.overrideWithValue(sender),
+      commandOutcomeLoaderProvider.overrideWithValue(
+        outcomeLoader ?? ScriptedOutcomeLoader().call,
+      ),
       commandIdGeneratorProvider.overrideWithValue(commandId ?? () => 'cmd-1'),
     ],
   );
@@ -190,6 +196,34 @@ PendingPermission permission(String id, DateTime occurredAt) =>
       always: const ['docker build *'],
       metadata: const {'command': 'docker build .'},
     );
+
+/// Controllable outcome loader for controller tests. Resolves to an accepted
+/// record by default so an unknown submission stays unknown and still triggers
+/// the authoritative re-read.
+class ScriptedOutcomeLoader {
+  int calls = 0;
+  final List<String> queried = [];
+  Completer<CommandOutcomeInfo>? gate;
+  CommandOutcomeInfo result = const CommandOutcomeInfo(
+    status: CommandOutcomeStatus.accepted,
+    kind: CommandOutcomeKind.question,
+  );
+  Object? throwError;
+
+  Future<CommandOutcomeInfo> call(String commandId) async {
+    calls++;
+    queried.add(commandId);
+    final current = gate;
+    if (current != null) {
+      return current.future;
+    }
+    final error = throwError;
+    if (error != null) {
+      throw error;
+    }
+    return result;
+  }
+}
 
 /// Controllable decision sender for controller tests.
 class ScriptedDecisionSender {
@@ -236,6 +270,7 @@ ProviderContainer decisionContainer({
   required PendingPermission permission,
   required PermissionDecisionSender sender,
   Future<List<PendingInteraction>> Function(int call)? loader,
+  CommandOutcomeLoader? outcomeLoader,
   String Function()? commandId,
 }) {
   var calls = 0;
@@ -251,9 +286,13 @@ ProviderContainer decisionContainer({
       ),
       pendingInteractionLoaderProvider.overrideWithValue(() async {
         final call = calls++;
-        return loader?.call(call) ?? [permission];
+        final loaded = await (loader?.call(call) ?? Future.value([permission]));
+        return (interactions: loaded, queriedInstanceIds: null);
       }),
       permissionDecisionSenderProvider.overrideWithValue(sender),
+      commandOutcomeLoaderProvider.overrideWithValue(
+        outcomeLoader ?? ScriptedOutcomeLoader().call,
+      ),
       commandIdGeneratorProvider.overrideWithValue(commandId ?? () => 'cmd-1'),
     ],
   );
@@ -290,7 +329,10 @@ void main() {
         ),
         pendingInteractionLoaderProvider.overrideWithValue(() async {
           calls++;
-          return const [];
+          return (
+            interactions: const <PendingInteraction>[],
+            queriedInstanceIds: null,
+          );
         }),
       ],
     );
@@ -311,7 +353,7 @@ void main() {
         ),
         pendingInteractionLoaderProvider.overrideWithValue(() async {
           calls++;
-          return [newer, older];
+          return (interactions: [newer, older], queriedInstanceIds: null);
         }),
       ],
     );
@@ -333,7 +375,12 @@ void main() {
           authControllerProvider.overrideWith(() => auth),
           pendingInteractionLoaderProvider.overrideWithValue(() async {
             calls++;
-            return [interaction('request', DateTime.utc(2026, 8, 14, 9))];
+            return (
+              interactions: [
+                interaction('request', DateTime.utc(2026, 8, 14, 9)),
+              ],
+              queriedInstanceIds: null,
+            );
           }),
         ],
       );
@@ -357,7 +404,10 @@ void main() {
         ),
         pendingInteractionLoaderProvider.overrideWithValue(() async {
           calls++;
-          return const [];
+          return (
+            interactions: const <PendingInteraction>[],
+            queriedInstanceIds: null,
+          );
         }),
       ],
     );
@@ -390,7 +440,12 @@ void main() {
         ),
         pendingInteractionLoaderProvider.overrideWithValue(() async {
           calls++;
-          return [interaction('request-$calls', DateTime.utc(2026, 8, 14, 9))];
+          return (
+            interactions: [
+              interaction('request-$calls', DateTime.utc(2026, 8, 14, 9)),
+            ],
+            queriedInstanceIds: null,
+          );
         }),
       ],
     );
@@ -421,8 +476,14 @@ void main() {
           authControllerProvider.overrideWith(() => auth),
           pendingInteractionLoaderProvider.overrideWithValue(() async {
             calls++;
-            if (calls == 1) return const [];
-            return delayed.future;
+            if (calls == 1) {
+              return (
+                interactions: const <PendingInteraction>[],
+                queriedInstanceIds: null,
+              );
+            }
+            final loaded = await delayed.future;
+            return (interactions: loaded, queriedInstanceIds: null);
           }),
         ],
       );
@@ -624,7 +685,7 @@ void main() {
     );
 
     test(
-      'result unknown keeps the interaction visible without re-reading',
+      'result unknown keeps the interaction visible and re-reads the snapshot',
       () async {
         final sender = ScriptedAnswerSender()
           ..outcome = QuestionAnswerOutcome.resultUnknown;
@@ -650,7 +711,7 @@ void main() {
               ],
             );
 
-        expect(loads, 1);
+        expect(loads, 2);
         expect(
           container.read(questionSubmissionStatesProvider)['question-1'],
           QuestionSubmissionState.resultUnknown,
@@ -667,7 +728,7 @@ void main() {
     );
 
     test(
-      'a 4xx gateway rejection keeps the interaction and re-reads',
+      'a 409 gateway rejection is presented as handled elsewhere and re-reads',
       () async {
         final sender = ScriptedAnswerSender()
           ..throwError = DioException(
@@ -677,6 +738,58 @@ void main() {
             response: Response(
               requestOptions: RequestOptions(path: ''),
               statusCode: 409,
+            ),
+            type: DioExceptionType.badResponse,
+          );
+        var loads = 0;
+        final container = answerContainer(
+          question: question,
+          sender: sender.call,
+          loader: (call) async {
+            loads++;
+            return [question];
+          },
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        await container
+            .read(pendingInteractionsProvider.notifier)
+            .answerQuestion(
+              question: question,
+              answers: const [
+                ['PostgreSQL'],
+                ['Migrate data'],
+              ],
+            );
+
+        expect(loads, 2);
+        expect(
+          container.read(questionSubmissionStatesProvider)['question-1'],
+          QuestionSubmissionState.handledElsewhere,
+        );
+        expect(
+          container
+              .read(pendingInteractionsProvider)
+              .requireValue
+              .single
+              .requestId,
+          'question-1',
+        );
+      },
+    );
+
+    test(
+      'a generic 4xx gateway rejection keeps the interaction and re-reads',
+      () async {
+        final sender = ScriptedAnswerSender()
+          ..throwError = DioException(
+            requestOptions: RequestOptions(
+              path: '/v1/pending-interactions/i/questions/q/answer',
+            ),
+            response: Response(
+              requestOptions: RequestOptions(path: ''),
+              statusCode: 400,
             ),
             type: DioExceptionType.badResponse,
           );
@@ -719,7 +832,8 @@ void main() {
     );
 
     test(
-      'a transport failure keeps the interaction as result unknown',
+      'a transport failure keeps the interaction as result unknown and re-reads '
+      'the snapshot',
       () async {
         final sender = ScriptedAnswerSender()
           ..throwError = DioException(
@@ -751,7 +865,7 @@ void main() {
               ],
             );
 
-        expect(loads, 1);
+        expect(loads, 2);
         expect(
           container.read(questionSubmissionStatesProvider)['question-1'],
           QuestionSubmissionState.resultUnknown,
@@ -767,48 +881,424 @@ void main() {
       },
     );
 
-    test(
-      'an unexpected sender failure keeps the interaction as unknown',
-      () async {
-        final sender = ScriptedAnswerSender()
-          ..throwError = StateError('no response body');
-        var loads = 0;
-        final container = answerContainer(
-          question: question,
-          sender: sender.call,
-          loader: (call) async {
-            loads++;
-            return [question];
-          },
-        );
-        addTearDown(container.dispose);
-        await container.read(pendingInteractionsProvider.future);
+    test('an unexpected sender failure keeps the interaction as unknown and '
+        're-reads the snapshot', () async {
+      final sender = ScriptedAnswerSender()
+        ..throwError = StateError('no response body');
+      var loads = 0;
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        loader: (call) async {
+          loads++;
+          return [question];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
 
-        await container
-            .read(pendingInteractionsProvider.notifier)
-            .answerQuestion(
-              question: question,
-              answers: const [
-                ['PostgreSQL'],
-                ['Migrate data'],
-              ],
-            );
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
 
-        expect(loads, 1);
-        expect(
-          container.read(questionSubmissionStatesProvider)['question-1'],
-          QuestionSubmissionState.resultUnknown,
+      expect(loads, 2);
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.resultUnknown,
+      );
+      expect(
+        container
+            .read(pendingInteractionsProvider)
+            .requireValue
+            .single
+            .requestId,
+        'question-1',
+      );
+    });
+
+    test('a result unknown outcome whose recorded status is confirmed removes '
+        'the interaction and re-reads authority', () async {
+      final sender = ScriptedAnswerSender()
+        ..outcome = QuestionAnswerOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..result = const CommandOutcomeInfo(
+          status: CommandOutcomeStatus.confirmed,
+          kind: CommandOutcomeKind.question,
         );
-        expect(
-          container
-              .read(pendingInteractionsProvider)
-              .requireValue
-              .single
-              .requestId,
-          'question-1',
+      var loads = 0;
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+        loader: (call) async {
+          loads++;
+          return call == 0 ? [question] : const <PendingInteraction>[];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
+
+      expect(sender.calls, 1);
+      expect(outcome.queried, ['cmd-1']);
+      expect(loads, 2);
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.confirmed,
+      );
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+    });
+
+    test('a result unknown outcome whose recorded status is stale is presented '
+        'as handled elsewhere and re-reads authority', () async {
+      final sender = ScriptedAnswerSender()
+        ..outcome = QuestionAnswerOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..result = const CommandOutcomeInfo(
+          status: CommandOutcomeStatus.stale,
+          kind: CommandOutcomeKind.question,
         );
-      },
-    );
+      var loads = 0;
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+        loader: (call) async {
+          loads++;
+          return [question];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
+
+      expect(sender.calls, 1);
+      expect(outcome.queried, ['cmd-1']);
+      expect(loads, 2);
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.handledElsewhere,
+      );
+      expect(
+        container
+            .read(pendingInteractionsProvider)
+            .requireValue
+            .single
+            .requestId,
+        'question-1',
+      );
+    });
+
+    test('a result unknown outcome that resolves to an upstream error re-reads '
+        'authority', () async {
+      final sender = ScriptedAnswerSender()
+        ..outcome = QuestionAnswerOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..result = const CommandOutcomeInfo(
+          status: CommandOutcomeStatus.upstreamError,
+          kind: CommandOutcomeKind.question,
+        );
+      var loads = 0;
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+        loader: (call) async {
+          loads++;
+          return [question];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
+
+      expect(sender.calls, 1);
+      expect(outcome.queried, ['cmd-1']);
+      expect(loads, 2);
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.upstreamError,
+      );
+      expect(
+        container
+            .read(pendingInteractionsProvider)
+            .requireValue
+            .single
+            .requestId,
+        'question-1',
+      );
+    });
+
+    test('a result unknown outcome that resolves accepted stays result unknown '
+        'and re-reads authority', () async {
+      final sender = ScriptedAnswerSender()
+        ..outcome = QuestionAnswerOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..result = const CommandOutcomeInfo(
+          status: CommandOutcomeStatus.accepted,
+          kind: CommandOutcomeKind.question,
+        );
+      var loads = 0;
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+        loader: (call) async {
+          loads++;
+          return [question];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
+
+      expect(sender.calls, 1);
+      expect(outcome.queried, ['cmd-1']);
+      expect(loads, 2);
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.resultUnknown,
+      );
+      expect(
+        container
+            .read(pendingInteractionsProvider)
+            .requireValue
+            .single
+            .requestId,
+        'question-1',
+      );
+    });
+
+    test('a 404 on the outcome query keeps the request as result unknown and '
+        're-reads authority', () async {
+      final sender = ScriptedAnswerSender()
+        ..outcome = QuestionAnswerOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..throwError = DioException(
+          requestOptions: RequestOptions(
+            path: '/v1/pending-interactions/commands/cmd-1',
+          ),
+          response: Response(
+            requestOptions: RequestOptions(path: ''),
+            statusCode: 404,
+          ),
+          type: DioExceptionType.badResponse,
+        );
+      var loads = 0;
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+        loader: (call) async {
+          loads++;
+          return [question];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
+
+      expect(outcome.queried, ['cmd-1']);
+      expect(loads, 2);
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.resultUnknown,
+      );
+      expect(
+        container
+            .read(pendingInteractionsProvider)
+            .requireValue
+            .single
+            .requestId,
+        'question-1',
+      );
+    });
+
+    test('a transport failure on the outcome query keeps the request as result '
+        'unknown and re-reads authority', () async {
+      final sender = ScriptedAnswerSender()
+        ..outcome = QuestionAnswerOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..throwError = DioException(
+          requestOptions: RequestOptions(
+            path: '/v1/pending-interactions/commands/cmd-1',
+          ),
+          type: DioExceptionType.connectionError,
+          error: 'no network',
+        );
+      var loads = 0;
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+        loader: (call) async {
+          loads++;
+          return [question];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
+
+      expect(outcome.queried, ['cmd-1']);
+      expect(loads, 2);
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.resultUnknown,
+      );
+      expect(
+        container
+            .read(pendingInteractionsProvider)
+            .requireValue
+            .single
+            .requestId,
+        'question-1',
+      );
+    });
+
+    test('a cache-expiry 404 on the outcome query converges when the fresh '
+        'snapshot lacks the request', () async {
+      final sender = ScriptedAnswerSender()
+        ..outcome = QuestionAnswerOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..throwError = DioException(
+          requestOptions: RequestOptions(
+            path: '/v1/pending-interactions/commands/cmd-1',
+          ),
+          response: Response(
+            requestOptions: RequestOptions(path: ''),
+            statusCode: 404,
+          ),
+          type: DioExceptionType.badResponse,
+        );
+      var loads = 0;
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+        loader: (call) async {
+          loads++;
+          return call == 0 ? [question] : const <PendingInteraction>[];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
+
+      expect(sender.calls, 1);
+      expect(outcome.queried, ['cmd-1']);
+      expect(loads, 2);
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.resultUnknown,
+      );
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+    });
+
+    test('an unknown outcome queries the same command id once and never '
+        'auto-retries', () async {
+      final sender = ScriptedAnswerSender()
+        ..outcome = QuestionAnswerOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..result = const CommandOutcomeInfo(
+          status: CommandOutcomeStatus.resultUnknown,
+          kind: CommandOutcomeKind.question,
+        );
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
+
+      expect(sender.calls, 1);
+      expect(outcome.calls, 1);
+      expect(outcome.queried, ['cmd-1']);
+      expect(
+        container.read(questionSubmissionStatesProvider)['question-1'],
+        QuestionSubmissionState.resultUnknown,
+      );
+    });
   });
 
   group('decidePermission', () {
@@ -1051,7 +1541,7 @@ void main() {
     );
 
     test(
-      'result unknown keeps the interaction visible without re-reading',
+      'result unknown keeps the interaction visible and re-reads the snapshot',
       () async {
         final sender = ScriptedDecisionSender()
           ..outcome = PermissionDecisionOutcome.resultUnknown;
@@ -1074,7 +1564,7 @@ void main() {
               decision: PermissionDecision.once,
             );
 
-        expect(loads, 1);
+        expect(loads, 2);
         expect(
           container.read(permissionSubmissionStatesProvider)['permission-1'],
           PermissionDecisionState.resultUnknown,
@@ -1091,7 +1581,7 @@ void main() {
     );
 
     test(
-      'a 4xx gateway rejection keeps the interaction and re-reads',
+      'a 409 gateway rejection is presented as handled elsewhere and re-reads',
       () async {
         final sender = ScriptedDecisionSender()
           ..throwError = DioException(
@@ -1101,6 +1591,55 @@ void main() {
             response: Response(
               requestOptions: RequestOptions(path: ''),
               statusCode: 409,
+            ),
+            type: DioExceptionType.badResponse,
+          );
+        var loads = 0;
+        final container = decisionContainer(
+          permission: pendingPermission,
+          sender: sender.call,
+          loader: (call) async {
+            loads++;
+            return [pendingPermission];
+          },
+        );
+        addTearDown(container.dispose);
+        await container.read(pendingInteractionsProvider.future);
+
+        await container
+            .read(pendingInteractionsProvider.notifier)
+            .decidePermission(
+              permission: pendingPermission,
+              decision: PermissionDecision.once,
+            );
+
+        expect(loads, 2);
+        expect(
+          container.read(permissionSubmissionStatesProvider)['permission-1'],
+          PermissionDecisionState.handledElsewhere,
+        );
+        expect(
+          container
+              .read(pendingInteractionsProvider)
+              .requireValue
+              .single
+              .requestId,
+          'permission-1',
+        );
+      },
+    );
+
+    test(
+      'a generic 4xx gateway rejection keeps the interaction and re-reads',
+      () async {
+        final sender = ScriptedDecisionSender()
+          ..throwError = DioException(
+            requestOptions: RequestOptions(
+              path: '/v1/pending-interactions/i/permissions/p/decision',
+            ),
+            response: Response(
+              requestOptions: RequestOptions(path: ''),
+              statusCode: 400,
             ),
             type: DioExceptionType.badResponse,
           );
@@ -1140,7 +1679,8 @@ void main() {
     );
 
     test(
-      'a transport failure keeps the interaction as result unknown',
+      'a transport failure keeps the interaction as result unknown and re-reads '
+      'the snapshot',
       () async {
         final sender = ScriptedDecisionSender()
           ..throwError = DioException(
@@ -1169,7 +1709,7 @@ void main() {
               decision: PermissionDecision.once,
             );
 
-        expect(loads, 1);
+        expect(loads, 2);
         expect(
           container.read(permissionSubmissionStatesProvider)['permission-1'],
           PermissionDecisionState.resultUnknown,
@@ -1185,15 +1725,151 @@ void main() {
       },
     );
 
+    test('an unexpected sender failure keeps the interaction as unknown and '
+        're-reads the snapshot', () async {
+      final sender = ScriptedDecisionSender()
+        ..throwError = StateError('no response body');
+      var loads = 0;
+      final container = decisionContainer(
+        permission: pendingPermission,
+        sender: sender.call,
+        loader: (call) async {
+          loads++;
+          return [pendingPermission];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .decidePermission(
+            permission: pendingPermission,
+            decision: PermissionDecision.once,
+          );
+
+      expect(loads, 2);
+      expect(
+        container.read(permissionSubmissionStatesProvider)['permission-1'],
+        PermissionDecisionState.resultUnknown,
+      );
+      expect(
+        container
+            .read(pendingInteractionsProvider)
+            .requireValue
+            .single
+            .requestId,
+        'permission-1',
+      );
+    });
+
+    test('a cache-expiry 404 on the outcome query converges while the request '
+        'is still pending', () async {
+      final sender = ScriptedDecisionSender()
+        ..outcome = PermissionDecisionOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..throwError = DioException(
+          requestOptions: RequestOptions(
+            path: '/v1/pending-interactions/commands/cmd-1',
+          ),
+          response: Response(
+            requestOptions: RequestOptions(path: ''),
+            statusCode: 404,
+          ),
+          type: DioExceptionType.badResponse,
+        );
+      var loads = 0;
+      final container = decisionContainer(
+        permission: pendingPermission,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+        loader: (call) async {
+          loads++;
+          return [pendingPermission];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .decidePermission(
+            permission: pendingPermission,
+            decision: PermissionDecision.once,
+          );
+
+      expect(sender.calls, 1);
+      expect(outcome.queried, ['cmd-1']);
+      expect(loads, 2);
+      expect(
+        container.read(permissionSubmissionStatesProvider)['permission-1'],
+        PermissionDecisionState.resultUnknown,
+      );
+      expect(
+        container
+            .read(pendingInteractionsProvider)
+            .requireValue
+            .single
+            .requestId,
+        'permission-1',
+      );
+    });
+
+    test('a result unknown decision whose recorded status is confirmed removes '
+        'the interaction and re-reads authority', () async {
+      final sender = ScriptedDecisionSender()
+        ..outcome = PermissionDecisionOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..result = const CommandOutcomeInfo(
+          status: CommandOutcomeStatus.confirmed,
+          kind: CommandOutcomeKind.permission,
+        );
+      var loads = 0;
+      final container = decisionContainer(
+        permission: pendingPermission,
+        sender: sender.call,
+        outcomeLoader: outcome.call,
+        loader: (call) async {
+          loads++;
+          return call == 0 ? [pendingPermission] : const <PendingInteraction>[];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .decidePermission(
+            permission: pendingPermission,
+            decision: PermissionDecision.once,
+          );
+
+      expect(sender.calls, 1);
+      expect(outcome.queried, ['cmd-1']);
+      expect(loads, 2);
+      expect(
+        container.read(permissionSubmissionStatesProvider)['permission-1'],
+        PermissionDecisionState.confirmed,
+      );
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+    });
+
     test(
-      'an unexpected sender failure keeps the interaction as unknown',
+      'a result unknown decision whose recorded status is stale is presented '
+      'as handled elsewhere and re-reads authority',
       () async {
         final sender = ScriptedDecisionSender()
-          ..throwError = StateError('no response body');
+          ..outcome = PermissionDecisionOutcome.resultUnknown;
+        final outcome = ScriptedOutcomeLoader()
+          ..result = const CommandOutcomeInfo(
+            status: CommandOutcomeStatus.stale,
+            kind: CommandOutcomeKind.permission,
+          );
         var loads = 0;
         final container = decisionContainer(
           permission: pendingPermission,
           sender: sender.call,
+          outcomeLoader: outcome.call,
           loader: (call) async {
             loads++;
             return [pendingPermission];
@@ -1206,13 +1882,15 @@ void main() {
             .read(pendingInteractionsProvider.notifier)
             .decidePermission(
               permission: pendingPermission,
-              decision: PermissionDecision.once,
+              decision: PermissionDecision.reject,
             );
 
-        expect(loads, 1);
+        expect(sender.calls, 1);
+        expect(outcome.queried, ['cmd-1']);
+        expect(loads, 2);
         expect(
           container.read(permissionSubmissionStatesProvider)['permission-1'],
-          PermissionDecisionState.resultUnknown,
+          PermissionDecisionState.handledElsewhere,
         );
         expect(
           container
@@ -1227,6 +1905,18 @@ void main() {
   });
 
   group('last-known retention', () {
+    OpenCodeInstancePresence presence(String id, InstancePresenceState state) =>
+        OpenCodeInstancePresence(
+          instanceId: id,
+          machine: 'dev-box',
+          project: 'api',
+          directory: '/work/api',
+          openCodeVersion: '1.18.18',
+          protocolVersion: 1,
+          state: state,
+          lastSeenAt: DateTime.utc(2026, 8, 14, 10),
+        );
+
     test('retains last-known interactions for instances absent from a newer '
         'snapshot', () async {
       var calls = 0;
@@ -1238,26 +1928,32 @@ void main() {
           pendingInteractionLoaderProvider.overrideWithValue(() async {
             calls++;
             if (calls == 1) {
-              return [
+              return (
+                interactions: [
+                  interactionOn(
+                    instanceId: 'inst-a',
+                    id: 'a',
+                    occurredAt: DateTime.utc(2026, 8, 14, 9),
+                  ),
+                  interactionOn(
+                    instanceId: 'inst-b',
+                    id: 'b',
+                    occurredAt: DateTime.utc(2026, 8, 14, 9, 1),
+                  ),
+                ],
+                queriedInstanceIds: null,
+              );
+            }
+            return (
+              interactions: [
                 interactionOn(
                   instanceId: 'inst-a',
-                  id: 'a',
-                  occurredAt: DateTime.utc(2026, 8, 14, 9),
+                  id: 'a2',
+                  occurredAt: DateTime.utc(2026, 8, 14, 9, 2),
                 ),
-                interactionOn(
-                  instanceId: 'inst-b',
-                  id: 'b',
-                  occurredAt: DateTime.utc(2026, 8, 14, 9, 1),
-                ),
-              ];
-            }
-            return [
-              interactionOn(
-                instanceId: 'inst-a',
-                id: 'a2',
-                occurredAt: DateTime.utc(2026, 8, 14, 9, 2),
-              ),
-            ];
+              ],
+              queriedInstanceIds: null,
+            );
           }),
         ],
       );
@@ -1280,13 +1976,16 @@ void main() {
         overrides: [
           authControllerProvider.overrideWith(() => auth),
           pendingInteractionLoaderProvider.overrideWithValue(() async {
-            return [
-              interactionOn(
-                instanceId: 'inst-a',
-                id: 'a',
-                occurredAt: DateTime.utc(2026, 8, 14, 9),
-              ),
-            ];
+            return (
+              interactions: [
+                interactionOn(
+                  instanceId: 'inst-a',
+                  id: 'a',
+                  occurredAt: DateTime.utc(2026, 8, 14, 9),
+                ),
+              ],
+              queriedInstanceIds: null,
+            );
           }),
         ],
       );
@@ -1309,6 +2008,344 @@ void main() {
             .lastKnownByInstance,
         isEmpty,
       );
+    });
+
+    test('a reconnect with zero pending clears the stale last-known', () async {
+      var calls = 0;
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(
+            () => MutableAuthController(authenticated),
+          ),
+          pendingInteractionLoaderProvider.overrideWithValue(() async {
+            calls++;
+            return calls == 1
+                ? (
+                    interactions: [
+                      interactionOn(
+                        instanceId: 'inst-a',
+                        id: 'a',
+                        occurredAt: DateTime.utc(2026, 8, 14, 9),
+                      ),
+                    ],
+                    queriedInstanceIds: null,
+                  )
+                : (
+                    interactions: const <PendingInteraction>[],
+                    queriedInstanceIds: null,
+                  );
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(pendingInteractionsProvider.future);
+      final controller = container.read(pendingInteractionsProvider.notifier);
+      expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a');
+
+      container.read(instancePresencesProvider.notifier).replaceAll([
+        presence('inst-a', InstancePresenceState.controllable),
+      ]);
+      await container.read(pendingInteractionsProvider.future);
+
+      expect(controller.lastKnownByInstance['inst-a'], isEmpty);
+    });
+
+    test(
+      'a reconnect with restored requests replaces the last-known',
+      () async {
+        var calls = 0;
+        final container = ProviderContainer(
+          overrides: [
+            authControllerProvider.overrideWith(
+              () => MutableAuthController(authenticated),
+            ),
+            pendingInteractionLoaderProvider.overrideWithValue(() async {
+              calls++;
+              return calls == 1
+                  ? (
+                      interactions: [
+                        interactionOn(
+                          instanceId: 'inst-a',
+                          id: 'a',
+                          occurredAt: DateTime.utc(2026, 8, 14, 9),
+                        ),
+                      ],
+                      queriedInstanceIds: null,
+                    )
+                  : (
+                      interactions: [
+                        interactionOn(
+                          instanceId: 'inst-a',
+                          id: 'a2',
+                          occurredAt: DateTime.utc(2026, 8, 14, 9, 2),
+                        ),
+                      ],
+                      queriedInstanceIds: null,
+                    );
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await container.read(pendingInteractionsProvider.future);
+        final controller = container.read(pendingInteractionsProvider.notifier);
+        expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a');
+
+        container.read(instancePresencesProvider.notifier).replaceAll([
+          presence('inst-a', InstancePresenceState.controllable),
+        ]);
+        await container.read(pendingInteractionsProvider.future);
+
+        expect(
+          controller.lastKnownByInstance['inst-a']!.single.requestId,
+          'a2',
+        );
+      },
+    );
+
+    test(
+      'offline instances keep their last-known while others refresh',
+      () async {
+        var calls = 0;
+        final container = ProviderContainer(
+          overrides: [
+            authControllerProvider.overrideWith(
+              () => MutableAuthController(authenticated),
+            ),
+            pendingInteractionLoaderProvider.overrideWithValue(() async {
+              calls++;
+              return calls == 1
+                  ? (
+                      interactions: [
+                        interactionOn(
+                          instanceId: 'inst-a',
+                          id: 'a',
+                          occurredAt: DateTime.utc(2026, 8, 14, 9),
+                        ),
+                      ],
+                      queriedInstanceIds: null,
+                    )
+                  : (
+                      interactions: const <PendingInteraction>[],
+                      queriedInstanceIds: null,
+                    );
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        container.read(instancePresencesProvider.notifier).replaceAll([
+          presence('inst-a', InstancePresenceState.offline),
+        ]);
+        await container.read(pendingInteractionsProvider.future);
+        final controller = container.read(pendingInteractionsProvider.notifier);
+        expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a');
+
+        await controller.refresh();
+
+        expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a');
+      },
+    );
+
+    test('a gateway exclusion wins over stale presence: the instance keeps its '
+        'last-known while presence still shows it controllable', () async {
+      var calls = 0;
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(
+            () => MutableAuthController(authenticated),
+          ),
+          pendingInteractionLoaderProvider.overrideWithValue(() async {
+            calls++;
+            return calls == 1
+                ? (
+                    interactions: [
+                      interactionOn(
+                        instanceId: 'inst-a',
+                        id: 'a',
+                        occurredAt: DateTime.utc(2026, 8, 14, 9),
+                      ),
+                      interactionOn(
+                        instanceId: 'inst-b',
+                        id: 'b',
+                        occurredAt: DateTime.utc(2026, 8, 14, 9, 1),
+                      ),
+                    ],
+                    queriedInstanceIds: {'inst-a', 'inst-b'},
+                  )
+                : (
+                    interactions: [
+                      interactionOn(
+                        instanceId: 'inst-a',
+                        id: 'a2',
+                        occurredAt: DateTime.utc(2026, 8, 14, 9, 2),
+                      ),
+                    ],
+                    queriedInstanceIds: {'inst-a'},
+                  );
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(pendingInteractionsProvider.future);
+      final controller = container.read(pendingInteractionsProvider.notifier);
+      expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a');
+      expect(controller.lastKnownByInstance['inst-b']!.single.requestId, 'b');
+
+      // The gateway stopped querying inst-b while a stale presence still
+      // shows it controllable. The gateway set is authoritative: inst-b is
+      // not re-included by presence, so its last-known survives for the
+      // offline read-only view instead of being wrongly cleared.
+      container.read(instancePresencesProvider.notifier).replaceAll([
+        presence('inst-a', InstancePresenceState.controllable),
+        presence('inst-b', InstancePresenceState.controllable),
+      ]);
+      await container.read(pendingInteractionsProvider.future);
+
+      expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a2');
+      expect(controller.lastKnownByInstance['inst-b']!.single.requestId, 'b');
+    });
+
+    test('an empty snapshot under the gateway queried set clears the retained '
+        'last-known', () async {
+      var calls = 0;
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(
+            () => MutableAuthController(authenticated),
+          ),
+          pendingInteractionLoaderProvider.overrideWithValue(() async {
+            calls++;
+            return calls == 1
+                ? (
+                    interactions: [
+                      interactionOn(
+                        instanceId: 'inst-a',
+                        id: 'a',
+                        occurredAt: DateTime.utc(2026, 8, 14, 9),
+                      ),
+                    ],
+                    queriedInstanceIds: {'inst-a'},
+                  )
+                : (
+                    interactions: const <PendingInteraction>[],
+                    queriedInstanceIds: {'inst-a'},
+                  );
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(pendingInteractionsProvider.future);
+      final controller = container.read(pendingInteractionsProvider.notifier);
+      expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a');
+
+      await controller.refresh();
+
+      expect(controller.lastKnownByInstance['inst-a'], isEmpty);
+    });
+
+    test(
+      'instances outside the gateway queried set keep their last-known',
+      () async {
+        var calls = 0;
+        final container = ProviderContainer(
+          overrides: [
+            authControllerProvider.overrideWith(
+              () => MutableAuthController(authenticated),
+            ),
+            pendingInteractionLoaderProvider.overrideWithValue(() async {
+              calls++;
+              return calls == 1
+                  ? (
+                      interactions: [
+                        interactionOn(
+                          instanceId: 'inst-a',
+                          id: 'a',
+                          occurredAt: DateTime.utc(2026, 8, 14, 9),
+                        ),
+                        interactionOn(
+                          instanceId: 'inst-b',
+                          id: 'b',
+                          occurredAt: DateTime.utc(2026, 8, 14, 9, 1),
+                        ),
+                      ],
+                      queriedInstanceIds: {'inst-a', 'inst-b'},
+                    )
+                  : (
+                      interactions: [
+                        interactionOn(
+                          instanceId: 'inst-a',
+                          id: 'a2',
+                          occurredAt: DateTime.utc(2026, 8, 14, 9, 2),
+                        ),
+                      ],
+                      queriedInstanceIds: {'inst-a'},
+                    );
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await container.read(pendingInteractionsProvider.future);
+        final controller = container.read(pendingInteractionsProvider.notifier);
+        expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a');
+        expect(controller.lastKnownByInstance['inst-b']!.single.requestId, 'b');
+
+        await controller.refresh();
+
+        expect(
+          controller.lastKnownByInstance['inst-a']!.single.requestId,
+          'a2',
+        );
+        expect(controller.lastKnownByInstance['inst-b']!.single.requestId, 'b');
+      },
+    );
+
+    test('without the gateway queried field the presence-derived set is the '
+        'fallback', () async {
+      var calls = 0;
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(
+            () => MutableAuthController(authenticated),
+          ),
+          pendingInteractionLoaderProvider.overrideWithValue(() async {
+            calls++;
+            return calls == 1
+                ? (
+                    interactions: [
+                      interactionOn(
+                        instanceId: 'inst-a',
+                        id: 'a',
+                        occurredAt: DateTime.utc(2026, 8, 14, 9),
+                      ),
+                    ],
+                    queriedInstanceIds: null,
+                  )
+                : (
+                    interactions: const <PendingInteraction>[],
+                    queriedInstanceIds: null,
+                  );
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(pendingInteractionsProvider.future);
+      final controller = container.read(pendingInteractionsProvider.notifier);
+      expect(controller.lastKnownByInstance['inst-a']!.single.requestId, 'a');
+
+      // A controllable presence drives the fallback queried set, so the
+      // reconnected instance with zero pending is cleared.
+      container.read(instancePresencesProvider.notifier).replaceAll([
+        presence('inst-a', InstancePresenceState.controllable),
+      ]);
+      await container.read(pendingInteractionsProvider.future);
+
+      expect(controller.lastKnownByInstance['inst-a'], isEmpty);
     });
   });
 
@@ -1334,13 +2371,16 @@ void main() {
               () => MutableAuthController(authenticated),
             ),
             pendingInteractionLoaderProvider.overrideWithValue(() async {
-              return [
-                interactionOn(
-                  instanceId: 'inst-a',
-                  id: 'a',
-                  occurredAt: DateTime.utc(2026, 8, 14, 9),
-                ),
-              ];
+              return (
+                interactions: [
+                  interactionOn(
+                    instanceId: 'inst-a',
+                    id: 'a',
+                    occurredAt: DateTime.utc(2026, 8, 14, 9),
+                  ),
+                ],
+                queriedInstanceIds: null,
+              );
             }),
           ],
         );
@@ -1371,14 +2411,20 @@ void main() {
             pendingInteractionLoaderProvider.overrideWithValue(() async {
               calls++;
               return calls == 1
-                  ? [
-                      interactionOn(
-                        instanceId: 'inst-a',
-                        id: 'a',
-                        occurredAt: DateTime.utc(2026, 8, 14, 9),
-                      ),
-                    ]
-                  : const <PendingInteraction>[];
+                  ? (
+                      interactions: [
+                        interactionOn(
+                          instanceId: 'inst-a',
+                          id: 'a',
+                          occurredAt: DateTime.utc(2026, 8, 14, 9),
+                        ),
+                      ],
+                      queriedInstanceIds: null,
+                    )
+                  : (
+                      interactions: const <PendingInteraction>[],
+                      queriedInstanceIds: null,
+                    );
             }),
           ],
         );
@@ -1408,13 +2454,16 @@ void main() {
             () => MutableAuthController(authenticated),
           ),
           pendingInteractionLoaderProvider.overrideWithValue(() async {
-            return [
-              interactionOn(
-                instanceId: 'inst-a',
-                id: 'a',
-                occurredAt: DateTime.utc(2026, 8, 14, 9),
-              ),
-            ];
+            return (
+              interactions: [
+                interactionOn(
+                  instanceId: 'inst-a',
+                  id: 'a',
+                  occurredAt: DateTime.utc(2026, 8, 14, 9),
+                ),
+              ],
+              queriedInstanceIds: null,
+            );
           }),
         ],
       );

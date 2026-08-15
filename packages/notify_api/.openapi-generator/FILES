@@ -15,6 +15,7 @@ lib/src/auth/bearer_auth.dart
 lib/src/auth/oauth.dart
 lib/src/date_serializer.dart
 lib/src/model/answer_question_body.dart
+lib/src/model/command_outcome.dart
 lib/src/model/create_ingest_key_body.dart
 lib/src/model/create_ingest_key_response.dart
 lib/src/model/date.dart

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
+import 'package:client/pending/command_outcome.dart';
 import 'package:client/pending/pending_answer.dart';
 import 'package:client/pending/pending_controller.dart';
 import 'package:client/pending/pending_interaction.dart';
@@ -185,11 +186,29 @@ class SeededSubmissionStates extends QuestionSubmissionStates {
   Map<String, QuestionSubmissionState> build() => _initial;
 }
 
+/// Controllable outcome loader for widget tests. Resolves to an accepted
+/// record by default so an unknown submission stays unknown.
+class ScriptedOutcomeLoader {
+  int calls = 0;
+  final List<String> queried = [];
+  CommandOutcomeInfo result = const CommandOutcomeInfo(
+    status: CommandOutcomeStatus.accepted,
+    kind: CommandOutcomeKind.question,
+  );
+
+  Future<CommandOutcomeInfo> call(String commandId) async {
+    calls++;
+    queried.add(commandId);
+    return result;
+  }
+}
+
 Future<void> pumpPage(
   WidgetTester tester, {
   required PendingInteraction interaction,
   required QuestionAnswerSender sender,
   PermissionDecisionSender? decisionSender,
+  CommandOutcomeLoader? outcomeLoader,
   bool readOnly = false,
   DateTime? lastSeenAt,
 }) async {
@@ -209,11 +228,14 @@ Future<void> pumpPage(
           ),
         ),
         pendingInteractionLoaderProvider.overrideWithValue(() async {
-          return [interaction];
+          return (interactions: [interaction], queriedInstanceIds: null);
         }),
         questionAnswerSenderProvider.overrideWithValue(sender),
         if (decisionSender != null)
           permissionDecisionSenderProvider.overrideWithValue(decisionSender),
+        commandOutcomeLoaderProvider.overrideWithValue(
+          outcomeLoader ?? ScriptedOutcomeLoader().call,
+        ),
         commandIdGeneratorProvider.overrideWithValue(() => 'cmd-1'),
       ],
       child: MaterialApp(
@@ -475,7 +497,9 @@ void main() {
     });
   }
 
-  testWidgets('a 4xx rejection keeps the request visible', (tester) async {
+  testWidgets('a generic 4xx rejection keeps the request visible', (
+    tester,
+  ) async {
     final sender = ScriptedAnswerSender()
       ..throwError = DioException(
         requestOptions: RequestOptions(
@@ -483,7 +507,7 @@ void main() {
         ),
         response: Response(
           requestOptions: RequestOptions(path: ''),
-          statusCode: 409,
+          statusCode: 400,
         ),
         type: DioExceptionType.badResponse,
       );
@@ -494,6 +518,65 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('网关拒绝了该回答，请求可能已失效。'), findsOneWidget);
+    expect(
+      find.text('Which database should the migration target?'),
+      findsOneWidget,
+    );
+    expect(submitEnabled(tester), isTrue);
+  });
+
+  testWidgets(
+    'a 409 gateway rejection shows the handled-elsewhere banner and re-reads '
+    'authority',
+    (tester) async {
+      final sender = ScriptedAnswerSender()
+        ..throwError = DioException(
+          requestOptions: RequestOptions(
+            path: '/v1/pending-interactions/i/questions/q/answer',
+          ),
+          response: Response(
+            requestOptions: RequestOptions(path: ''),
+            statusCode: 409,
+          ),
+          type: DioExceptionType.badResponse,
+        );
+      await pumpPage(tester, interaction: question(), sender: sender.call);
+
+      await answerEverything(tester);
+      await tester.tap(find.byKey(const ValueKey('submit-answer')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('该请求已在其他设备处理。'), findsOneWidget);
+      expect(
+        find.text('Which database should the migration target?'),
+        findsOneWidget,
+      );
+      expect(submitEnabled(tester), isTrue);
+    },
+  );
+
+  testWidgets('a result unknown followed by a stale recorded outcome shows the '
+      'handled-elsewhere banner', (tester) async {
+    final sender = ScriptedAnswerSender()
+      ..outcome = QuestionAnswerOutcome.resultUnknown;
+    final outcome = ScriptedOutcomeLoader()
+      ..result = const CommandOutcomeInfo(
+        status: CommandOutcomeStatus.stale,
+        kind: CommandOutcomeKind.question,
+      );
+    await pumpPage(
+      tester,
+      interaction: question(),
+      sender: sender.call,
+      outcomeLoader: outcome.call,
+    );
+
+    await answerEverything(tester);
+    await tester.tap(find.byKey(const ValueKey('submit-answer')));
+    await tester.pumpAndSettle();
+
+    expect(outcome.queried, ['cmd-1']);
+    expect(find.text('该请求已在其他设备处理。'), findsOneWidget);
     expect(
       find.text('Which database should the migration target?'),
       findsOneWidget,
@@ -834,7 +917,7 @@ void main() {
     });
   }
 
-  testWidgets('a 4xx rejection of an always decision keeps the request '
+  testWidgets('a generic 4xx rejection of an always decision keeps the request '
       'visible', (tester) async {
     final sender = ScriptedDecisionSender()
       ..throwError = DioException(
@@ -843,7 +926,7 @@ void main() {
         ),
         response: Response(
           requestOptions: RequestOptions(path: ''),
-          statusCode: 409,
+          statusCode: 400,
         ),
         type: DioExceptionType.badResponse,
       );
@@ -865,6 +948,40 @@ void main() {
     expect(allowOnceEnabled(tester), isTrue);
     expect(rejectEnabled(tester), isTrue);
   });
+
+  testWidgets(
+    'a 409 rejection of an always decision shows the handled-elsewhere banner',
+    (tester) async {
+      final sender = ScriptedDecisionSender()
+        ..throwError = DioException(
+          requestOptions: RequestOptions(
+            path: '/v1/pending-interactions/i/permissions/p/decision',
+          ),
+          response: Response(
+            requestOptions: RequestOptions(path: ''),
+            statusCode: 409,
+          ),
+          type: DioExceptionType.badResponse,
+        );
+      await pumpPage(
+        tester,
+        interaction: permission(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: sender.call,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('permission-allow-always')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('permission-always-save')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('该请求已在其他设备处理。'), findsOneWidget);
+      expect(find.text('bash'), findsOneWidget);
+      expect(alwaysEnabled(tester), isTrue);
+      expect(allowOnceEnabled(tester), isTrue);
+      expect(rejectEnabled(tester), isTrue);
+    },
+  );
 
   for (final scenario in [
     (
@@ -904,7 +1021,7 @@ void main() {
     });
   }
 
-  testWidgets('a 4xx rejection keeps the permission request visible', (
+  testWidgets('a generic 4xx rejection keeps the permission request visible', (
     tester,
   ) async {
     final sender = ScriptedDecisionSender()
@@ -914,7 +1031,7 @@ void main() {
         ),
         response: Response(
           requestOptions: RequestOptions(path: ''),
-          statusCode: 409,
+          statusCode: 400,
         ),
         type: DioExceptionType.badResponse,
       );
@@ -933,6 +1050,36 @@ void main() {
     expect(allowOnceEnabled(tester), isTrue);
     expect(rejectEnabled(tester), isTrue);
   });
+
+  testWidgets(
+    'a result unknown followed by a stale recorded decision shows the '
+    'handled-elsewhere banner',
+    (tester) async {
+      final sender = ScriptedDecisionSender()
+        ..outcome = PermissionDecisionOutcome.resultUnknown;
+      final outcome = ScriptedOutcomeLoader()
+        ..result = const CommandOutcomeInfo(
+          status: CommandOutcomeStatus.stale,
+          kind: CommandOutcomeKind.permission,
+        );
+      await pumpPage(
+        tester,
+        interaction: permission(),
+        sender: ScriptedAnswerSender().call,
+        decisionSender: sender.call,
+        outcomeLoader: outcome.call,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('permission-allow-once')));
+      await tester.pumpAndSettle();
+
+      expect(outcome.queried, ['cmd-1']);
+      expect(find.text('该请求已在其他设备处理。'), findsOneWidget);
+      expect(find.text('bash'), findsOneWidget);
+      expect(allowOnceEnabled(tester), isTrue);
+      expect(rejectEnabled(tester), isTrue);
+    },
+  );
 
   testWidgets('back navigation never submits a permission decision', (
     tester,
@@ -1044,7 +1191,7 @@ void main() {
             ),
           ),
           pendingInteractionLoaderProvider.overrideWithValue(() async {
-            return [question()];
+            return (interactions: [question()], queriedInstanceIds: null);
           }),
           questionSubmissionStatesProvider.overrideWith(
             () => SeededSubmissionStates({

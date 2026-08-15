@@ -14,6 +14,7 @@ import {
   verifyEmailBodySchema,
 } from "../src/schemas/auth.js";
 import { errorResponseSchema, healthStatusSchema } from "../src/schemas/common.js";
+import { commandOutcomeSchema } from "../src/schemas/commands.js";
 import {
   instancePresenceSchema,
   pluginControlClientMessageSchema,
@@ -83,6 +84,14 @@ const requestIdPathParameter = {
   required: true,
   description: "OpenCode question request identifier.",
   schema: { type: "string", minLength: 1 },
+};
+
+const commandIdPathParameter = {
+  name: "commandId",
+  in: "path",
+  required: true,
+  description: "Client-generated command identifier.",
+  schema: { type: "string", format: "uuid" },
 };
 
 const permissionRequestIdPathParameter = {
@@ -452,6 +461,27 @@ const document = {
         },
       },
     },
+    "/v1/pending-interactions/commands/{commandId}": {
+      get: {
+        operationId: "getCommandOutcome",
+        tags: ["pending"],
+        security: bearerSecurity,
+        summary: "Query the body-free outcome of a client-generated command.",
+        description:
+          "Returns the in-memory outcome correlation for a command submitted by " +
+          "the authenticated account, keyed by the client-generated commandId. " +
+          "The outcome is body-free: it carries only correlation and status " +
+          "metadata, never the question answers or permission decision. A client " +
+          "timeout should query the same commandId to distinguish accepted, " +
+          "confirmed, stale, and result_unknown before resubmitting.",
+        parameters: [commandIdPathParameter],
+        responses: {
+          "200": jsonResponse("Body-free command outcome.", "CommandOutcome"),
+          "401": errorResponse("Missing or invalid access token."),
+          "404": errorResponse("Unknown command outcome for this user."),
+        },
+      },
+    },
     "/v1/ws": {
       get: {
         operationId: "connectEvents",
@@ -541,6 +571,7 @@ const document = {
     },
     schemas: {
       AnswerQuestionBody: answerQuestionBodySchema,
+      CommandOutcome: commandOutcomeSchema,
       CreateIngestKeyBody: createIngestKeyBodySchema,
       CreateIngestKeyResponse: createIngestKeyResponseSchema,
       DecidePermissionBody: decidePermissionBodySchema,

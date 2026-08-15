@@ -11,6 +11,7 @@ import {
   verifyEmailBodySchema,
 } from "./schemas/auth.js";
 import { errorResponseSchema, healthStatusSchema } from "./schemas/common.js";
+import { commandOutcomeSchema } from "./schemas/commands.js";
 import {
   pluginControlClientMessageSchema,
   pluginControlServerMessageSchema,
@@ -79,8 +80,11 @@ export const validateQuestionCommandResult = ajv.compile(questionCommandResultSc
 export const validateDecidePermissionBody = ajv.compile(decidePermissionBodySchema);
 export const validatePermissionCommandResult = ajv.compile(permissionCommandResultSchema);
 
+export const validateCommandOutcome = ajv.compile(commandOutcomeSchema);
+
 export * from "./schemas/auth.js";
 export * from "./schemas/common.js";
+export * from "./schemas/commands.js";
 export * from "./schemas/control.js";
 export * from "./schemas/devices.js";
 export * from "./schemas/events.js";

@@ -359,6 +359,35 @@ void main() {
     expect(jsonDecode(jsonEncode(out)), snapshotJson);
   });
 
+  test('round-trips the optional queried instance ids scope', () {
+    final snapshotJson = {
+      'generatedAt': '2026-08-14T09:00:05.000Z',
+      'interactions': <Object?>[],
+      'queriedInstanceIds': ['6f0d91b0-93e4-43a9-9449-0bed03e651aa'],
+    };
+    final snapshot = standardSerializers.deserializeWith(
+      PendingSnapshot.serializer,
+      snapshotJson,
+    )!;
+    expect(
+      snapshot.queriedInstanceIds!.single,
+      '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+    );
+
+    final out = standardSerializers.serializeWith(
+      PendingSnapshot.serializer,
+      snapshot,
+    );
+    expect(jsonDecode(jsonEncode(out)), snapshotJson);
+
+    // An absent field round-trips as null and is not re-emitted.
+    final without = standardSerializers.deserializeWith(
+      PendingSnapshot.serializer,
+      snapshotJson..remove('queriedInstanceIds'),
+    )!;
+    expect(without.queriedInstanceIds, isNull);
+  });
+
   group('Question answer command', () {
     test('AnswerQuestionBody round-trips the ordered answer set', () {
       final body = AnswerQuestionBody((b) {
@@ -467,6 +496,72 @@ void main() {
         final out = standardSerializers.serializeWith(
           PermissionCommandResult.serializer,
           result,
+        );
+        expect(jsonDecode(jsonEncode(out)), json);
+      }
+    });
+  });
+
+  group('Command outcome correlation', () {
+    Map<String, Object?> commandOutcomeJson({
+      required String kind,
+      required String status,
+    }) => {
+      'commandId': 'cmd-42',
+      'instanceId': '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+      'kind': kind,
+      'requestId': 'request-1',
+      'status': status,
+      'updatedAt': '2026-08-14T09:00:00.000Z',
+    };
+
+    test('CommandOutcome round-trips every status', () {
+      const statuses = [
+        (CommandOutcomeStatusEnum.accepted, 'accepted'),
+        (CommandOutcomeStatusEnum.confirmed, 'confirmed'),
+        (CommandOutcomeStatusEnum.stale, 'stale'),
+        (CommandOutcomeStatusEnum.upstreamError, 'upstream_error'),
+        (CommandOutcomeStatusEnum.resultUnknown, 'result_unknown'),
+      ];
+      for (final (status, wire) in statuses) {
+        final json = commandOutcomeJson(kind: 'question', status: wire);
+        final outcome = standardSerializers.deserializeWith(
+          CommandOutcome.serializer,
+          json,
+        )!;
+        expect(outcome.commandId, 'cmd-42');
+        expect(outcome.instanceId, '6f0d91b0-93e4-43a9-9449-0bed03e651aa');
+        expect(outcome.kind, CommandOutcomeKindEnum.question);
+        expect(outcome.requestId, 'request-1');
+        expect(outcome.status, status);
+        expect(outcome.updatedAt, DateTime.utc(2026, 8, 14, 9));
+
+        // The body-free shape round-trips byte-identically: only correlation
+        // and status metadata, never the answer or decision body.
+        final out = standardSerializers.serializeWith(
+          CommandOutcome.serializer,
+          outcome,
+        );
+        expect(jsonDecode(jsonEncode(out)), json);
+      }
+    });
+
+    test('CommandOutcome round-trips both kinds', () {
+      const kinds = [
+        (CommandOutcomeKindEnum.question, 'question'),
+        (CommandOutcomeKindEnum.permission, 'permission'),
+      ];
+      for (final (kind, wire) in kinds) {
+        final json = commandOutcomeJson(kind: wire, status: 'confirmed');
+        final outcome = standardSerializers.deserializeWith(
+          CommandOutcome.serializer,
+          json,
+        )!;
+        expect(outcome.kind, kind);
+
+        final out = standardSerializers.serializeWith(
+          CommandOutcome.serializer,
+          outcome,
         );
         expect(jsonDecode(jsonEncode(out)), json);
       }

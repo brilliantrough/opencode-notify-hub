@@ -68,11 +68,18 @@ export interface GatewayDeps {
   realtime?: { pingIntervalMs?: number };
   /**
    * Control-channel tuning; tests shrink the pending-snapshot timeout so
-   * partial-snapshot behavior is exercised without real waits, and the
+   * partial-snapshot behavior is exercised without real waits, the
    * answer-command timeout so result-unknown behavior is exercised without
-   * real waits.
+   * real waits, the command-outcome TTL so expiry behavior is exercised
+   * without real waits, and the command-outcome cap so eviction behavior is
+   * exercised with a small bound.
    */
-  control?: { snapshotTimeoutMs?: number; answerTimeoutMs?: number };
+  control?: {
+    snapshotTimeoutMs?: number;
+    answerTimeoutMs?: number;
+    outcomeTtlMs?: number;
+    maxCommandOutcomes?: number;
+  };
 }
 
 /**
@@ -280,6 +287,12 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
         : {}),
       ...(deps.control?.answerTimeoutMs !== undefined
         ? { answerTimeoutMs: deps.control.answerTimeoutMs }
+        : {}),
+      ...(deps.control?.outcomeTtlMs !== undefined
+        ? { outcomeTtlMs: deps.control.outcomeTtlMs }
+        : {}),
+      ...(deps.control?.maxCommandOutcomes !== undefined
+        ? { maxCommandOutcomes: deps.control.maxCommandOutcomes }
         : {}),
     });
     await app.register(

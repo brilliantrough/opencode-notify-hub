@@ -19,6 +19,42 @@ components:
         - commandId
         - answers
       type: object
+    CommandOutcome:
+      additionalProperties: false
+      properties:
+        commandId:
+          format: uuid
+          type: string
+        instanceId:
+          format: uuid
+          type: string
+        kind:
+          enum:
+            - question
+            - permission
+          type: string
+        requestId:
+          minLength: 1
+          type: string
+        status:
+          enum:
+            - accepted
+            - confirmed
+            - stale
+            - upstream_error
+            - result_unknown
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+        - commandId
+        - requestId
+        - instanceId
+        - kind
+        - status
+        - updatedAt
+      type: object
     CreateIngestKeyBody:
       additionalProperties: false
       properties:
@@ -951,6 +987,12 @@ components:
                   - always
                   - metadata
                 type: object
+          type: array
+        queriedInstanceIds:
+          description: Instances the gateway actually queried for this snapshot; absent for clients that do not track query scope.
+          items:
+            format: uuid
+            type: string
           type: array
       required:
         - generatedAt
@@ -2439,6 +2481,42 @@ paths:
       security:
         - bearerAuth: []
       summary: List the authenticated user's pending interactions.
+      tags:
+        - pending
+  /v1/pending-interactions/commands/{commandId}:
+    get:
+      description: "Returns the in-memory outcome correlation for a command submitted by the authenticated account, keyed by the client-generated commandId. The outcome is body-free: it carries only correlation and status metadata, never the question answers or permission decision. A client timeout should query the same commandId to distinguish accepted, confirmed, stale, and result_unknown before resubmitting."
+      operationId: getCommandOutcome
+      parameters:
+        - description: Client-generated command identifier.
+          in: path
+          name: commandId
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandOutcome"
+          description: Body-free command outcome.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Missing or invalid access token.
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Unknown command outcome for this user.
+      security:
+        - bearerAuth: []
+      summary: Query the body-free outcome of a client-generated command.
       tags:
         - pending
   /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision:

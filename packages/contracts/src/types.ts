@@ -11,6 +11,11 @@ import type {
 } from "./schemas/auth.js";
 import type { errorResponseSchema, healthStatusSchema } from "./schemas/common.js";
 import type {
+  commandKindSchema,
+  commandOutcomeSchema,
+  commandOutcomeStatusSchema,
+} from "./schemas/commands.js";
+import type {
   instancePresenceSchema,
   pluginControlClientMessageSchema,
   pluginControlServerMessageSchema,
@@ -95,3 +100,7 @@ export type PermissionDecision = FromSchema<typeof permissionDecisionSchema>;
 export type PermissionCommandStatus = FromSchema<typeof permissionCommandStatusSchema>;
 export type DecidePermissionBody = FromSchema<typeof decidePermissionBodySchema>;
 export type PermissionCommandResult = FromSchema<typeof permissionCommandResultSchema>;
+
+export type CommandKind = FromSchema<typeof commandKindSchema>;
+export type CommandOutcomeStatus = FromSchema<typeof commandOutcomeStatusSchema>;
+export type CommandOutcome = FromSchema<typeof commandOutcomeSchema>;

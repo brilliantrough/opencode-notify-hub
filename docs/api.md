@@ -34,7 +34,8 @@ Examples use `https://notify.example.com`.
 | `POST /v1/events` | Accept one signed notification event (`202`) |
 | `GET /v1/pending-interactions` | Collect the user's authoritative OpenCode pending snapshot |
 | `POST /v1/pending-interactions/{instanceId}/questions/{requestId}/answer` | Route one ordered question answer set to the owning instance |
-| `POST /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision` | Route a `once` or `reject` permission decision to the owning instance |
+| `POST /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision` | Route a `once`, `always`, or `reject` permission decision to the owning instance |
+| `GET /v1/pending-interactions/commands/{commandId}` | Query the body-free outcome of a submitted command |
 | `GET /v1/ws` | Upgrade to the authenticated realtime WebSocket |
 | `GET /v1/plugin/ws` | Upgrade to the Plugin control WebSocket |
 
@@ -142,6 +143,20 @@ connected `controllable` instance only, `404` for unknown/foreign targets,
 statuses `confirmed | stale | upstream_error | result_unknown`. Permission
 patterns, metadata, and decisions transit memory only and are redacted from
 logs; nothing is persisted.
+
+### Command outcomes
+
+Every answer or decision command carries a client-generated UUID `commandId`.
+The gateway keeps a body-free, in-memory outcome record per command
+(`accepted | confirmed | stale | upstream_error | result_unknown` with the
+request/instance identity and `updatedAt` only — never answers, decisions,
+patterns, or metadata) for about ten minutes.
+`GET /v1/pending-interactions/commands/{commandId}` returns the outcome to
+the owning account and a uniform `404` for unknown, expired, or foreign
+ids. Clients use it to reconcile a `result_unknown` timeout against the same
+command id and a fresh pending snapshot instead of resubmitting. The cache
+is deliberately volatile: a gateway restart loses outcomes, and clients
+re-converge through OpenCode's authoritative pending lists.
 
 ## Regeneration
 

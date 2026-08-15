@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_state.dart';
 import '../realtime/instance_presence.dart';
+import 'command_outcome.dart';
 import 'pending_answer.dart';
 import 'pending_interaction.dart';
 import 'pending_permission.dart';
@@ -22,7 +23,36 @@ final pendingApiProvider = Provider<PendingApi>(
   (ref) => ref.watch(apiClientProvider).notifyApi.getPendingApi(),
 );
 
-typedef PendingInteractionLoader = Future<List<PendingInteraction>> Function();
+typedef CommandOutcomeLoader =
+    Future<CommandOutcomeInfo> Function(String commandId);
+
+/// Queries the gateway's body-free in-memory outcome for a client-generated
+/// [commandId] and maps it to the domain [CommandOutcomeInfo]. The outcome
+/// carries only correlation and status metadata — never the question answers
+/// or the permission decision. A missing/expired correlation (404) or a
+/// transport failure surfaces as a thrown [DioException].
+final commandOutcomeLoaderProvider = Provider<CommandOutcomeLoader>((ref) {
+  final api = ref.watch(pendingApiProvider);
+  return (commandId) async {
+    final response = await api.getCommandOutcome(commandId: commandId);
+    final data = response.data;
+    if (data == null) {
+      throw StateError('Empty command-outcome response');
+    }
+    return commandOutcomeFromGenerated(data);
+  };
+});
+
+/// One authoritative pending-interactions snapshot: the interactions plus the
+/// gateway's raw queried instance set. [queriedInstanceIds] is null when the
+/// generated snapshot omitted the field, signaling the presence-derived
+/// fallback for the queried scope.
+typedef PendingSnapshotLoad = ({
+  List<PendingInteraction> interactions,
+  Set<String>? queriedInstanceIds,
+});
+
+typedef PendingInteractionLoader = Future<PendingSnapshotLoad> Function();
 
 final pendingInteractionLoaderProvider = Provider<PendingInteractionLoader>((
   ref,
@@ -34,7 +64,12 @@ final pendingInteractionLoaderProvider = Provider<PendingInteractionLoader>((
     if (snapshot == null) {
       throw StateError('Empty pending-interactions response');
     }
-    return snapshot.interactions.map(PendingInteraction.fromGenerated).toList();
+    return (
+      interactions: snapshot.interactions
+          .map(PendingInteraction.fromGenerated)
+          .toList(),
+      queriedInstanceIds: snapshot.queriedInstanceIds?.toSet(),
+    );
   };
 });
 
@@ -246,6 +281,10 @@ final permissionDecisionSenderProvider = Provider<PermissionDecisionSender>((
   };
 });
 
+/// How an unknown submission outcome resolved after querying the gateway's
+/// body-free command correlation.
+enum UnknownOutcomeResolution { confirmed, stale, upstreamError, unknown }
+
 class PendingInteractionsController
     extends AsyncNotifier<List<PendingInteraction>> {
   bool _building = false;
@@ -268,13 +307,26 @@ class PendingInteractionsController
   /// hold the controller directly instead of watching the provider.
   AsyncValue<List<PendingInteraction>> get current => state;
 
-  void _retain(List<PendingInteraction> interactions) {
+  /// Replaces the retention entry of every queried instance with the exact
+  /// snapshot contents — including an empty list when the authoritative
+  /// snapshot returned nothing — while preserving the entries of non-queried
+  /// (offline) instances. The queried set is gateway-authoritative when the
+  /// snapshot carried the queried instance ids; a reconnected instance with
+  /// zero pending therefore deterministically clears its stale last-known, and
+  /// an instance the gateway stopped querying keeps its last-known even when a
+  /// stale presence still shows it controllable.
+  void _retain(
+    List<PendingInteraction> interactions,
+    Set<String> queriedInstanceIds,
+  ) {
     final byInstance = <String, List<PendingInteraction>>{};
     for (final interaction in interactions) {
       (byInstance[interaction.instanceId] ??= []).add(interaction);
     }
-    for (final entry in byInstance.entries) {
-      _lastKnownByInstance[entry.key] = entry.value;
+    // Snapshot instances were necessarily queried by the gateway, so they are
+    // included alongside the authoritative queried set.
+    for (final instanceId in {...queriedInstanceIds, ...byInstance.keys}) {
+      _lastKnownByInstance[instanceId] = byInstance[instanceId] ?? const [];
     }
   }
 
@@ -353,9 +405,8 @@ class PendingInteractionsController
   }
 
   Future<List<PendingInteraction>> _fetch() async {
-    final interactions = [
-      ...await ref.read(pendingInteractionLoaderProvider)(),
-    ];
+    final load = await ref.read(pendingInteractionLoaderProvider)();
+    final interactions = [...load.interactions];
     interactions.sort((left, right) {
       final byTime = left.occurredAt.compareTo(right.occurredAt);
       if (byTime != 0) return byTime;
@@ -363,18 +414,35 @@ class PendingInteractionsController
       if (byInstance != 0) return byInstance;
       return left.requestId.compareTo(right.requestId);
     });
-    _retain(interactions);
+    _retain(interactions, load.queriedInstanceIds ?? _queriedInstanceIds());
     return interactions;
+  }
+
+  /// Presence-derived fallback for the set of instances the gateway queried:
+  /// the currently controllable instances. Used only when the generated
+  /// snapshot omitted the queried instance ids (backward compat). Offline,
+  /// conflicting, incompatible, and unknown instances are never queried and
+  /// keep their retained last-known.
+  Set<String> _queriedInstanceIds() {
+    final presences = ref.read(instancePresencesProvider);
+    return {
+      for (final presence in presences.values)
+        if (presence.state == InstancePresenceState.controllable)
+          presence.instanceId,
+    };
   }
 
   /// Submits [answers] for [question] with a fresh client-generated command
   /// id and drives the per-request submission state.
   ///
-  /// Only a confirmed outcome removes the request from the workbench;
-  /// stale, upstream-error, and gateway-rejected outcomes keep it and trigger
-  /// an authoritative snapshot re-read, while unknown and transport failures
-  /// keep it visible without re-reading. Gateway 4xx rejections never remove
-  /// the request and never propagate.
+  /// Only a confirmed outcome removes the request from the workbench; stale,
+  /// upstream-error, and gateway-rejected outcomes keep it and trigger an
+  /// authoritative snapshot re-read. An unknown outcome — and a transport or
+  /// unexpected failure — queries the same [commandId] once to converge on
+  /// what the gateway recorded, never auto-retrying, then re-reads authority
+  /// so the workbench reflects the fresh snapshot. A 409 gateway rejection
+  /// (the in-flight race loser) is presented as handled-elsewhere. Gateway 4xx
+  /// rejections never remove the request and never propagate.
   Future<void> answerQuestion({
     required PendingQuestion question,
     required List<List<String>> answers,
@@ -402,17 +470,26 @@ class PendingInteractionsController
           await reconcile();
         case QuestionAnswerOutcome.resultUnknown:
           _markSubmission(requestId, QuestionSubmissionState.resultUnknown);
+          await _reconcileUnknownQuestion(requestId, commandId);
       }
     } on DioException catch (error) {
       final statusCode = error.response?.statusCode;
-      if (statusCode != null && statusCode >= 400 && statusCode < 500) {
+      if (statusCode == 409) {
+        // The in-flight race loser: another client confirmed the request
+        // first. Present the definitive handled-elsewhere message and refresh
+        // authority so the workbench converges.
+        _markSubmission(requestId, QuestionSubmissionState.handledElsewhere);
+        await reconcile();
+      } else if (statusCode != null && statusCode >= 400 && statusCode < 500) {
         _markSubmission(requestId, QuestionSubmissionState.rejected);
         await reconcile();
       } else {
         _markSubmission(requestId, QuestionSubmissionState.resultUnknown);
+        await _reconcileUnknownQuestion(requestId, commandId);
       }
     } catch (_) {
       _markSubmission(requestId, QuestionSubmissionState.resultUnknown);
+      await _reconcileUnknownQuestion(requestId, commandId);
     }
   }
 
@@ -422,9 +499,12 @@ class PendingInteractionsController
   ///
   /// Only a confirmed outcome removes the request from the workbench; stale,
   /// upstream-error, and gateway-rejected outcomes keep it and trigger an
-  /// authoritative snapshot re-read, while unknown and transport failures
-  /// keep it visible without re-reading. Gateway 4xx rejections never remove
-  /// the request and never propagate.
+  /// authoritative snapshot re-read. An unknown outcome — and a transport or
+  /// unexpected failure — queries the same [commandId] once to converge on
+  /// what the gateway recorded, never auto-retrying, then re-reads authority
+  /// so the workbench reflects the fresh snapshot. A 409 gateway rejection
+  /// (the in-flight race loser) is presented as handled-elsewhere. Gateway 4xx
+  /// rejections never remove the request and never propagate.
   Future<void> decidePermission({
     required PendingPermission permission,
     required PermissionDecision decision,
@@ -461,10 +541,20 @@ class PendingInteractionsController
             requestId,
             PermissionDecisionState.resultUnknown,
           );
+          await _reconcileUnknownPermission(requestId, commandId);
       }
     } on DioException catch (error) {
       final statusCode = error.response?.statusCode;
-      if (statusCode != null && statusCode >= 400 && statusCode < 500) {
+      if (statusCode == 409) {
+        // The in-flight race loser: another client confirmed the request
+        // first. Present the definitive handled-elsewhere message and refresh
+        // authority so the workbench converges.
+        _markPermissionSubmission(
+          requestId,
+          PermissionDecisionState.handledElsewhere,
+        );
+        await reconcile();
+      } else if (statusCode != null && statusCode >= 400 && statusCode < 500) {
         _markPermissionSubmission(requestId, PermissionDecisionState.rejected);
         await reconcile();
       } else {
@@ -472,13 +562,106 @@ class PendingInteractionsController
           requestId,
           PermissionDecisionState.resultUnknown,
         );
+        await _reconcileUnknownPermission(requestId, commandId);
       }
     } catch (_) {
       _markPermissionSubmission(
         requestId,
         PermissionDecisionState.resultUnknown,
       );
+      await _reconcileUnknownPermission(requestId, commandId);
     }
+  }
+
+  /// Queries the same [commandId] once after a question outcome was unknown
+  /// and converges the submission state and workbench on what the gateway
+  /// recorded. Never resubmits. A still-unknown correlation (accepted,
+  /// expired, or unreachable) still re-reads authority so the workbench
+  /// converges on the fresh snapshot.
+  Future<void> _reconcileUnknownQuestion(
+    String requestId,
+    String commandId,
+  ) async {
+    switch (await _resolveUnknownOutcome(commandId)) {
+      case UnknownOutcomeResolution.confirmed:
+        _markSubmission(requestId, QuestionSubmissionState.confirmed);
+        _removeInteraction(requestId);
+        await reconcile();
+      case UnknownOutcomeResolution.stale:
+        // A stale correlation means OpenCode no longer sees the request; the
+        // authoritative re-read follows and the definitive handled-elsewhere
+        // banner is shown.
+        _markSubmission(requestId, QuestionSubmissionState.handledElsewhere);
+        await reconcile();
+      case UnknownOutcomeResolution.upstreamError:
+        _markSubmission(requestId, QuestionSubmissionState.upstreamError);
+        await reconcile();
+      case UnknownOutcomeResolution.unknown:
+        _markSubmission(requestId, QuestionSubmissionState.resultUnknown);
+        await reconcile();
+    }
+  }
+
+  /// Queries the same [commandId] once after a permission outcome was unknown
+  /// and converges the submission state and workbench on what the gateway
+  /// recorded. Never resubmits. A still-unknown correlation (accepted,
+  /// expired, or unreachable) still re-reads authority so the workbench
+  /// converges on the fresh snapshot.
+  Future<void> _reconcileUnknownPermission(
+    String requestId,
+    String commandId,
+  ) async {
+    switch (await _resolveUnknownOutcome(commandId)) {
+      case UnknownOutcomeResolution.confirmed:
+        _markPermissionSubmission(requestId, PermissionDecisionState.confirmed);
+        _removeInteraction(requestId);
+        await reconcile();
+      case UnknownOutcomeResolution.stale:
+        _markPermissionSubmission(
+          requestId,
+          PermissionDecisionState.handledElsewhere,
+        );
+        await reconcile();
+      case UnknownOutcomeResolution.upstreamError:
+        _markPermissionSubmission(
+          requestId,
+          PermissionDecisionState.upstreamError,
+        );
+        await reconcile();
+      case UnknownOutcomeResolution.unknown:
+        _markPermissionSubmission(
+          requestId,
+          PermissionDecisionState.resultUnknown,
+        );
+        await reconcile();
+    }
+  }
+
+  /// Resolves an unknown submission outcome by querying the gateway's
+  /// body-free outcome correlation for [commandId] exactly once. A missing or
+  /// expired correlation (404) and transport failures both leave the outcome
+  /// undetermined and resolve to [UnknownOutcomeResolution.unknown]; accepted
+  /// and still-pending records do the same. Callers always re-read authority
+  /// afterwards so the workbench converges on the fresh snapshot.
+  Future<UnknownOutcomeResolution> _resolveUnknownOutcome(
+    String commandId,
+  ) async {
+    CommandOutcomeInfo info;
+    try {
+      info = await ref.read(commandOutcomeLoaderProvider)(commandId);
+    } on DioException {
+      return UnknownOutcomeResolution.unknown;
+    } catch (_) {
+      return UnknownOutcomeResolution.unknown;
+    }
+    return switch (info.status) {
+      CommandOutcomeStatus.confirmed => UnknownOutcomeResolution.confirmed,
+      CommandOutcomeStatus.stale => UnknownOutcomeResolution.stale,
+      CommandOutcomeStatus.upstreamError =>
+        UnknownOutcomeResolution.upstreamError,
+      CommandOutcomeStatus.accepted ||
+      CommandOutcomeStatus.resultUnknown => UnknownOutcomeResolution.unknown,
+    };
   }
 
   /// Refetches the authoritative snapshot and replaces the list without first

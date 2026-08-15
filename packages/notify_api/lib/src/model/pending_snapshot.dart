@@ -15,6 +15,7 @@ part 'pending_snapshot.g.dart';
 /// Properties:
 /// * [generatedAt]
 /// * [interactions]
+/// * [queriedInstanceIds] - Instances the gateway actually queried for this snapshot; absent for clients that do not track query scope.
 @BuiltValue()
 abstract class PendingSnapshot
     implements Built<PendingSnapshot, PendingSnapshotBuilder> {
@@ -23,6 +24,10 @@ abstract class PendingSnapshot
 
   @BuiltValueField(wireName: r'interactions')
   BuiltList<PendingSnapshotInteractionsInner> get interactions;
+
+  /// Instances the gateway actually queried for this snapshot; absent for clients that do not track query scope.
+  @BuiltValueField(wireName: r'queriedInstanceIds')
+  BuiltList<String>? get queriedInstanceIds;
 
   PendingSnapshot._();
 
@@ -62,6 +67,13 @@ class _$PendingSnapshotSerializer
         FullType(PendingSnapshotInteractionsInner),
       ]),
     );
+    if (object.queriedInstanceIds != null) {
+      yield r'queriedInstanceIds';
+      yield serializers.serialize(
+        object.queriedInstanceIds,
+        specifiedType: const FullType(BuiltList, [FullType(String)]),
+      );
+    }
   }
 
   @override
@@ -108,6 +120,17 @@ class _$PendingSnapshotSerializer
                   )
                   as BuiltList<PendingSnapshotInteractionsInner>;
           result.interactions.replace(valueDes);
+          break;
+        case r'queriedInstanceIds':
+          final valueDes =
+              serializers.deserialize(
+                    value,
+                    specifiedType: const FullType(BuiltList, [
+                      FullType(String),
+                    ]),
+                  )
+                  as BuiltList<String>;
+          result.queriedInstanceIds.replace(valueDes);
           break;
         default:
           unhandled.add(key);

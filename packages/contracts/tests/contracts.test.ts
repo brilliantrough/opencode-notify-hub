@@ -31,6 +31,7 @@ import {
   validateQuestionCommandResult,
   validateDecidePermissionBody,
   validatePermissionCommandResult,
+  validateCommandOutcome,
 } from "../src/index.js";
 
 const EVENT_ID = "3b8f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b";
@@ -1404,6 +1405,45 @@ describe("PendingSnapshot", () => {
     ).toBe(true);
   });
 
+  it("accepts an optional queriedInstanceIds list", () => {
+    expect(
+      validatePendingSnapshot({
+        generatedAt: "2026-08-14T09:00:05.000Z",
+        interactions: [interaction],
+        queriedInstanceIds: [
+          "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+          "4604c02c-9298-4b82-bf3a-372493361b99",
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts a snapshot without queriedInstanceIds", () => {
+    expect(
+      validatePendingSnapshot({ generatedAt: "2026-08-14T09:00:05.000Z", interactions: [] }),
+    ).toBe(true);
+  });
+
+  it("rejects non-uuid entries in queriedInstanceIds", () => {
+    expect(
+      validatePendingSnapshot({
+        generatedAt: "2026-08-14T09:00:05.000Z",
+        interactions: [],
+        queriedInstanceIds: ["runtime-1"],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a non-array queriedInstanceIds", () => {
+    expect(
+      validatePendingSnapshot({
+        generatedAt: "2026-08-14T09:00:05.000Z",
+        interactions: [],
+        queriedInstanceIds: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      }),
+    ).toBe(false);
+  });
+
   it("requires generatedAt and interactions", () => {
     expect(
       validatePendingSnapshot({ interactions: [interaction] }),
@@ -1627,6 +1667,88 @@ describe("PermissionCommandResult", () => {
   });
 });
 
+describe("CommandOutcome", () => {
+  const commandId = "7f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
+  const instanceId = "6f0d91b0-93e4-43a9-9449-0bed03e651aa";
+  const validOutcome = {
+    commandId,
+    requestId: "req_1",
+    instanceId,
+    kind: "question",
+    status: "confirmed",
+    updatedAt: "2026-08-14T09:00:05.000Z",
+  } as const;
+
+  it("accepts a valid outcome and preserves it verbatim", () => {
+    const outcome = { ...validOutcome };
+    expect(validateCommandOutcome(outcome)).toBe(true);
+    expect(outcome).toEqual(validOutcome);
+  });
+
+  it.each(["question", "permission"] as const)("accepts kind %s", (kind) => {
+    expect(validateCommandOutcome({ ...validOutcome, kind })).toBe(true);
+  });
+
+  it.each(["accepted", "confirmed", "stale", "upstream_error", "result_unknown"] as const)(
+    "accepts status %s",
+    (status) => {
+      expect(validateCommandOutcome({ ...validOutcome, status })).toBe(true);
+    },
+  );
+
+  it("rejects an unknown kind", () => {
+    expect(validateCommandOutcome({ ...validOutcome, kind: "provider_action" })).toBe(false);
+  });
+
+  it("rejects an unknown status", () => {
+    expect(validateCommandOutcome({ ...validOutcome, status: "pending" })).toBe(false);
+    expect(validateCommandOutcome({ ...validOutcome, status: "failed" })).toBe(false);
+    expect(validateCommandOutcome({ ...validOutcome, status: "timeout" })).toBe(false);
+  });
+
+  it("rejects a non-uuid commandId", () => {
+    expect(validateCommandOutcome({ ...validOutcome, commandId: "cmd_1" })).toBe(false);
+  });
+
+  it("rejects a non-uuid instanceId", () => {
+    expect(validateCommandOutcome({ ...validOutcome, instanceId: "runtime-1" })).toBe(false);
+  });
+
+  it("requires a non-empty requestId", () => {
+    expect(validateCommandOutcome({ ...validOutcome, requestId: "" })).toBe(false);
+  });
+
+  it("rejects a malformed updatedAt", () => {
+    expect(validateCommandOutcome({ ...validOutcome, updatedAt: "yesterday" })).toBe(false);
+  });
+
+  it("requires every field", () => {
+    for (const field of [
+      "commandId",
+      "requestId",
+      "instanceId",
+      "kind",
+      "status",
+      "updatedAt",
+    ] as const) {
+      const { [field]: _omitted, ...rest } = validOutcome;
+      expect(validateCommandOutcome(rest)).toBe(false);
+    }
+  });
+
+  it("rejects unknown properties", () => {
+    expect(validateCommandOutcome({ ...validOutcome, note: "nope" })).toBe(false);
+  });
+
+  it("is body-free by construction: rejects answers, decisions, and metadata", () => {
+    expect(validateCommandOutcome({ ...validOutcome, answers: [["Postgres"]] })).toBe(false);
+    expect(validateCommandOutcome({ ...validOutcome, decision: "once" })).toBe(false);
+    expect(
+      validateCommandOutcome({ ...validOutcome, metadata: { source: "interactive" } }),
+    ).toBe(false);
+  });
+});
+
 describe("API support schemas", () => {
   it("accepts a valid EmailBody", () => {
     expect(validateEmailBody({ email: "dev@example.com" })).toBe(true);
@@ -1828,5 +1950,43 @@ describe("OpenAPI generation", () => {
       "404",
       "409",
     ]);
+  });
+
+  it("documents the authenticated command outcome GET path", () => {
+    interface OpenApiLike {
+      paths: {
+        [path: string]: {
+          get?: {
+            operationId: string;
+            security: Record<string, unknown>[];
+            parameters: { name: string; schema: { type: string; format?: string } }[];
+            responses: Record<string, { content?: { "application/json"?: { schema: unknown } } }>;
+          };
+        };
+      };
+      components: {
+        schemas: Record<string, unknown>;
+      };
+    }
+    const document = parse(buildOpenApiYaml()) as OpenApiLike;
+    const path = "/v1/pending-interactions/commands/{commandId}";
+    const operation = document.paths[path]?.get;
+    expect(operation).toBeDefined();
+    expect(operation?.operationId).toBe("getCommandOutcome");
+    expect(operation?.security).toEqual([{ bearerAuth: [] }]);
+    expect(operation?.parameters).toEqual([
+      {
+        name: "commandId",
+        in: "path",
+        required: true,
+        description: "Client-generated command identifier.",
+        schema: { type: "string", format: "uuid" },
+      },
+    ]);
+    expect(operation?.responses["200"].content?.["application/json"]?.schema).toEqual({
+      $ref: "#/components/schemas/CommandOutcome",
+    });
+    expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(["200", "401", "404"]);
+    expect(document.components.schemas.CommandOutcome).toBeDefined();
   });
 });

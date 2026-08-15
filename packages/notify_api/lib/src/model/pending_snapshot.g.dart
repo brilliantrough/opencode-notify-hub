@@ -11,12 +11,17 @@ class _$PendingSnapshot extends PendingSnapshot {
   final DateTime generatedAt;
   @override
   final BuiltList<PendingSnapshotInteractionsInner> interactions;
+  @override
+  final BuiltList<String>? queriedInstanceIds;
 
   factory _$PendingSnapshot([void Function(PendingSnapshotBuilder)? updates]) =>
       (PendingSnapshotBuilder()..update(updates))._build();
 
-  _$PendingSnapshot._({required this.generatedAt, required this.interactions})
-    : super._();
+  _$PendingSnapshot._({
+    required this.generatedAt,
+    required this.interactions,
+    this.queriedInstanceIds,
+  }) : super._();
   @override
   PendingSnapshot rebuild(void Function(PendingSnapshotBuilder) updates) =>
       (toBuilder()..update(updates)).build();
@@ -29,7 +34,8 @@ class _$PendingSnapshot extends PendingSnapshot {
     if (identical(other, this)) return true;
     return other is PendingSnapshot &&
         generatedAt == other.generatedAt &&
-        interactions == other.interactions;
+        interactions == other.interactions &&
+        queriedInstanceIds == other.queriedInstanceIds;
   }
 
   @override
@@ -37,6 +43,7 @@ class _$PendingSnapshot extends PendingSnapshot {
     var _$hash = 0;
     _$hash = $jc(_$hash, generatedAt.hashCode);
     _$hash = $jc(_$hash, interactions.hashCode);
+    _$hash = $jc(_$hash, queriedInstanceIds.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -45,7 +52,8 @@ class _$PendingSnapshot extends PendingSnapshot {
   String toString() {
     return (newBuiltValueToStringHelper(r'PendingSnapshot')
           ..add('generatedAt', generatedAt)
-          ..add('interactions', interactions))
+          ..add('interactions', interactions)
+          ..add('queriedInstanceIds', queriedInstanceIds))
         .toString();
   }
 }
@@ -65,6 +73,12 @@ class PendingSnapshotBuilder
     ListBuilder<PendingSnapshotInteractionsInner>? interactions,
   ) => _$this._interactions = interactions;
 
+  ListBuilder<String>? _queriedInstanceIds;
+  ListBuilder<String> get queriedInstanceIds =>
+      _$this._queriedInstanceIds ??= ListBuilder<String>();
+  set queriedInstanceIds(ListBuilder<String>? queriedInstanceIds) =>
+      _$this._queriedInstanceIds = queriedInstanceIds;
+
   PendingSnapshotBuilder() {
     PendingSnapshot._defaults(this);
   }
@@ -74,6 +88,7 @@ class PendingSnapshotBuilder
     if ($v != null) {
       _generatedAt = $v.generatedAt;
       _interactions = $v.interactions.toBuilder();
+      _queriedInstanceIds = $v.queriedInstanceIds?.toBuilder();
       _$v = null;
     }
     return this;
@@ -104,12 +119,15 @@ class PendingSnapshotBuilder
               'generatedAt',
             ),
             interactions: interactions.build(),
+            queriedInstanceIds: _queriedInstanceIds?.build(),
           );
     } catch (_) {
       late String _$failedField;
       try {
         _$failedField = 'interactions';
         interactions.build();
+        _$failedField = 'queriedInstanceIds';
+        _queriedInstanceIds?.build();
       } catch (e) {
         throw BuiltValueNestedFieldError(
           r'PendingSnapshot',

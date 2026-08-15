@@ -465,6 +465,10 @@ class _SubmissionBanner extends StatelessWidget {
         '结果未知，问题仍在等待回答。',
         Icons.help_outline,
       ),
+      QuestionSubmissionState.handledElsewhere => (
+        '该请求已在其他设备处理。',
+        Icons.devices_other,
+      ),
       QuestionSubmissionState.rejected => (
         '网关拒绝了该回答，请求可能已失效。',
         Icons.block_outlined,
@@ -654,6 +658,10 @@ class _PermissionDecisionBanner extends StatelessWidget {
       PermissionDecisionState.resultUnknown => (
         '结果未知，权限请求仍在等待。',
         Icons.help_outline,
+      ),
+      PermissionDecisionState.handledElsewhere => (
+        '该请求已在其他设备处理。',
+        Icons.devices_other,
       ),
       PermissionDecisionState.rejected => (
         '网关拒绝了该决定，请求可能已失效。',

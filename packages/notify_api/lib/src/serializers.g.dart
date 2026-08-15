@@ -9,6 +9,9 @@ part of 'serializers.dart';
 Serializers _$serializers =
     (Serializers().toBuilder()
           ..add(AnswerQuestionBody.serializer)
+          ..add(CommandOutcome.serializer)
+          ..add(CommandOutcomeKindEnum.serializer)
+          ..add(CommandOutcomeStatusEnum.serializer)
           ..add(CreateIngestKeyBody.serializer)
           ..add(CreateIngestKeyResponse.serializer)
           ..add(DecidePermissionBody.serializer)
@@ -164,6 +167,10 @@ Serializers _$serializers =
               const FullType(PendingSnapshotInteractionsInner),
             ]),
             () => ListBuilder<PendingSnapshotInteractionsInner>(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [const FullType(String)]),
+            () => ListBuilder<String>(),
           )
           ..addBuilderFactory(
             const FullType(BuiltList, const [const FullType(String)]),

@@ -108,5 +108,12 @@ export const pendingSnapshotSchema = {
   properties: {
     generatedAt: { type: "string", format: "date-time" },
     interactions: { type: "array", items: pendingInteractionSchema },
+    queriedInstanceIds: {
+      type: "array",
+      items: { type: "string", format: "uuid" },
+      description:
+        "Instances the gateway actually queried for this snapshot; absent for " +
+        "clients that do not track query scope.",
+    },
   },
 } as const satisfies JSONSchema;

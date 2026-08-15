@@ -1,10 +1,12 @@
 import {
   answerQuestionBodySchema,
+  commandOutcomeSchema,
   decidePermissionBodySchema,
   pendingSnapshotSchema,
   permissionCommandResultSchema,
   questionCommandResultSchema,
   type AnswerQuestionBody,
+  type CommandOutcome,
   type DecidePermissionBody,
   type PendingSnapshot,
   type PermissionCommandResult,
@@ -48,6 +50,15 @@ import type {
  * requests, the wrong interaction kind, and a second in-flight decision on
  * the same connection answer 409. Decision bodies are redacted from logs and
  * never persisted.
+ *
+ * `GET /v1/pending-interactions/commands/:commandId`: query the body-free,
+ * in-memory outcome correlation of one command the authenticated account
+ * submitted, keyed by the client-generated `commandId`. The 200 response
+ * carries only correlation and lifecycle metadata (commandId, requestId,
+ * instanceId, kind, status, updatedAt) — never answers, decisions, or
+ * payloads. Unknown, expired, and foreign command ids all answer the same
+ * uniform 404, so a client that timed out can distinguish accepted, confirmed,
+ * stale, and result_unknown before resubmitting.
  */
 export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPluginAsync {
   return async (app) => {
@@ -128,6 +139,28 @@ export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPl
             .send(errorBody(ErrorCodes.NOT_FOUND, "Permission request not found"));
         }
         return reply.status(200).send(outcome.result satisfies PermissionCommandResult);
+      },
+    );
+
+    app.get<{ Params: { commandId: string } }>(
+      "/v1/pending-interactions/commands/:commandId",
+      {
+        preHandler: app.authenticate,
+        schema: { response: { 200: commandOutcomeSchema } },
+      },
+      async (request, reply) => {
+        const outcome = registry.outcomeFor(
+          request.userId as string,
+          request.params.commandId,
+        );
+        if (outcome === undefined) {
+          // Unknown, expired, and foreign command ids are indistinguishable:
+          // one uniform 404, never a hint about another account's command.
+          return reply
+            .status(404)
+            .send(errorBody(ErrorCodes.NOT_FOUND, "Command outcome not found"));
+        }
+        return reply.status(200).send(outcome satisfies CommandOutcome);
       },
     );
   };

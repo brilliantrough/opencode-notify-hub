@@ -133,7 +133,10 @@ Future<ProviderContainer> pumpNavigation(
   final container = ProviderContainer(
     overrides: [
       authControllerProvider.overrideWith(() => auth),
-      pendingInteractionLoaderProvider.overrideWithValue(loader),
+      pendingInteractionLoaderProvider.overrideWithValue(() async {
+        final loaded = await loader();
+        return (interactions: loaded, queriedInstanceIds: null);
+      }),
       appNavigatorKeyProvider.overrideWithValue(navigatorKey),
     ],
   );

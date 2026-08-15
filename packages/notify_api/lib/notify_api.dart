@@ -19,6 +19,7 @@ export 'package:notify_api/src/api/pending_api.dart';
 export 'package:notify_api/src/api/realtime_api.dart';
 
 export 'package:notify_api/src/model/answer_question_body.dart';
+export 'package:notify_api/src/model/command_outcome.dart';
 export 'package:notify_api/src/model/create_ingest_key_body.dart';
 export 'package:notify_api/src/model/create_ingest_key_response.dart';
 export 'package:notify_api/src/model/decide_permission_body.dart';

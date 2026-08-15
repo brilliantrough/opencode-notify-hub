@@ -15,6 +15,7 @@ import 'package:notify_api/src/date_serializer.dart';
 import 'package:notify_api/src/model/date.dart';
 
 import 'package:notify_api/src/model/answer_question_body.dart';
+import 'package:notify_api/src/model/command_outcome.dart';
 import 'package:notify_api/src/model/create_ingest_key_body.dart';
 import 'package:notify_api/src/model/create_ingest_key_response.dart';
 import 'package:notify_api/src/model/decide_permission_body.dart';
@@ -83,6 +84,7 @@ part 'serializers.g.dart';
 
 @SerializersFor([
   AnswerQuestionBody,
+  CommandOutcome,
   CreateIngestKeyBody,
   CreateIngestKeyResponse,
   DecidePermissionBody,

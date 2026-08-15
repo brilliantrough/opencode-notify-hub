@@ -37,6 +37,10 @@ enum QuestionSubmissionState {
   /// The terminal outcome could not be determined; the request stays visible.
   resultUnknown,
 
+  /// Another client confirmed the request first; it was handled elsewhere and
+  /// authority has been re-read.
+  handledElsewhere,
+
   /// The gateway rejected the command (client/4xx error).
   rejected,
 }
