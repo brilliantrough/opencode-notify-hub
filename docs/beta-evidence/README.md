@@ -1,5 +1,10 @@
 # Issue #14 AC9 — first Linux host → Linux desktop closed loop
 
+> **Start here if you are a fresh agent picking up the upstream blocker:**
+> [upstream-plugin-gap.md](upstream-plugin-gap.md) is the self-contained
+> handoff — verified claims, reproduction probes (committed under
+> `probes/`), the fixes already in our code, and what to try next.
+
 ## Result (2026-08-15, final)
 
 The remote-unblock closed loop **passes end to end** on this machine
@@ -33,12 +38,10 @@ the plugin in any launch mode.
 | `opencode` **TUI** (pty) | yes | **yes** | registers `incompatible(unknown)` | no — `serverUrl` (`localhost:4096`) has no reachable listener (direct `node:http` → `ECONNREFUSED` with `NO_PROXY`; TUI process has no LISTEN socket) | no |
 | `opencode serve` + **`opencode attach`** (pty) | **yes** | **yes** | **yes — CONTROLLABLE** | **no** — the attached session's question lives in the attach process's private store; the serve (the plugin's `serverUrl`) reports an empty question list and empty session messages (verified), so the plugin's pending/reply adapters never see the question | no |
 
-Probe references: `/tmp/opencode/probe/tui_probe.py`, `/tmp/opencode/probe/
-attach_probe.py`, `/tmp/opencode/probe/plugin-load-probe*.mjs`,
-`run-*-probe.sh`, plus the diagnostics in this README (TUI `incompatible
-(unknown)`; attach control channel CONTROLLABLE + notification delivered but
-gateway snapshot empty because the serve holds no question; serve session
-messages empty for the attached session).
+Probe references: the committed, re-runnable probes under
+`docs/beta-evidence/probes/` (see the table in
+[upstream-plugin-gap.md](upstream-plugin-gap.md) for what each proves and the
+expected output).
 
 ### serve + attach is the closest functional mode (and its one remaining blocker)
 
