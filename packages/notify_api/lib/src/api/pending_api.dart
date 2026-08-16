@@ -10,12 +10,11 @@ import 'package:dio/dio.dart';
 
 import 'package:notify_api/src/api_util.dart';
 import 'package:notify_api/src/model/answer_question_body.dart';
+import 'package:notify_api/src/model/command_accepted.dart';
 import 'package:notify_api/src/model/command_outcome.dart';
 import 'package:notify_api/src/model/decide_permission_body.dart';
 import 'package:notify_api/src/model/error_response.dart';
 import 'package:notify_api/src/model/pending_snapshot.dart';
-import 'package:notify_api/src/model/permission_command_result.dart';
-import 'package:notify_api/src/model/question_command_result.dart';
 
 class PendingApi {
   final Dio _dio;
@@ -25,7 +24,7 @@ class PendingApi {
   const PendingApi(this._dio, this._serializers);
 
   /// Submit a complete answer set for a pending OpenCode question.
-  /// Validates and submits one complete ordered answer set for a pending question owned by the authenticated account and routes the command to the exact Plugin instance. The response carries the client-generated commandId and the terminal outcome; it confirms gateway routing, not that OpenCode applied the answers. Leaving the request unanswered has no OpenCode side effect and never invokes question reject.
+  /// Validates and submits one complete ordered answer set for a pending question owned by the authenticated account and routes the command to the exact Plugin instance. The body includes the event-derived sessionId, so the Plugin can call the session-scoped OpenCode reply directly. The 202 response only acknowledges best-effort delivery; it does not confirm that OpenCode applied the answers. Leaving the request unanswered has no OpenCode side effect and never invokes question reject.
   ///
   /// Parameters:
   /// * [instanceId] - OpenCode instance identifier.
@@ -38,9 +37,9 @@ class PendingApi {
   /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
   /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
   ///
-  /// Returns a [Future] containing a [Response] with a [QuestionCommandResult] as data
+  /// Returns a [Future] containing a [Response] with a [CommandAccepted] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<QuestionCommandResult>> answerQuestion({
+  Future<Response<CommandAccepted>> answerQuestion({
     required String instanceId,
     required String requestId,
     required AnswerQuestionBody answerQuestionBody,
@@ -112,7 +111,7 @@ class PendingApi {
       onReceiveProgress: onReceiveProgress,
     );
 
-    QuestionCommandResult? _responseData;
+    CommandAccepted? _responseData;
 
     try {
       final rawResponse = _response.data;
@@ -120,9 +119,9 @@ class PendingApi {
           ? null
           : _serializers.deserialize(
                   rawResponse,
-                  specifiedType: const FullType(QuestionCommandResult),
+                  specifiedType: const FullType(CommandAccepted),
                 )
-                as QuestionCommandResult;
+                as CommandAccepted;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -133,7 +132,7 @@ class PendingApi {
       );
     }
 
-    return Response<QuestionCommandResult>(
+    return Response<CommandAccepted>(
       data: _responseData,
       headers: _response.headers,
       isRedirect: _response.isRedirect,
@@ -146,7 +145,7 @@ class PendingApi {
   }
 
   /// Submit an immediate decision for a pending OpenCode permission.
-  /// Validates and submits one immediate allow-once, always-allow, or reject decision for a pending permission owned by the authenticated account and routes the command to the exact Plugin instance. The response carries the client-generated commandId and the terminal outcome; it confirms gateway routing, not that OpenCode applied the decision. Leaving the request undecided has no OpenCode side effect.
+  /// Validates and submits one immediate allow-once, always-allow, or reject decision for a pending permission owned by the authenticated account and routes the command to the exact Plugin instance. The body includes the event-derived sessionId, and the 202 response only acknowledges best-effort delivery; it does not confirm that OpenCode applied the decision. Leaving the request undecided has no OpenCode side effect.
   ///
   /// Parameters:
   /// * [instanceId] - OpenCode instance identifier.
@@ -159,9 +158,9 @@ class PendingApi {
   /// * [onSendProgress] - A [ProgressCallback] that can be used to get the send progress
   /// * [onReceiveProgress] - A [ProgressCallback] that can be used to get the receive progress
   ///
-  /// Returns a [Future] containing a [Response] with a [PermissionCommandResult] as data
+  /// Returns a [Future] containing a [Response] with a [CommandAccepted] as data
   /// Throws [DioException] if API call or serialization fails
-  Future<Response<PermissionCommandResult>> decidePermission({
+  Future<Response<CommandAccepted>> decidePermission({
     required String instanceId,
     required String requestId,
     required DecidePermissionBody decidePermissionBody,
@@ -233,7 +232,7 @@ class PendingApi {
       onReceiveProgress: onReceiveProgress,
     );
 
-    PermissionCommandResult? _responseData;
+    CommandAccepted? _responseData;
 
     try {
       final rawResponse = _response.data;
@@ -241,9 +240,9 @@ class PendingApi {
           ? null
           : _serializers.deserialize(
                   rawResponse,
-                  specifiedType: const FullType(PermissionCommandResult),
+                  specifiedType: const FullType(CommandAccepted),
                 )
-                as PermissionCommandResult;
+                as CommandAccepted;
     } catch (error, stackTrace) {
       throw DioException(
         requestOptions: _response.requestOptions,
@@ -254,7 +253,7 @@ class PendingApi {
       );
     }
 
-    return Response<PermissionCommandResult>(
+    return Response<CommandAccepted>(
       data: _responseData,
       headers: _response.headers,
       isRedirect: _response.isRedirect,
@@ -267,7 +266,7 @@ class PendingApi {
   }
 
   /// Query the body-free outcome of a client-generated command.
-  /// Returns the in-memory outcome correlation for a command submitted by the authenticated account, keyed by the client-generated commandId. The outcome is body-free: it carries only correlation and status metadata, never the question answers or permission decision. A client timeout should query the same commandId to distinguish accepted, confirmed, stale, and result_unknown before resubmitting.
+  /// Returns the in-memory outcome correlation for a command submitted by the authenticated account, keyed by the client-generated commandId. The outcome is body-free: it carries only correlation and status metadata, never the question answers or permission decision. This is an optional diagnostic surface; successful best-effort submissions do not wait for it.
   ///
   /// Parameters:
   /// * [commandId] - Client-generated command identifier.

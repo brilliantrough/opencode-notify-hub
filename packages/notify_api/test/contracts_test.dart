@@ -392,6 +392,7 @@ void main() {
     test('AnswerQuestionBody round-trips the ordered answer set', () {
       final body = AnswerQuestionBody((b) {
         b.commandId = 'cmd-42';
+        b.sessionId = 'ses-42';
         b.answers.replace([
           BuiltList<String>(['PostgreSQL']),
           BuiltList<String>(['Migrate', 'PostgreSQL', 'Use read replicas']),
@@ -408,6 +409,7 @@ void main() {
           ['Migrate', 'PostgreSQL', 'Use read replicas'],
         ],
         'commandId': 'cmd-42',
+        'sessionId': 'ses-42',
       });
 
       final restored = standardSerializers.deserializeWith(
@@ -415,34 +417,27 @@ void main() {
         out,
       )!;
       expect(restored.commandId, 'cmd-42');
+      expect(restored.sessionId, 'ses-42');
       expect(restored.answers.map((answer) => answer.toList()), [
         ['PostgreSQL'],
         ['Migrate', 'PostgreSQL', 'Use read replicas'],
       ]);
     });
 
-    test('QuestionCommandResult round-trips every terminal status', () {
-      const statuses = [
-        (QuestionCommandResultStatusEnum.confirmed, 'confirmed'),
-        (QuestionCommandResultStatusEnum.stale, 'stale'),
-        (QuestionCommandResultStatusEnum.upstreamError, 'upstream_error'),
-        (QuestionCommandResultStatusEnum.resultUnknown, 'result_unknown'),
-      ];
-      for (final (status, wire) in statuses) {
-        final json = {'commandId': 'cmd-42', 'status': wire};
-        final result = standardSerializers.deserializeWith(
-          QuestionCommandResult.serializer,
-          json,
-        )!;
-        expect(result.commandId, 'cmd-42');
-        expect(result.status, status);
+    test('CommandAccepted round-trips the one-way acknowledgement', () {
+      final json = {'commandId': 'cmd-42', 'status': 'accepted'};
+      final accepted = standardSerializers.deserializeWith(
+        CommandAccepted.serializer,
+        json,
+      )!;
+      expect(accepted.commandId, 'cmd-42');
+      expect(accepted.status, CommandAcceptedStatusEnum.accepted);
 
-        final out = standardSerializers.serializeWith(
-          QuestionCommandResult.serializer,
-          result,
-        );
-        expect(jsonDecode(jsonEncode(out)), json);
-      }
+      final out = standardSerializers.serializeWith(
+        CommandAccepted.serializer,
+        accepted,
+      );
+      expect(jsonDecode(jsonEncode(out)), json);
     });
   });
 
@@ -456,6 +451,7 @@ void main() {
       for (final (decision, wire) in decisions) {
         final body = DecidePermissionBody((b) {
           b.commandId = 'cmd-42';
+          b.sessionId = 'ses-42';
           b.decision = decision;
         });
 
@@ -466,6 +462,7 @@ void main() {
         expect(jsonDecode(jsonEncode(out)), {
           'commandId': 'cmd-42',
           'decision': wire,
+          'sessionId': 'ses-42',
         });
 
         final restored = standardSerializers.deserializeWith(
@@ -473,33 +470,11 @@ void main() {
           out,
         )!;
         expect(restored.commandId, 'cmd-42');
+        expect(restored.sessionId, 'ses-42');
         expect(restored.decision, decision);
       }
     });
 
-    test('PermissionCommandResult round-trips every terminal status', () {
-      const statuses = [
-        (PermissionCommandResultStatusEnum.confirmed, 'confirmed'),
-        (PermissionCommandResultStatusEnum.stale, 'stale'),
-        (PermissionCommandResultStatusEnum.upstreamError, 'upstream_error'),
-        (PermissionCommandResultStatusEnum.resultUnknown, 'result_unknown'),
-      ];
-      for (final (status, wire) in statuses) {
-        final json = {'commandId': 'cmd-42', 'status': wire};
-        final result = standardSerializers.deserializeWith(
-          PermissionCommandResult.serializer,
-          json,
-        )!;
-        expect(result.commandId, 'cmd-42');
-        expect(result.status, status);
-
-        final out = standardSerializers.serializeWith(
-          PermissionCommandResult.serializer,
-          result,
-        );
-        expect(jsonDecode(jsonEncode(out)), json);
-      }
-    });
   });
 
   group('Command outcome correlation', () {

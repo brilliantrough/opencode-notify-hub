@@ -135,23 +135,154 @@ class _AuthGateState extends ConsumerState<AuthGate> {
   void initState() {
     super.initState();
     if (ref.read(authControllerProvider) is AuthUnknown) {
-      // Restore a persisted session in the background.
-      Future.microtask(
-        () => ref.read(authControllerProvider.notifier).bootstrap(),
-      );
+      // Present the restore screen before platform credential access, which
+      // can briefly block the Linux GTK thread while libsecret wakes up.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(ref.read(authControllerProvider.notifier).bootstrap());
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return switch (ref.watch(authControllerProvider)) {
-      AuthUnknown() => const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      AuthUnknown() => const _SessionRestoreSplash(),
+      AuthRestoreFailed() => _SessionRestoreFailurePage(
+        onRetry: () => ref.read(authControllerProvider.notifier).bootstrap(),
+        onLogin: () =>
+            ref.read(authControllerProvider.notifier).abandonSessionRestore(),
       ),
       Unauthenticated() => const LoginPage(),
       AwaitingVerification(:final email) => VerifyEmailPage(email: email),
       Authenticated() => const AppShell(),
     };
+  }
+}
+
+class _SessionRestoreSplash extends StatelessWidget {
+  const _SessionRestoreSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      key: const ValueKey('session-restore-loading'),
+      body: Semantics(
+        label: '正在恢复会话',
+        liveRegion: true,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colors.primary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SizedBox.square(
+                  dimension: 58,
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _RestoreMarkBar(height: 16, color: colors.onPrimary),
+                        const SizedBox(width: 5),
+                        _RestoreMarkBar(height: 28, color: colors.onPrimary),
+                        const SizedBox(width: 5),
+                        _RestoreMarkBar(height: 21, color: colors.onPrimary),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 28),
+              const SizedBox(width: 240, child: LinearProgressIndicator()),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RestoreMarkBar extends StatelessWidget {
+  const _RestoreMarkBar({required this.height, required this.color});
+
+  final double height;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(2),
+    ),
+    child: SizedBox(width: 6, height: height),
+  );
+}
+
+class _SessionRestoreFailurePage extends StatelessWidget {
+  const _SessionRestoreFailurePage({this.onRetry, this.onLogin});
+
+  final VoidCallback? onRetry;
+  final VoidCallback? onLogin;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      key: const ValueKey('session-restore-failed'),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.cloud_off_outlined, size: 52, color: colors.error),
+                  const SizedBox(height: 20),
+                  Text(
+                    'OpenCode Notify',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    '暂时无法恢复会话',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '未能验证已保存的登录状态，登录信息仍保留在此设备上',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 28),
+                  FilledButton.icon(
+                    key: const ValueKey('session-restore-retry'),
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('重试'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    key: const ValueKey('session-restore-login'),
+                    onPressed: onLogin,
+                    child: const Text('使用其他账号登录'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

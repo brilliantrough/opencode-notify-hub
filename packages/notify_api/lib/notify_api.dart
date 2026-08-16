@@ -19,6 +19,7 @@ export 'package:notify_api/src/api/pending_api.dart';
 export 'package:notify_api/src/api/realtime_api.dart';
 
 export 'package:notify_api/src/model/answer_question_body.dart';
+export 'package:notify_api/src/model/command_accepted.dart';
 export 'package:notify_api/src/model/command_outcome.dart';
 export 'package:notify_api/src/model/create_ingest_key_body.dart';
 export 'package:notify_api/src/model/create_ingest_key_response.dart';
@@ -60,7 +61,6 @@ export 'package:notify_api/src/model/pending_interaction_one_of_questions_inner_
 export 'package:notify_api/src/model/pending_interaction_one_of_tool.dart';
 export 'package:notify_api/src/model/pending_snapshot.dart';
 export 'package:notify_api/src/model/pending_snapshot_interactions_inner.dart';
-export 'package:notify_api/src/model/permission_command_result.dart';
 export 'package:notify_api/src/model/plugin_control_client_message.dart';
 export 'package:notify_api/src/model/plugin_control_client_message_one_of.dart';
 export 'package:notify_api/src/model/plugin_control_client_message_one_of1.dart';
@@ -71,7 +71,6 @@ export 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
 export 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
 export 'package:notify_api/src/model/plugin_control_server_message_one_of2.dart';
 export 'package:notify_api/src/model/plugin_control_server_message_one_of3.dart';
-export 'package:notify_api/src/model/question_command_result.dart';
 export 'package:notify_api/src/model/refresh_body.dart';
 export 'package:notify_api/src/model/register_body.dart';
 export 'package:notify_api/src/model/register_device_body.dart';

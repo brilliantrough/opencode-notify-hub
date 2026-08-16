@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/auth_controller.dart';
+import '../config/server_config.dart';
 import 'auth_messages.dart';
 import 'forgot_password_page.dart';
 import 'register_page.dart';
+import 'server_settings_dialog.dart';
 
 /// Email + password login. Submit stays disabled until both fields are
 /// valid; failures surface as concise localized messages. An unverified
@@ -27,6 +29,7 @@ class LoginPage extends ConsumerStatefulWidget {
 
   /// Key of the link to the forgot-password page.
   static const Key forgotLinkKey = ValueKey('login-forgot-link');
+  static const Key serverKey = ValueKey('login-server');
 
   @override
   ConsumerState<LoginPage> createState() => _LoginPageState();
@@ -76,6 +79,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final server = ref.watch(serverConfigProvider).gatewayHttpBase;
     return Scaffold(
       appBar: AppBar(title: const Text('登录')),
       body: Center(
@@ -85,6 +89,20 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             shrinkWrap: true,
             padding: const EdgeInsets.all(24),
             children: [
+              ListTile(
+                key: LoginPage.serverKey,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.dns_outlined),
+                title: const Text('服务器'),
+                subtitle: Text(
+                  server,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: const Icon(Icons.edit_outlined),
+                onTap: () => showServerSettingsDialog(context),
+              ),
+              const SizedBox(height: 12),
               TextField(
                 key: LoginPage.emailFieldKey,
                 controller: _emailController,
@@ -104,9 +122,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 const SizedBox(height: 12),
                 Text(
                   _error!,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ],
               const SizedBox(height: 24),

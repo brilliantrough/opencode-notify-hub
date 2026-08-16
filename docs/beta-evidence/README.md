@@ -81,7 +81,9 @@ question created via the V2 API), reusing the production plugin modules:
 - remote unblock: runs the production `ControlChannel` (register +
   pending-snapshot + answer/decision commands) with the production V2 adapters
   (`PendingAdapter` / `QuestionReplyAdapter` / `PermissionReplyAdapter`), so
-  the desktop client's answer flows into the same real opencode session.
+  the desktop client's event-carried session/request identity is submitted
+  directly to the same real opencode session. Command submission is
+  best-effort: the Gateway acknowledges delivery without waiting for OpenCode.
 
 The daemon is used because no 1.18.18 launch mode exposes the pending-question
 store to the plugin's `serverUrl` (see matrix). Every other part of the loop is

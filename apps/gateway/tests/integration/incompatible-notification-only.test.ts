@@ -238,7 +238,7 @@ describe("incompatible-version notification-only behavior (AC4)", () => {
       method: "POST",
       url: `/v1/pending-interactions/${instanceId}/questions/${requestId}/answer`,
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      payload: body,
+      payload: { sessionId: "ses_1", ...body },
     });
   }
 
@@ -252,7 +252,7 @@ describe("incompatible-version notification-only behavior (AC4)", () => {
       method: "POST",
       url: `/v1/pending-interactions/${instanceId}/permissions/${requestId}/decision`,
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      payload: body,
+      payload: { sessionId: "ses_2", ...body },
     });
   }
 

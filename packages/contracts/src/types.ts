@@ -11,6 +11,7 @@ import type {
 } from "./schemas/auth.js";
 import type { errorResponseSchema, healthStatusSchema } from "./schemas/common.js";
 import type {
+  commandAcceptedSchema,
   commandKindSchema,
   commandOutcomeSchema,
   commandOutcomeStatusSchema,
@@ -43,14 +44,12 @@ import type {
 import type { pendingInteractionSchema, pendingSnapshotSchema } from "./schemas/pending.js";
 import type {
   decidePermissionBodySchema,
-  permissionCommandResultSchema,
   permissionCommandStatusSchema,
   permissionDecisionSchema,
 } from "./schemas/permissions.js";
 import type {
   answerQuestionBodySchema,
   questionAnswersSchema,
-  questionCommandResultSchema,
   questionCommandStatusSchema,
 } from "./schemas/questions.js";
 import type { wsServerMessageSchema } from "./schemas/ws.js";
@@ -94,13 +93,12 @@ export type PendingSnapshot = FromSchema<typeof pendingSnapshotSchema>;
 export type QuestionAnswers = FromSchema<typeof questionAnswersSchema>;
 export type QuestionCommandStatus = FromSchema<typeof questionCommandStatusSchema>;
 export type AnswerQuestionBody = FromSchema<typeof answerQuestionBodySchema>;
-export type QuestionCommandResult = FromSchema<typeof questionCommandResultSchema>;
 
 export type PermissionDecision = FromSchema<typeof permissionDecisionSchema>;
 export type PermissionCommandStatus = FromSchema<typeof permissionCommandStatusSchema>;
 export type DecidePermissionBody = FromSchema<typeof decidePermissionBodySchema>;
-export type PermissionCommandResult = FromSchema<typeof permissionCommandResultSchema>;
 
 export type CommandKind = FromSchema<typeof commandKindSchema>;
+export type CommandAccepted = FromSchema<typeof commandAcceptedSchema>;
 export type CommandOutcomeStatus = FromSchema<typeof commandOutcomeStatusSchema>;
 export type CommandOutcome = FromSchema<typeof commandOutcomeSchema>;

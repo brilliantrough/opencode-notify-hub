@@ -2,10 +2,9 @@ import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 
 import {
+  validateCommandAccepted,
   validateCommandOutcome,
   validateErrorResponse,
-  validatePermissionCommandResult,
-  validateQuestionCommandResult,
 } from "@notify/contracts";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -355,7 +354,7 @@ describe("command outcomes", () => {
         "content-type": "application/json",
         ...overrides,
       },
-      payload: body,
+      payload: { sessionId: "ses_1", ...body },
     });
   }
 
@@ -374,7 +373,7 @@ describe("command outcomes", () => {
         "content-type": "application/json",
         ...overrides,
       },
-      payload: body,
+      payload: { sessionId: "ses_2", ...body },
     });
   }
 
@@ -391,6 +390,35 @@ describe("command outcomes", () => {
         ...overrides,
       },
     });
+  }
+
+  /**
+   * Poll the outcome endpoint until the command reaches `status`. The POST
+   * submission is acknowledged immediately (202), so the terminal plugin
+   * result arrives asynchronously; this helper is the synchronization point
+   * for every transition asserted after a result frame or disconnect.
+   */
+  async function awaitOutcomeStatus(
+    token: string,
+    commandId: string,
+    status: string,
+    timeoutMs = 3_000,
+  ): Promise<Record<string, unknown>> {
+    const deadline = Date.now() + timeoutMs;
+    let last: Record<string, unknown> = {};
+    while (Date.now() < deadline) {
+      const res = await getCommandOutcome(token, commandId);
+      if (res.statusCode === 200) {
+        last = res.json() as Record<string, unknown>;
+        if (last.status === status) {
+          return last;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
+    throw new Error(
+      `command outcome ${commandId} never reached ${status}; last observed: ${JSON.stringify(last)}`,
+    );
   }
 
   describe("authentication", () => {
@@ -434,8 +462,16 @@ describe("command outcomes", () => {
         commandId,
         answers: [["Postgres"]],
       });
-      const frame = (await command) as { commandId: string };
+      const frame = (await command) as { commandId: string; sessionID: string };
       expect(frame.commandId).toBe(commandId);
+      expect(frame.sessionID).toBe("ses_1");
+
+      // The gateway acknowledges routing immediately, without waiting for
+      // the Plugin result.
+      const res = await response;
+      expect(res.statusCode).toBe(202);
+      expect(validateCommandAccepted(res.json())).toBe(true);
+      expect(res.json()).toEqual({ commandId, status: "accepted" });
 
       // The moment the gateway routed the command, the outcome is `accepted`.
       const accepted = await getCommandOutcome(alice.token, commandId);
@@ -459,16 +495,11 @@ describe("command outcomes", () => {
           status: "confirmed",
         }),
       );
-      const res = await response;
-      expect(res.statusCode).toBe(200);
-      expect(validateQuestionCommandResult(res.json())).toBe(true);
-      expect(res.json()).toEqual({ commandId, status: "confirmed" });
 
       // The terminal plugin result advances the outcome to `confirmed`.
-      const confirmed = await getCommandOutcome(alice.token, commandId);
-      expect(confirmed.statusCode).toBe(200);
-      expect(validateCommandOutcome(confirmed.json())).toBe(true);
-      expect(confirmed.json()).toEqual({
+      const confirmed = await awaitOutcomeStatus(alice.token, commandId, "confirmed");
+      expect(validateCommandOutcome(confirmed)).toBe(true);
+      expect(confirmed).toEqual({
         commandId,
         requestId: "req_1",
         instanceId: instance.instanceId,
@@ -495,8 +526,14 @@ describe("command outcomes", () => {
         commandId,
         decision: "once",
       });
-      const frame = (await command) as { commandId: string };
+      const frame = (await command) as { commandId: string; sessionID: string };
       expect(frame.commandId).toBe(commandId);
+      expect(frame.sessionID).toBe("ses_2");
+
+      const res = await response;
+      expect(res.statusCode).toBe(202);
+      expect(validateCommandAccepted(res.json())).toBe(true);
+      expect(res.json()).toEqual({ commandId, status: "accepted" });
 
       const accepted = await getCommandOutcome(alice.token, commandId);
       expect(accepted.statusCode).toBe(200);
@@ -517,14 +554,9 @@ describe("command outcomes", () => {
           status: "confirmed",
         }),
       );
-      const res = await response;
-      expect(res.statusCode).toBe(200);
-      expect(validatePermissionCommandResult(res.json())).toBe(true);
-      expect(res.json()).toEqual({ commandId, status: "confirmed" });
-
-      const confirmed = await getCommandOutcome(alice.token, commandId);
-      expect(confirmed.statusCode).toBe(200);
-      expect(confirmed.json()).toEqual({
+      const confirmed = await awaitOutcomeStatus(alice.token, commandId, "confirmed");
+      expect(validateCommandOutcome(confirmed)).toBe(true);
+      expect(confirmed).toEqual({
         commandId,
         requestId: "per_1",
         instanceId: instance.instanceId,
@@ -556,15 +588,18 @@ describe("command outcomes", () => {
 
       const statuses = ["confirmed", "stale", "upstream_error", "result_unknown"] as const;
       const requestIds = ["per_a", "per_b", "per_c", "per_d"];
+      const sessionIds = ["ses_2", "ses_b", "ses_c", "ses_d"];
       for (const [index, status] of statuses.entries()) {
         const commandId = randomUUID();
         const command = nextMessage(instance.ws);
         const response = decidePermission(alice.token, instance.instanceId, requestIds[index], {
           commandId,
+          sessionId: sessionIds[index],
           decision: "once",
         });
         const frame = (await command) as { commandId: string };
         expect(frame.commandId).toBe(commandId);
+        expect((await response).json()).toEqual({ commandId, status: "accepted" });
         instance.ws.send(
           JSON.stringify({
             type: "permission_decide_result",
@@ -573,10 +608,8 @@ describe("command outcomes", () => {
             status,
           }),
         );
-        expect((await response).json()).toEqual({ commandId, status });
-        const outcome = await getCommandOutcome(alice.token, commandId);
-        expect(outcome.statusCode).toBe(200);
-        expect((outcome.json() as { status: string }).status).toBe(status);
+        const outcome = await awaitOutcomeStatus(alice.token, commandId, status);
+        expect(outcome.status).toBe(status);
       }
     });
   });
@@ -599,12 +632,12 @@ describe("command outcomes", () => {
       });
       const frame = (await command) as { commandId: string };
       expect(frame.commandId).toBe(commandId);
-      // The Plugin never replies; the command settles as result_unknown.
-      expect((await response).json()).toEqual({ commandId, status: "result_unknown" });
-      const outcome = await getCommandOutcome(alice.token, commandId);
-      expect(outcome.statusCode).toBe(200);
-      expect(validateCommandOutcome(outcome.json())).toBe(true);
-      expect(outcome.json()).toEqual({
+      // The Plugin never replies; the submission is acknowledged immediately.
+      expect((await response).json()).toEqual({ commandId, status: "accepted" });
+      // The command settles as result_unknown once the bounded wait elapses.
+      const outcome = await awaitOutcomeStatus(alice.token, commandId, "result_unknown");
+      expect(validateCommandOutcome(outcome)).toBe(true);
+      expect(outcome).toEqual({
         commandId,
         requestId: "req_1",
         instanceId: instance.instanceId,
@@ -630,11 +663,11 @@ describe("command outcomes", () => {
       });
       const frame = (await command) as { commandId: string };
       expect(frame.commandId).toBe(commandId);
+      expect((await response).json()).toEqual({ commandId, status: "accepted" });
       instance.ws.close();
-      expect((await response).json()).toEqual({ commandId, status: "result_unknown" });
-      const outcome = await getCommandOutcome(alice.token, commandId);
-      expect(outcome.statusCode).toBe(200);
-      expect((outcome.json() as { status: string }).status).toBe("result_unknown");
+      // The owning Plugin disconnect settles the in-flight command.
+      const outcome = await awaitOutcomeStatus(alice.token, commandId, "result_unknown");
+      expect(outcome.status).toBe("result_unknown");
     });
   });
 
@@ -657,6 +690,7 @@ describe("command outcomes", () => {
       });
       const frame = (await command) as { commandId: string };
       expect(frame.commandId).toBe(commandId);
+      expect((await response).json()).toEqual({ commandId, status: "accepted" });
       instance.ws.send(
         JSON.stringify({
           type: "question_answer_result",
@@ -665,7 +699,8 @@ describe("command outcomes", () => {
           status: "confirmed",
         }),
       );
-      expect((await response).json()).toEqual({ commandId, status: "confirmed" });
+      // The terminal plugin result is recorded before the TTL can expire it.
+      await awaitOutcomeStatus(alice.token, commandId, "confirmed");
 
       // The clock passing the tiny TTL expires the owner's entry. Unknown and
       // foreign ids are 404 regardless of time, so all three answer the same
@@ -704,6 +739,10 @@ describe("command outcomes", () => {
         answers: [["Postgres"]],
       });
       await firstFrame;
+      expect((await firstResponse).json()).toEqual({
+        commandId: firstCommandId,
+        status: "accepted",
+      });
       instance.ws.send(
         JSON.stringify({
           type: "question_answer_result",
@@ -712,10 +751,8 @@ describe("command outcomes", () => {
           status: "confirmed",
         }),
       );
-      expect((await firstResponse).json()).toEqual({
-        commandId: firstCommandId,
-        status: "confirmed",
-      });
+      // The first command settles as confirmed before the clock moves on.
+      await awaitOutcomeStatus(alice.token, firstCommandId, "confirmed");
 
       // The clock passing the TTL expires the first entry on the next access.
       clock.advance(TINY_OUTCOME_TTL_MS + 1);
@@ -728,9 +765,14 @@ describe("command outcomes", () => {
       const secondFrame = nextMessage(instance.ws);
       const secondResponse = answerQuestion(alice.token, instance.instanceId, "req_b", {
         commandId: secondCommandId,
+        sessionId: "ses_b",
         answers: [["Postgres"]],
       });
       await secondFrame;
+      expect((await secondResponse).json()).toEqual({
+        commandId: secondCommandId,
+        status: "accepted",
+      });
       const accepted = await getCommandOutcome(alice.token, secondCommandId);
       expect(accepted.statusCode).toBe(200);
       expect((accepted.json() as { status: string }).status).toBe("accepted");
@@ -742,10 +784,7 @@ describe("command outcomes", () => {
           status: "confirmed",
         }),
       );
-      expect((await secondResponse).json()).toEqual({
-        commandId: secondCommandId,
-        status: "confirmed",
-      });
+      await awaitOutcomeStatus(alice.token, secondCommandId, "confirmed");
     });
   });
 
@@ -803,13 +842,12 @@ describe("command outcomes", () => {
       );
       expect((await winnerResponse).json()).toEqual({
         commandId: winnerCommandId,
-        status: "confirmed",
+        status: "accepted",
       });
 
       // The winner's outcome is now terminal for both desktop clients.
-      const winnerOutcome = await getCommandOutcome(secondToken, winnerCommandId);
-      expect(winnerOutcome.statusCode).toBe(200);
-      expect((winnerOutcome.json() as { status: string }).status).toBe("confirmed");
+      const winnerOutcome = await awaitOutcomeStatus(secondToken, winnerCommandId, "confirmed");
+      expect(winnerOutcome.status).toBe("confirmed");
     });
   });
 
@@ -837,6 +875,7 @@ describe("command outcomes", () => {
         answers: [["Postgres"]],
       });
       expect(((await firstFrame) as { commandId: string }).commandId).toBe(commandId);
+      expect((await firstResponse).json()).toEqual({ commandId, status: "accepted" });
       first.ws.send(
         JSON.stringify({
           type: "question_answer_result",
@@ -845,7 +884,6 @@ describe("command outcomes", () => {
           status: "confirmed",
         }),
       );
-      expect((await firstResponse).json()).toEqual({ commandId, status: "confirmed" });
 
       // Second connection replays the same commandId for a different request:
       // the gateway routes it (the per-connection in-flight gates do not
@@ -853,14 +891,15 @@ describe("command outcomes", () => {
       const replayFrame = nextMessage(second.ws);
       const replayResponse = answerQuestion(alice.token, second.instanceId, "req_two", {
         commandId,
+        sessionId: "ses_two",
         answers: [["sqlite"]],
       });
       expect(((await replayFrame) as { commandId: string }).commandId).toBe(commandId);
+      expect((await replayResponse).json()).toEqual({ commandId, status: "accepted" });
 
-      const outcome = await getCommandOutcome(alice.token, commandId);
-      expect(outcome.statusCode).toBe(200);
-      expect(validateCommandOutcome(outcome.json())).toBe(true);
-      expect(outcome.json()).toEqual({
+      const outcome = await awaitOutcomeStatus(alice.token, commandId, "confirmed");
+      expect(validateCommandOutcome(outcome)).toBe(true);
+      expect(outcome).toEqual({
         commandId,
         requestId: "req_one",
         instanceId: first.instanceId,
@@ -879,7 +918,7 @@ describe("command outcomes", () => {
           status: "confirmed",
         }),
       );
-      await replayResponse;
+      await awaitOutcomeStatus(alice.token, commandId, "confirmed");
       const afterReplay = await getCommandOutcome(alice.token, commandId);
       expect(afterReplay.statusCode).toBe(200);
       expect(afterReplay.json()).toEqual({
@@ -906,13 +945,16 @@ describe("command outcomes", () => {
 
       const commandIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
       const requestIds = ["req_a", "req_b", "req_c", "req_d"];
+      const sessionIds = ["ses_1", "ses_b", "ses_c", "ses_d"];
       for (let i = 0; i < 4; i++) {
         const frame = nextMessage(instance.ws);
         const response = answerQuestion(alice.token, instance.instanceId, requestIds[i], {
           commandId: commandIds[i],
+          sessionId: sessionIds[i],
           answers: [["Postgres"]],
         });
         expect(((await frame) as { commandId: string }).commandId).toBe(commandIds[i]);
+        expect((await response).json()).toEqual({ commandId: commandIds[i], status: "accepted" });
         instance.ws.send(
           JSON.stringify({
             type: "question_answer_result",
@@ -921,7 +963,7 @@ describe("command outcomes", () => {
             status: "confirmed",
           }),
         );
-        expect((await response).json()).toEqual({ commandId: commandIds[i], status: "confirmed" });
+        await awaitOutcomeStatus(alice.token, commandIds[i], "confirmed");
       }
 
       // The fake clock advancing under the TTL is irrelevant: the oldest
@@ -987,7 +1029,8 @@ describe("command outcomes", () => {
         commandId: answerCommandId,
         answers: [[answerSentinel]],
       });
-      const sentAnswer = (await answerFrame) as { answers: string[][] };
+      const sentAnswer = (await answerFrame) as { sessionID: string; answers: string[][] };
+      expect(sentAnswer.sessionID).toBe("ses_1");
       expect(sentAnswer.answers).toEqual([[answerSentinel]]);
 
       const decisionFrame = nextMessage(instance.ws);
@@ -995,7 +1038,8 @@ describe("command outcomes", () => {
         commandId: decisionCommandId,
         decision: "once",
       });
-      const sentDecision = (await decisionFrame) as { decision: string };
+      const sentDecision = (await decisionFrame) as { sessionID: string; decision: string };
+      expect(sentDecision.sessionID).toBe("ses_2");
       expect(sentDecision.decision).toBe("once");
 
       instance.ws.send(
@@ -1016,11 +1060,11 @@ describe("command outcomes", () => {
       );
       expect((await answerResponse).json()).toEqual({
         commandId: answerCommandId,
-        status: "confirmed",
+        status: "accepted",
       });
       expect((await decisionResponse).json()).toEqual({
         commandId: decisionCommandId,
-        status: "confirmed",
+        status: "accepted",
       });
 
       // The outcome endpoint is body-free by construction: no answers, no

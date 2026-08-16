@@ -14,6 +14,7 @@ part 'decide_permission_body.g.dart';
 /// Properties:
 /// * [commandId]
 /// * [decision]
+/// * [sessionId]
 @BuiltValue()
 abstract class DecidePermissionBody
     implements Built<DecidePermissionBody, DecidePermissionBodyBuilder> {
@@ -23,6 +24,9 @@ abstract class DecidePermissionBody
   @BuiltValueField(wireName: r'decision')
   DecidePermissionBodyDecisionEnum get decision;
   // enum decisionEnum {  once,  reject,  always,  };
+
+  @BuiltValueField(wireName: r'sessionId')
+  String get sessionId;
 
   DecidePermissionBody._();
 
@@ -62,6 +66,11 @@ class _$DecidePermissionBodySerializer
     yield serializers.serialize(
       object.decision,
       specifiedType: const FullType(DecidePermissionBodyDecisionEnum),
+    );
+    yield r'sessionId';
+    yield serializers.serialize(
+      object.sessionId,
+      specifiedType: const FullType(String),
     );
   }
 
@@ -109,6 +118,15 @@ class _$DecidePermissionBodySerializer
                   )
                   as DecidePermissionBodyDecisionEnum;
           result.decision = valueDes;
+          break;
+        case r'sessionId':
+          final valueDes =
+              serializers.deserialize(
+                    value,
+                    specifiedType: const FullType(String),
+                  )
+                  as String;
+          result.sessionId = valueDes;
           break;
         default:
           unhandled.add(key);

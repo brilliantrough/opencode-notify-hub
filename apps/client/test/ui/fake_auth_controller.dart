@@ -30,14 +30,25 @@ class FakeAuthController extends AuthController {
   final List<String> resentEmails = [];
   final List<String> forgotEmails = [];
   final List<({String email, String code, String password})> resets = [];
+  int bootstrapCalls = 0;
+  int abandonRestoreCalls = 0;
   int logoutCalls = 0;
 
   @override
   AuthState build() => _initial;
 
+  void replace(AuthState next) => state = next;
+
   @override
   Future<void> bootstrap() async {
-    // No stored session in tests: stay in the initial state.
+    bootstrapCalls++;
+    state = const AuthUnknown();
+  }
+
+  @override
+  Future<void> abandonSessionRestore() async {
+    abandonRestoreCalls++;
+    state = const Unauthenticated();
   }
 
   @override

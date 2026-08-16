@@ -61,11 +61,13 @@ class GatewayWsClient implements WsClient {
     required TokenRefresher refresher,
     WsConnector? connector,
     Random? random,
+    Duration connectTimeout = const Duration(seconds: 10),
   }) : _config = config,
        _tokenHolder = tokenHolder,
        _refresher = refresher,
        _connector = connector ?? _defaultConnector,
-       _random = random ?? Random();
+       _random = random ?? Random(),
+       _connectTimeout = connectTimeout;
 
   static const Duration _baseBackoff = Duration(milliseconds: 500);
   static const Duration _maxBackoff = Duration(seconds: 30);
@@ -85,6 +87,7 @@ class GatewayWsClient implements WsClient {
   final TokenRefresher _refresher;
   final WsConnector _connector;
   final Random _random;
+  final Duration _connectTimeout;
 
   final StreamController<NotifyEvent> _events =
       StreamController<NotifyEvent>.broadcast();
@@ -193,10 +196,7 @@ class GatewayWsClient implements WsClient {
 
       final WebSocketChannel channel;
       try {
-        channel = _connector(Uri.parse(_config.gatewayWsBase), {
-          'Authorization': 'Bearer $token',
-        });
-        await channel.ready;
+        channel = await _openChannel(token);
       } catch (error) {
         if (isStale() || !_running) {
           return;
@@ -285,6 +285,19 @@ class GatewayWsClient implements WsClient {
       }
 
       await _waitBackoff(epoch, attempt++);
+    }
+  }
+
+  Future<WebSocketChannel> _openChannel(String token) async {
+    final channel = _connector(Uri.parse(_config.gatewayWsBase), {
+      'Authorization': 'Bearer $token',
+    });
+    try {
+      await channel.ready.timeout(_connectTimeout);
+      return channel;
+    } catch (_) {
+      unawaited(channel.sink.close());
+      rethrow;
     }
   }
 

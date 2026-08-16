@@ -51,8 +51,10 @@ Our plugin was migrated to the V2 surface in commit `a442e33`
 (`packages/plugin/src/pending-adapter.ts`, `question-reply-adapter.ts`,
 `permission-reply-adapter.ts`). V2 field mapping: permission `action→permission`,
 `resources→patterns`, `save→always`, `source(type==="tool")→tool`;
-question fields unchanged. Replies first resolve `sessionID` by looking up the
-`requestId` in the current location-scoped pending list (absent ⇒ `stale`).
+question fields unchanged. Reply commands now carry the `sessionID` captured
+from the original event/snapshot and call the V2 session-scoped reply directly;
+there is no pending-list preflight. A request already handled locally returns
+stale and is treated as a best-effort no-op.
 
 ## Third verified defect: proxy environment poisons loopback plugin traffic
 

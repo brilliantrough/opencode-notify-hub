@@ -64,14 +64,14 @@ OpenCode after installing or changing any variable.
 ### 3. Desktop client
 
 Build each desktop target on its native operating system per
-[client-setup.md](client-setup.md). The client has no runtime server picker;
-pass the staging gateway at build time:
+[client-setup.md](client-setup.md). Builds are server-portable; select the
+staging gateway from the login page before running the acceptance matrix:
 
 ```bash
 cd apps/client
-flutter build linux --release --dart-define=GATEWAY_URL=https://notify.example.com
+flutter build linux --release
 # Windows host:
-flutter build windows --release --dart-define=GATEWAY_URL=https://notify.example.com
+flutter build windows --release
 ```
 
 Distribute the complete portable bundle directory, not the executable alone.
@@ -123,8 +123,8 @@ docker compose -f deploy/docker-compose.production.yml up -d --force-recreate
 - **Plugin:** reinstall the previous bundle in
   `~/.config/opencode/plugins/` and restart OpenCode. The bundle is a single
   self-contained file; no other state is stored locally.
-- **Desktop client:** reinstall the previous platform bundle with the same
-  `GATEWAY_URL`.
+- **Desktop client:** reinstall the previous platform bundle; the persisted
+  server selection remains in local preferences.
 
 Roll back the gateway before the plugin: a reverted gateway and an upgraded
 plugin degrade to the notification-only path, never to a broken one.
@@ -144,8 +144,8 @@ plugin degrade to the notification-only path, never to a broken one.
 - The command outcome cache is **body-free and in-memory** for about ten
   minutes: `commandId`, request/instance identity, status, and `updatedAt`
   only — never answers, decisions, patterns, or metadata. It is volatile; a
-  gateway restart loses it, and clients re-converge through OpenCode's
-  authoritative pending lists.
+  gateway restart loses it. It is diagnostic only; clients optimistically
+  remove requests after the Gateway returns `202 accepted`.
 
 The full user-facing policy is [PRIVACY.md](../PRIVACY.md) and the persistence
 boundary is [ADR 0003](adr/0003-relay-full-interactions-without-persistence.md).
@@ -225,8 +225,8 @@ suites prove:
   instances, partial `200` on timeout, and the provider-notification
   regression;
 - `question-answer` / `permission-decision`: routing to the owning instance,
-  `404`/`409`/`result_unknown` semantics, in-flight dedup, and the `always`
-  confirmation rule;
+  event-carried `sessionId`, immediate `202 accepted`, direct V2 replies,
+  `404`/`409` routing gates, in-flight dedup, and the `always` confirmation rule;
 - `command-outcome`: body-free, in-memory outcome records and uniform `404`;
 - `incompatible-notification-only`: incompatible versions keep notifications
   and publish diagnosable presence but are excluded from commands;

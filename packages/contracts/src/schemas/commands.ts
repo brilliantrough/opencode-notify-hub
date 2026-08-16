@@ -17,6 +17,19 @@ export const commandOutcomeStatusSchema = {
   enum: ["accepted", "confirmed", "stale", "upstream_error", "result_unknown"],
 } as const satisfies JSONSchema;
 
+// Immediate acknowledgement returned after the Gateway writes a best-effort
+// command to the owning Plugin connection. It deliberately says nothing about
+// whether OpenCode later applied or ignored the command.
+export const commandAcceptedSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["commandId", "status"],
+  properties: {
+    commandId: { type: "string", format: "uuid" },
+    status: { const: "accepted" },
+  },
+} as const satisfies JSONSchema;
+
 // Body-free, in-memory command outcome correlation keyed by the
 // client-generated commandId for roughly ten minutes. It never carries
 // question answers, permission decisions, or any other interaction body;

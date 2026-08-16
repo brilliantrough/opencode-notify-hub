@@ -1,16 +1,14 @@
 import {
   answerQuestionBodySchema,
+  commandAcceptedSchema,
   commandOutcomeSchema,
   decidePermissionBodySchema,
   pendingSnapshotSchema,
-  permissionCommandResultSchema,
-  questionCommandResultSchema,
   type AnswerQuestionBody,
+  type CommandAccepted,
   type CommandOutcome,
   type DecidePermissionBody,
   type PendingSnapshot,
-  type PermissionCommandResult,
-  type QuestionCommandResult,
 } from "@notify/contracts";
 import type { FastifyPluginAsync } from "fastify";
 
@@ -33,9 +31,10 @@ import type {
  * `POST /v1/pending-interactions/:instanceId/questions/:requestId/answer`:
  * submit one complete ordered answer set for a pending question owned by the
  * authenticated account. The registry routes the command to the exact Plugin
- * instance and awaits its terminal outcome; the 200 response carries the
- * client-generated `commandId` and confirms gateway routing, not that
- * OpenCode applied the answers. Unknown/foreign/non-actionable targets and
+ * instance and immediately returns 202 `accepted`; this acknowledges
+ * best-effort delivery only, not that OpenCode applied the answers. The body
+ * carries the event-derived session id so the Plugin can reply directly.
+ * Unknown/foreign/non-actionable targets and
  * never-projected request ids answer a uniform 404; stale requests and the
  * wrong interaction kind answer 409. Answer bodies are redacted from logs and
  * never persisted.
@@ -43,9 +42,9 @@ import type {
  * `POST /v1/pending-interactions/:instanceId/permissions/:requestId/decision`:
  * submit one immediate decision (`once`, `always`, or `reject`) for a pending
  * permission owned by the authenticated account. The registry routes the
- * command to the exact Plugin instance and awaits its terminal outcome; the
- * 200 response carries the client-generated `commandId` and confirms gateway
- * routing, not that OpenCode applied the decision. Unknown/foreign/non-actionable
+ * command to the exact Plugin instance and immediately returns 202 `accepted`;
+ * this acknowledges best-effort delivery only, not that OpenCode applied the
+ * decision. Unknown/foreign/non-actionable
  * targets and never-projected request ids answer a uniform 404; stale
  * requests, the wrong interaction kind, and a second in-flight decision on
  * the same connection answer 409. Decision bodies are redacted from logs and
@@ -57,8 +56,8 @@ import type {
  * carries only correlation and lifecycle metadata (commandId, requestId,
  * instanceId, kind, status, updatedAt) — never answers, decisions, or
  * payloads. Unknown, expired, and foreign command ids all answer the same
- * uniform 404, so a client that timed out can distinguish accepted, confirmed,
- * stale, and result_unknown before resubmitting.
+ * uniform 404. This is an optional diagnostic surface; successful submissions
+ * do not wait for or reconcile against it.
  */
 export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPluginAsync {
   return async (app) => {
@@ -82,7 +81,7 @@ export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPl
         preHandler: app.authenticate,
         schema: {
           body: answerQuestionBodySchema,
-          response: { 200: questionCommandResultSchema },
+          response: { 202: commandAcceptedSchema },
         },
       },
       async (request, reply) => {
@@ -92,6 +91,7 @@ export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPl
           request.params.instanceId,
           request.params.requestId,
           body.commandId,
+          body.sessionId,
           body.answers,
         );
         if (!outcome.ok) {
@@ -104,7 +104,7 @@ export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPl
             .status(404)
             .send(errorBody(ErrorCodes.NOT_FOUND, "Question request not found"));
         }
-        return reply.status(200).send(outcome.result satisfies QuestionCommandResult);
+        return reply.status(202).send(outcome.result satisfies CommandAccepted);
       },
     );
 
@@ -114,7 +114,7 @@ export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPl
         preHandler: app.authenticate,
         schema: {
           body: decidePermissionBodySchema,
-          response: { 200: permissionCommandResultSchema },
+          response: { 202: commandAcceptedSchema },
         },
       },
       async (request, reply) => {
@@ -124,6 +124,7 @@ export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPl
           request.params.instanceId,
           request.params.requestId,
           body.commandId,
+          body.sessionId,
           body.decision,
         );
         if (!outcome.ok) {
@@ -138,7 +139,7 @@ export function pendingInteractionsRoutes(registry: InstanceRegistry): FastifyPl
             .status(404)
             .send(errorBody(ErrorCodes.NOT_FOUND, "Permission request not found"));
         }
-        return reply.status(200).send(outcome.result satisfies PermissionCommandResult);
+        return reply.status(202).send(outcome.result satisfies CommandAccepted);
       },
     );
 

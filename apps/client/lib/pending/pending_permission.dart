@@ -1,11 +1,11 @@
-import 'package:notify_api/notify_api.dart' as api;
-
-/// Terminal outcome OpenCode reports for a submitted permission decision.
+/// Gateway acceptance or a legacy terminal outcome for a permission decision.
 ///
-/// Only [confirmed] lets the client drop the request from the workbench;
+/// [accepted] removes the request optimistically; [confirmed] remains a
+/// supported legacy outcome. Otherwise,
 /// [stale] and [upstreamError] mean the authoritative snapshot should be
 /// re-read, while [resultUnknown] keeps the request visible and pending.
 enum PermissionDecisionOutcome {
+  accepted,
   confirmed,
   stale,
   upstreamError,
@@ -17,7 +17,7 @@ enum PermissionDecisionOutcome {
 /// OpenCode will save and only confirms the intent from a dialog.
 enum PermissionDecision { once, reject, always }
 
-/// The gateway's correlated decision reply, mapped from the generated contract.
+/// The Gateway's decision acknowledgement mapped into the client domain.
 class PermissionDecisionResult {
   const PermissionDecisionResult({
     required this.commandId,
@@ -35,6 +35,9 @@ enum PermissionDecisionState {
 
   /// The decision command is in flight; gateway acceptance is not yet known.
   submitting,
+
+  /// The Gateway accepted the command for best-effort delivery.
+  sent,
 
   /// OpenCode confirmed the decision; the request leaves the workbench.
   confirmed,
@@ -54,20 +57,4 @@ enum PermissionDecisionState {
 
   /// The gateway rejected the command (client/4xx error).
   rejected,
-}
-
-/// Maps a generated gateway status onto the domain outcome.
-PermissionDecisionOutcome permissionDecisionOutcomeFromStatus(
-  api.PermissionCommandResultStatusEnum status,
-) {
-  if (status == api.PermissionCommandResultStatusEnum.confirmed) {
-    return PermissionDecisionOutcome.confirmed;
-  }
-  if (status == api.PermissionCommandResultStatusEnum.stale) {
-    return PermissionDecisionOutcome.stale;
-  }
-  if (status == api.PermissionCommandResultStatusEnum.upstreamError) {
-    return PermissionDecisionOutcome.upstreamError;
-  }
-  return PermissionDecisionOutcome.resultUnknown;
 }

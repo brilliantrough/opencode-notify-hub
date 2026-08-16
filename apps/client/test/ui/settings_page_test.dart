@@ -1,11 +1,17 @@
+import 'package:client/auth/auth_controller.dart';
+import 'package:client/auth/auth_state.dart';
+import 'package:client/config/server_config.dart';
 import 'package:client/devices/devices_controller.dart';
 import 'package:client/settings/settings_controller.dart';
 import 'package:client/ui/settings_page.dart';
+import 'package:client/ui/server_settings_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'fake_auth_controller.dart';
 
 class MockStartupToggle extends Mock implements StartupToggle {}
 
@@ -14,6 +20,8 @@ Future<ProviderContainer> _pumpSettingsPage(
   Map<String, Object> initialValues = const {},
   StartupToggle? startupToggle,
   bool? autostartSupported,
+  FakeAuthController? authController,
+  ServerConfigStore? serverConfigStore,
 }) async {
   SharedPreferences.setMockInitialValues(initialValues);
   final prefs = await SharedPreferences.getInstance();
@@ -28,6 +36,18 @@ Future<ProviderContainer> _pumpSettingsPage(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(Future.value(prefs)),
       startupToggleProvider.overrideWithValue(toggle),
+      authControllerProvider.overrideWith(
+        () =>
+            authController ??
+            FakeAuthController(
+              const Authenticated(
+                accessToken: 'access-token',
+                email: 'user@example.com',
+              ),
+            ),
+      ),
+      if (serverConfigStore != null)
+        serverConfigStoreProvider.overrideWithValue(serverConfigStore),
       if (autostartSupported != null)
         desktopSettingsSupportedProvider.overrideWithValue(autostartSupported),
     ],
@@ -66,6 +86,55 @@ void main() {
     expect(sound.value, isTrue);
     expect(pause.value, isFalse);
     expect(autostart.value, isFalse);
+  });
+
+  testWidgets('confirmed logout clears the current session', (tester) async {
+    final auth = FakeAuthController(
+      const Authenticated(
+        accessToken: 'access-token',
+        email: 'test@example.com',
+      ),
+    );
+    await _pumpSettingsPage(tester, authController: auth);
+
+    await tester.tap(find.byKey(SettingsPage.logoutKey));
+    await tester.pumpAndSettle();
+    expect(find.text('确认退出登录？'), findsOneWidget);
+
+    await tester.tap(find.byKey(SettingsPage.confirmLogoutKey));
+    await tester.pumpAndSettle();
+
+    expect(auth.logoutCalls, 1);
+  });
+
+  testWidgets('switching server logs out and persists the new origin', (
+    tester,
+  ) async {
+    final auth = FakeAuthController(
+      const Authenticated(
+        accessToken: 'access-token',
+        email: 'test@example.com',
+      ),
+    );
+    final store = MemoryServerConfigStore('https://old.example.com');
+    await _pumpSettingsPage(
+      tester,
+      authController: auth,
+      serverConfigStore: store,
+    );
+
+    expect(find.text('https://old.example.com'), findsOneWidget);
+    await tester.tap(find.byKey(SettingsPage.serverKey));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(ServerSettingsDialog.addressFieldKey),
+      'new.example.com',
+    );
+    await tester.tap(find.byKey(ServerSettingsDialog.saveKey));
+    await tester.pumpAndSettle();
+
+    expect(auth.logoutCalls, 1);
+    expect(store.read(), 'https://new.example.com');
   });
 
   testWidgets('switch values reflect persisted settings', (tester) async {

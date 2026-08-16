@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/auth_controller.dart';
 import '../auth/auth_state.dart';
+import '../config/server_config.dart';
 import '../history/notification_history.dart';
 import '../notifications/notification_navigation.dart';
 import '../notifications/notification_router.dart';

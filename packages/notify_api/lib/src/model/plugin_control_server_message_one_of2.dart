@@ -15,6 +15,7 @@ part 'plugin_control_server_message_one_of2.g.dart';
 /// * [answers]
 /// * [commandId]
 /// * [requestId]
+/// * [sessionID]
 /// * [type]
 @BuiltValue()
 abstract class PluginControlServerMessageOneOf2
@@ -31,6 +32,9 @@ abstract class PluginControlServerMessageOneOf2
 
   @BuiltValueField(wireName: r'requestId')
   String get requestId;
+
+  @BuiltValueField(wireName: r'sessionID')
+  String get sessionID;
 
   @BuiltValueField(wireName: r'type')
   PluginControlServerMessageOneOf2TypeEnum get type;
@@ -81,6 +85,11 @@ class _$PluginControlServerMessageOneOf2Serializer
     yield r'requestId';
     yield serializers.serialize(
       object.requestId,
+      specifiedType: const FullType(String),
+    );
+    yield r'sessionID';
+    yield serializers.serialize(
+      object.sessionID,
       specifiedType: const FullType(String),
     );
     yield r'type';
@@ -143,6 +152,15 @@ class _$PluginControlServerMessageOneOf2Serializer
                   )
                   as String;
           result.requestId = valueDes;
+          break;
+        case r'sessionID':
+          final valueDes =
+              serializers.deserialize(
+                    value,
+                    specifiedType: const FullType(String),
+                  )
+                  as String;
+          result.sessionID = valueDes;
           break;
         case r'type':
           final valueDes =

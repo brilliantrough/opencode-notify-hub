@@ -1,17 +1,6 @@
-/// Compile-time application configuration.
-///
-/// The gateway base URL is set at build time:
-///
-/// ```sh
-/// flutter run --dart-define=GATEWAY_URL=https://gateway.internal.example.com
-/// ```
+/// Network configuration derived from the persisted server selection.
 class AppConfig {
-  AppConfig({String? gatewayHttpBase})
-      : gatewayHttpBase = gatewayHttpBase ??
-            const String.fromEnvironment(
-              'GATEWAY_URL',
-              defaultValue: 'https://notify.example.com',
-            );
+  const AppConfig({required this.gatewayHttpBase});
 
   /// HTTP(S) base URL of the notification gateway.
   final String gatewayHttpBase;
@@ -20,8 +9,8 @@ class AppConfig {
   /// becomes `ws(s)` and the `/v1/ws` path is appended.
   ///
   /// Throws [ArgumentError] when [gatewayHttpBase] has no `http(s)` scheme,
-  /// so a misconfigured `--dart-define=GATEWAY_URL` fails fast instead of
-  /// producing an undialable WebSocket URI.
+  /// so an invalid server selection fails fast instead of producing an
+  /// undialable WebSocket URI.
   String get gatewayWsBase {
     var base = gatewayHttpBase;
     if (base.endsWith('/')) {

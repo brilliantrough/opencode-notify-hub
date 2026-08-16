@@ -11,6 +11,10 @@ import 'package:client/realtime/instance_presence.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:notify_api/notify_api.dart' show PendingApi;
+
+class MockPendingApi extends Mock implements PendingApi {}
 
 class MutableAuthController extends AuthController {
   MutableAuthController(this._initial);
@@ -114,18 +118,20 @@ class ScriptedAnswerSender {
     ({
       String instanceId,
       String requestId,
+      String sessionId,
       String commandId,
       List<List<String>> answers,
     })
   >
   received = [];
   Completer<QuestionAnswerResult>? gate;
-  QuestionAnswerOutcome outcome = QuestionAnswerOutcome.confirmed;
+  QuestionAnswerOutcome outcome = QuestionAnswerOutcome.accepted;
   Object? throwError;
 
   Future<QuestionAnswerResult> call({
     required String instanceId,
     required String requestId,
+    required String sessionId,
     required String commandId,
     required List<List<String>> answers,
   }) async {
@@ -133,6 +139,7 @@ class ScriptedAnswerSender {
     received.add((
       instanceId: instanceId,
       requestId: requestId,
+      sessionId: sessionId,
       commandId: commandId,
       answers: answers,
     ));
@@ -232,18 +239,20 @@ class ScriptedDecisionSender {
     ({
       String instanceId,
       String requestId,
+      String sessionId,
       String commandId,
       PermissionDecision decision,
     })
   >
   received = [];
   Completer<PermissionDecisionResult>? gate;
-  PermissionDecisionOutcome outcome = PermissionDecisionOutcome.confirmed;
+  PermissionDecisionOutcome outcome = PermissionDecisionOutcome.accepted;
   Object? throwError;
 
   Future<PermissionDecisionResult> call({
     required String instanceId,
     required String requestId,
+    required String sessionId,
     required String commandId,
     required PermissionDecision decision,
   }) async {
@@ -251,6 +260,7 @@ class ScriptedDecisionSender {
     received.add((
       instanceId: instanceId,
       requestId: requestId,
+      sessionId: sessionId,
       commandId: commandId,
       decision: decision,
     ));
@@ -303,6 +313,48 @@ void main() {
     accessToken: 'access-1',
     email: 'user@example.com',
   );
+
+  test('a gateway without remote unblock exposes an empty workbench', () async {
+    final api = MockPendingApi();
+    final request = RequestOptions(path: '/v1/pending-interactions');
+    when(() => api.getPendingInteractions()).thenThrow(
+      DioException(
+        requestOptions: request,
+        response: Response<void>(requestOptions: request, statusCode: 404),
+        type: DioExceptionType.badResponse,
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [pendingApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    final snapshot = await container.read(pendingInteractionLoaderProvider)();
+
+    expect(snapshot.interactions, isEmpty);
+    expect(snapshot.queriedInstanceIds, isEmpty);
+  });
+
+  test('pending snapshot loader still exposes gateway failures', () async {
+    final api = MockPendingApi();
+    final request = RequestOptions(path: '/v1/pending-interactions');
+    when(() => api.getPendingInteractions()).thenThrow(
+      DioException(
+        requestOptions: request,
+        response: Response<void>(requestOptions: request, statusCode: 500),
+        type: DioExceptionType.badResponse,
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [pendingApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await expectLater(
+      container.read(pendingInteractionLoaderProvider)(),
+      throwsA(isA<DioException>()),
+    );
+  });
 
   test('default command ids are UUID v4 values accepted by the contract', () {
     final container = ProviderContainer();
@@ -507,10 +559,10 @@ void main() {
   group('answerQuestion', () {
     final question = multiQuestion('question-1', DateTime.utc(2026, 8, 14, 9));
 
-    test('submits ordered answers with the injected command id and confirmed '
-        'removes the interaction', () async {
+    test('submits session-scoped answers and accepted removes the interaction '
+        'without refreshing authority', () async {
       final sender = ScriptedAnswerSender()
-        ..outcome = QuestionAnswerOutcome.confirmed;
+        ..outcome = QuestionAnswerOutcome.accepted;
       var loads = 0;
       final container = answerContainer(
         question: question,
@@ -538,15 +590,53 @@ void main() {
       expect(sent.commandId, 'cmd-1');
       expect(sent.instanceId, question.instanceId);
       expect(sent.requestId, 'question-1');
+      expect(sent.sessionId, question.sessionId);
       expect(sent.answers, [
         ['PostgreSQL'],
         ['Migrate data', 'Add indexes'],
       ]);
-      expect(loads, 2);
+      expect(loads, 1);
       expect(
         container.read(questionSubmissionStatesProvider)['question-1'],
-        QuestionSubmissionState.confirmed,
+        QuestionSubmissionState.sent,
       );
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+    });
+
+    test('accepted removal is durable across a later authoritative refresh', () async {
+      final sender = ScriptedAnswerSender()
+        ..outcome = QuestionAnswerOutcome.accepted;
+      var loads = 0;
+      final container = answerContainer(
+        question: question,
+        sender: sender.call,
+        loader: (call) async {
+          loads++;
+          return [question];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .answerQuestion(
+            question: question,
+            answers: const [
+              ['PostgreSQL'],
+              ['Migrate data'],
+            ],
+          );
+
+      // The gateway accepted best-effort delivery: no reconcile happened and
+      // the request left the workbench without a second loader call.
+      expect(loads, 1);
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+
+      // A later authoritative snapshot still carrying the request must not
+      // re-populate the workbench with an already-submitted interaction.
+      await container.read(pendingInteractionsProvider.notifier).refresh();
+      expect(loads, 2);
       expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
     });
 
@@ -1341,6 +1431,80 @@ void main() {
         container.read(permissionSubmissionStatesProvider)['permission-1'],
         PermissionDecisionState.confirmed,
       );
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+    });
+
+    test('submits the session-scoped decision and accepted removes the '
+        'interaction without refreshing authority', () async {
+      final sender = ScriptedDecisionSender()
+        ..outcome = PermissionDecisionOutcome.accepted;
+      var loads = 0;
+      final container = decisionContainer(
+        permission: pendingPermission,
+        sender: sender.call,
+        loader: (call) async {
+          loads++;
+          return call == 0
+              ? [pendingPermission]
+              : const <PendingInteraction>[];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .decidePermission(
+            permission: pendingPermission,
+            decision: PermissionDecision.once,
+          );
+
+      expect(sender.calls, 1);
+      final sent = sender.received.single;
+      expect(sent.commandId, 'cmd-1');
+      expect(sent.instanceId, pendingPermission.instanceId);
+      expect(sent.requestId, 'permission-1');
+      expect(sent.sessionId, pendingPermission.sessionId);
+      expect(sent.decision, PermissionDecision.once);
+      expect(loads, 1);
+      expect(
+        container.read(permissionSubmissionStatesProvider)['permission-1'],
+        PermissionDecisionState.sent,
+      );
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+    });
+
+    test('accepted removal is durable across a later authoritative refresh', () async {
+      final sender = ScriptedDecisionSender()
+        ..outcome = PermissionDecisionOutcome.accepted;
+      var loads = 0;
+      final container = decisionContainer(
+        permission: pendingPermission,
+        sender: sender.call,
+        loader: (call) async {
+          loads++;
+          return [pendingPermission];
+        },
+      );
+      addTearDown(container.dispose);
+      await container.read(pendingInteractionsProvider.future);
+
+      await container
+          .read(pendingInteractionsProvider.notifier)
+          .decidePermission(
+            permission: pendingPermission,
+            decision: PermissionDecision.once,
+          );
+
+      // The gateway accepted best-effort delivery: no reconcile happened and
+      // the request left the workbench without a second loader call.
+      expect(loads, 1);
+      expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
+
+      // A later authoritative snapshot still carrying the request must not
+      // re-populate the workbench with an already-submitted interaction.
+      await container.read(pendingInteractionsProvider.notifier).refresh();
+      expect(loads, 2);
       expect(container.read(pendingInteractionsProvider).requireValue, isEmpty);
     });
 

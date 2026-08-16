@@ -81,11 +81,48 @@ void main() {
     }
   }
 
-  testWidgets('AuthUnknown shows a loading indicator', (tester) async {
+  testWidgets('AuthUnknown presents a font-free restore splash', (
+    tester,
+  ) async {
     auth = FakeAuthController(const AuthUnknown());
-    // No pumpAndSettle: the progress indicator animates forever.
+    // No pumpAndSettle: the progress indicator animates while restore waits.
     await pumpApp(tester, settle: false);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('session-restore-loading')),
+      findsOneWidget,
+    );
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.byType(Text), findsNothing);
+    expect(find.byType(Icon), findsNothing);
+    expect(find.bySemanticsLabel('正在恢复会话'), findsOneWidget);
+  });
+
+  testWidgets('restore failure offers retry and another-account login', (
+    tester,
+  ) async {
+    auth = FakeAuthController(const AuthRestoreFailed());
+    await pumpApp(tester);
+
+    expect(
+      find.byKey(const ValueKey('session-restore-failed')),
+      findsOneWidget,
+    );
+    expect(find.text('暂时无法恢复会话'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('session-restore-retry')));
+    await tester.pump();
+    expect(auth.bootstrapCalls, 1);
+    expect(
+      find.byKey(const ValueKey('session-restore-loading')),
+      findsOneWidget,
+    );
+
+    auth.replace(const AuthRestoreFailed());
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('session-restore-login')));
+    await tester.pumpAndSettle();
+    expect(auth.abandonRestoreCalls, 1);
+    expect(find.byType(LoginPage), findsOneWidget);
   });
 
   testWidgets('Unauthenticated routes to the login page', (tester) async {

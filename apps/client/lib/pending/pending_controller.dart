@@ -8,7 +8,8 @@ import 'package:notify_api/notify_api.dart'
         AnswerQuestionBody,
         DecidePermissionBody,
         DecidePermissionBodyDecisionEnum,
-        PendingApi;
+        PendingApi,
+        PendingSnapshot;
 import 'package:uuid/uuid.dart';
 
 import '../auth/auth_controller.dart';
@@ -59,7 +60,20 @@ final pendingInteractionLoaderProvider = Provider<PendingInteractionLoader>((
 ) {
   final api = ref.watch(pendingApiProvider);
   return () async {
-    final response = await api.getPendingInteractions();
+    final Response<PendingSnapshot> response;
+    try {
+      response = await api.getPendingInteractions();
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404) {
+        // Production gateways from before remote-unblock phase 1 have no
+        // pending snapshot route. Existing notification features remain usable.
+        return (
+          interactions: const <PendingInteraction>[],
+          queriedInstanceIds: const <String>{},
+        );
+      }
+      rethrow;
+    }
     final snapshot = response.data;
     if (snapshot == null) {
       throw StateError('Empty pending-interactions response');
@@ -189,8 +203,8 @@ class PermissionSubmissionStates
 
 typedef CommandIdGenerator = String Function();
 
-/// Generates a unique client command id for each question submission. The
-/// gateway correlates its terminal outcome back to this id.
+/// Generates a unique client command id for each submission. The Gateway uses
+/// it for delivery de-duplication and optional diagnostic outcome tracking.
 final commandIdGeneratorProvider = Provider<CommandIdGenerator>((ref) {
   const uuid = Uuid();
   return uuid.v4;
@@ -200,18 +214,21 @@ typedef QuestionAnswerSender =
     Future<QuestionAnswerResult> Function({
       required String instanceId,
       required String requestId,
+      required String sessionId,
       required String commandId,
       required List<List<String>> answers,
     });
 
 /// Submits one complete ordered answer set through the generated
-/// [PendingApi.answerQuestion] and maps the gateway's terminal outcome.
-/// Gateway 4xx errors surface as a thrown [DioException].
+/// [PendingApi.answerQuestion]. A successful response is the Gateway's
+/// immediate best-effort acceptance, not an OpenCode confirmation. Gateway
+/// 4xx errors surface as a thrown [DioException].
 final questionAnswerSenderProvider = Provider<QuestionAnswerSender>((ref) {
   final api = ref.watch(pendingApiProvider);
   return ({
     required instanceId,
     required requestId,
+    required sessionId,
     required commandId,
     required answers,
   }) async {
@@ -220,6 +237,7 @@ final questionAnswerSenderProvider = Provider<QuestionAnswerSender>((ref) {
       requestId: requestId,
       answerQuestionBody: AnswerQuestionBody((b) {
         b.commandId = commandId;
+        b.sessionId = sessionId;
         b.answers.replace([
           for (final answer in answers) BuiltList<String>.of(answer),
         ]);
@@ -231,7 +249,7 @@ final questionAnswerSenderProvider = Provider<QuestionAnswerSender>((ref) {
     }
     return QuestionAnswerResult(
       commandId: data.commandId,
-      outcome: questionAnswerOutcomeFromStatus(data.status),
+      outcome: QuestionAnswerOutcome.accepted,
     );
   };
 });
@@ -240,13 +258,15 @@ typedef PermissionDecisionSender =
     Future<PermissionDecisionResult> Function({
       required String instanceId,
       required String requestId,
+      required String sessionId,
       required String commandId,
       required PermissionDecision decision,
     });
 
 /// Submits one decision (allow once, always allow, or reject) through the
-/// generated [PendingApi.decidePermission] and maps the gateway's terminal
-/// outcome. Gateway 4xx errors surface as a thrown [DioException]. The page
+/// generated [PendingApi.decidePermission]. A successful response is the
+/// Gateway's immediate best-effort acceptance, not an OpenCode confirmation.
+/// Gateway 4xx errors surface as a thrown [DioException]. The page
 /// sends [PermissionDecision.always] only after its confirmation dialog.
 final permissionDecisionSenderProvider = Provider<PermissionDecisionSender>((
   ref,
@@ -255,6 +275,7 @@ final permissionDecisionSenderProvider = Provider<PermissionDecisionSender>((
   return ({
     required instanceId,
     required requestId,
+    required sessionId,
     required commandId,
     required decision,
   }) async {
@@ -263,6 +284,7 @@ final permissionDecisionSenderProvider = Provider<PermissionDecisionSender>((
       requestId: requestId,
       decidePermissionBody: DecidePermissionBody((b) {
         b.commandId = commandId;
+        b.sessionId = sessionId;
         b.decision = switch (decision) {
           PermissionDecision.once => DecidePermissionBodyDecisionEnum.once,
           PermissionDecision.reject => DecidePermissionBodyDecisionEnum.reject,
@@ -276,7 +298,7 @@ final permissionDecisionSenderProvider = Provider<PermissionDecisionSender>((
     }
     return PermissionDecisionResult(
       commandId: data.commandId,
-      outcome: permissionDecisionOutcomeFromStatus(data.status),
+      outcome: PermissionDecisionOutcome.accepted,
     );
   };
 });
@@ -297,6 +319,12 @@ class PendingInteractionsController
   /// previous last-known requests so offline read-only views still work.
   /// Cleared on logout.
   final Map<String, List<PendingInteraction>> _lastKnownByInstance = {};
+
+  /// Requests this controller has handed to the Gateway successfully. This is
+  /// deliberately an in-memory, account-session suppression set: best-effort
+  /// delivery may still fail upstream, but an accepted card does not reappear
+  /// from a briefly stale snapshot. Logout clears the set.
+  final Set<String> _submittedInteractionKeys = {};
 
   /// Unmodifiable view of the per-instance last-known retention.
   Map<String, List<PendingInteraction>> get lastKnownByInstance =>
@@ -332,6 +360,7 @@ class PendingInteractionsController
 
   void _clearRetention() {
     _lastKnownByInstance.clear();
+    _submittedInteractionKeys.clear();
   }
 
   @override
@@ -406,7 +435,13 @@ class PendingInteractionsController
 
   Future<List<PendingInteraction>> _fetch() async {
     final load = await ref.read(pendingInteractionLoaderProvider)();
-    final interactions = [...load.interactions];
+    final interactions = [
+      for (final interaction in load.interactions)
+        if (!_submittedInteractionKeys.contains(
+          _interactionKey(interaction.instanceId, interaction.requestId),
+        ))
+          interaction,
+    ];
     interactions.sort((left, right) {
       final byTime = left.occurredAt.compareTo(right.occurredAt);
       if (byTime != 0) return byTime;
@@ -435,7 +470,9 @@ class PendingInteractionsController
   /// Submits [answers] for [question] with a fresh client-generated command
   /// id and drives the per-request submission state.
   ///
-  /// Only a confirmed outcome removes the request from the workbench; stale,
+  /// An accepted outcome marks the request sent and removes it optimistically
+  /// without a snapshot re-read. Legacy terminal outcomes remain supported at
+  /// this seam; stale,
   /// upstream-error, and gateway-rejected outcomes keep it and trigger an
   /// authoritative snapshot re-read. An unknown outcome — and a transport or
   /// unexpected failure — queries the same [commandId] once to converge on
@@ -454,10 +491,14 @@ class PendingInteractionsController
       final result = await ref.read(questionAnswerSenderProvider)(
         instanceId: question.instanceId,
         requestId: requestId,
+        sessionId: question.sessionId,
         commandId: commandId,
         answers: answers,
       );
       switch (result.outcome) {
+        case QuestionAnswerOutcome.accepted:
+          _markSubmission(requestId, QuestionSubmissionState.sent);
+          _removeSubmittedInteraction(question.instanceId, requestId);
         case QuestionAnswerOutcome.confirmed:
           _markSubmission(requestId, QuestionSubmissionState.confirmed);
           _removeInteraction(requestId);
@@ -497,7 +538,9 @@ class PendingInteractionsController
   /// command id and drives the per-request submission state. Always allow is
   /// submitted here only after the page's confirmation dialog.
   ///
-  /// Only a confirmed outcome removes the request from the workbench; stale,
+  /// An accepted outcome marks the request sent and removes it optimistically
+  /// without a snapshot re-read. Legacy terminal outcomes remain supported at
+  /// this seam; stale,
   /// upstream-error, and gateway-rejected outcomes keep it and trigger an
   /// authoritative snapshot re-read. An unknown outcome — and a transport or
   /// unexpected failure — queries the same [commandId] once to converge on
@@ -516,10 +559,14 @@ class PendingInteractionsController
       final result = await ref.read(permissionDecisionSenderProvider)(
         instanceId: permission.instanceId,
         requestId: requestId,
+        sessionId: permission.sessionId,
         commandId: commandId,
         decision: decision,
       );
       switch (result.outcome) {
+        case PermissionDecisionOutcome.accepted:
+          _markPermissionSubmission(requestId, PermissionDecisionState.sent);
+          _removeSubmittedInteraction(permission.instanceId, requestId);
         case PermissionDecisionOutcome.confirmed:
           _markPermissionSubmission(
             requestId,
@@ -697,6 +744,23 @@ class PendingInteractionsController
         if (interaction.requestId != requestId) interaction,
     ]);
   }
+
+  void _removeSubmittedInteraction(String instanceId, String requestId) {
+    _submittedInteractionKeys.add(_interactionKey(instanceId, requestId));
+    _lastKnownByInstance[instanceId] = [
+      for (final interaction in _lastKnownByInstance[instanceId] ?? const [])
+        if (interaction.requestId != requestId) interaction,
+    ];
+    final current = state.value ?? const <PendingInteraction>[];
+    state = AsyncData([
+      for (final interaction in current)
+        if (interaction.instanceId != instanceId || interaction.requestId != requestId)
+          interaction,
+    ]);
+  }
+
+  static String _interactionKey(String instanceId, String requestId) =>
+      '$instanceId:$requestId';
 
   void _markSubmission(String requestId, QuestionSubmissionState value) {
     ref.read(questionSubmissionStatesProvider.notifier).mark(requestId, value);

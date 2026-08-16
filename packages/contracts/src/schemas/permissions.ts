@@ -21,19 +21,10 @@ export const permissionCommandStatusSchema = {
 export const decidePermissionBodySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["commandId", "decision"],
+  required: ["commandId", "sessionId", "decision"],
   properties: {
     commandId: { type: "string", format: "uuid" },
+    sessionId: { type: "string", minLength: 1 },
     decision: permissionDecisionSchema,
-  },
-} as const satisfies JSONSchema;
-
-export const permissionCommandResultSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["commandId", "status"],
-  properties: {
-    commandId: { type: "string", format: "uuid" },
-    status: permissionCommandStatusSchema,
   },
 } as const satisfies JSONSchema;

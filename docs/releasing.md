@@ -79,7 +79,7 @@ Before the first Android artifact:
 ## Desktop checks
 
 - Build Linux on a supported Linux runner and Windows on a Windows runner.
-- Pass the intended production `GATEWAY_URL` at build time.
+- Verify runtime server selection and persistence on each desktop target.
 - Verify complete-bundle startup on a clean machine.
 - Verify tray, autostart, sound, notification click, reconnect, and uninstall.
 - Sign/notarize artifacts when the target platform ecosystem requires it.

@@ -7,51 +7,47 @@ import 'package:built_collection/built_collection.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
-part 'permission_command_result.g.dart';
+part 'command_accepted.g.dart';
 
-/// PermissionCommandResult
+/// CommandAccepted
 ///
 /// Properties:
 /// * [commandId]
 /// * [status]
 @BuiltValue()
-abstract class PermissionCommandResult
-    implements Built<PermissionCommandResult, PermissionCommandResultBuilder> {
+abstract class CommandAccepted
+    implements Built<CommandAccepted, CommandAcceptedBuilder> {
   @BuiltValueField(wireName: r'commandId')
   String get commandId;
 
   @BuiltValueField(wireName: r'status')
-  PermissionCommandResultStatusEnum get status;
-  // enum statusEnum {  confirmed,  stale,  upstream_error,  result_unknown,  };
+  CommandAcceptedStatusEnum get status;
+  // enum statusEnum {  accepted,  };
 
-  PermissionCommandResult._();
+  CommandAccepted._();
 
-  factory PermissionCommandResult([
-    void updates(PermissionCommandResultBuilder b),
-  ]) = _$PermissionCommandResult;
+  factory CommandAccepted([void updates(CommandAcceptedBuilder b)]) =
+      _$CommandAccepted;
 
   @BuiltValueHook(initializeBuilder: true)
-  static void _defaults(PermissionCommandResultBuilder b) => b;
+  static void _defaults(CommandAcceptedBuilder b) => b;
 
   @BuiltValueSerializer(custom: true)
-  static Serializer<PermissionCommandResult> get serializer =>
-      _$PermissionCommandResultSerializer();
+  static Serializer<CommandAccepted> get serializer =>
+      _$CommandAcceptedSerializer();
 }
 
-class _$PermissionCommandResultSerializer
-    implements PrimitiveSerializer<PermissionCommandResult> {
+class _$CommandAcceptedSerializer
+    implements PrimitiveSerializer<CommandAccepted> {
   @override
-  final Iterable<Type> types = const [
-    PermissionCommandResult,
-    _$PermissionCommandResult,
-  ];
+  final Iterable<Type> types = const [CommandAccepted, _$CommandAccepted];
 
   @override
-  final String wireName = r'PermissionCommandResult';
+  final String wireName = r'CommandAccepted';
 
   Iterable<Object?> _serializeProperties(
     Serializers serializers,
-    PermissionCommandResult object, {
+    CommandAccepted object, {
     FullType specifiedType = FullType.unspecified,
   }) sync* {
     yield r'commandId';
@@ -62,14 +58,14 @@ class _$PermissionCommandResultSerializer
     yield r'status';
     yield serializers.serialize(
       object.status,
-      specifiedType: const FullType(PermissionCommandResultStatusEnum),
+      specifiedType: const FullType(CommandAcceptedStatusEnum),
     );
   }
 
   @override
   Object serialize(
     Serializers serializers,
-    PermissionCommandResult object, {
+    CommandAccepted object, {
     FullType specifiedType = FullType.unspecified,
   }) {
     return _serializeProperties(
@@ -84,7 +80,7 @@ class _$PermissionCommandResultSerializer
     Object serialized, {
     FullType specifiedType = FullType.unspecified,
     required List<Object?> serializedList,
-    required PermissionCommandResultBuilder result,
+    required CommandAcceptedBuilder result,
     required List<Object?> unhandled,
   }) {
     for (var i = 0; i < serializedList.length; i += 2) {
@@ -104,11 +100,9 @@ class _$PermissionCommandResultSerializer
           final valueDes =
               serializers.deserialize(
                     value,
-                    specifiedType: const FullType(
-                      PermissionCommandResultStatusEnum,
-                    ),
+                    specifiedType: const FullType(CommandAcceptedStatusEnum),
                   )
-                  as PermissionCommandResultStatusEnum;
+                  as CommandAcceptedStatusEnum;
           result.status = valueDes;
           break;
         default:
@@ -120,12 +114,12 @@ class _$PermissionCommandResultSerializer
   }
 
   @override
-  PermissionCommandResult deserialize(
+  CommandAccepted deserialize(
     Serializers serializers,
     Object serialized, {
     FullType specifiedType = FullType.unspecified,
   }) {
-    final result = PermissionCommandResultBuilder();
+    final result = CommandAcceptedBuilder();
     final serializedList = (serialized as Iterable<Object?>).toList();
     final unhandled = <Object?>[];
     _deserializeProperties(
@@ -140,27 +134,18 @@ class _$PermissionCommandResultSerializer
   }
 }
 
-class PermissionCommandResultStatusEnum extends EnumClass {
-  @BuiltValueEnumConst(wireName: r'confirmed')
-  static const PermissionCommandResultStatusEnum confirmed =
-      _$permissionCommandResultStatusEnum_confirmed;
-  @BuiltValueEnumConst(wireName: r'stale')
-  static const PermissionCommandResultStatusEnum stale =
-      _$permissionCommandResultStatusEnum_stale;
-  @BuiltValueEnumConst(wireName: r'upstream_error')
-  static const PermissionCommandResultStatusEnum upstreamError =
-      _$permissionCommandResultStatusEnum_upstreamError;
-  @BuiltValueEnumConst(wireName: r'result_unknown')
-  static const PermissionCommandResultStatusEnum resultUnknown =
-      _$permissionCommandResultStatusEnum_resultUnknown;
+class CommandAcceptedStatusEnum extends EnumClass {
+  @BuiltValueEnumConst(wireName: r'accepted')
+  static const CommandAcceptedStatusEnum accepted =
+      _$commandAcceptedStatusEnum_accepted;
 
-  static Serializer<PermissionCommandResultStatusEnum> get serializer =>
-      _$permissionCommandResultStatusEnumSerializer;
+  static Serializer<CommandAcceptedStatusEnum> get serializer =>
+      _$commandAcceptedStatusEnumSerializer;
 
-  const PermissionCommandResultStatusEnum._(String name) : super(name);
+  const CommandAcceptedStatusEnum._(String name) : super(name);
 
-  static BuiltSet<PermissionCommandResultStatusEnum> get values =>
-      _$permissionCommandResultStatusEnumValues;
-  static PermissionCommandResultStatusEnum valueOf(String name) =>
-      _$permissionCommandResultStatusEnumValueOf(name);
+  static BuiltSet<CommandAcceptedStatusEnum> get values =>
+      _$commandAcceptedStatusEnumValues;
+  static CommandAcceptedStatusEnum valueOf(String name) =>
+      _$commandAcceptedStatusEnumValueOf(name);
 }

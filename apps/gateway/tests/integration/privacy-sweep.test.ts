@@ -383,7 +383,7 @@ describe("Issue #14 consolidated privacy sweep (AC1 and AC2)", () => {
       method: "POST",
       url: `/v1/pending-interactions/${instanceId}/questions/${requestId}/answer`,
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      payload: body,
+      payload: { sessionId: "ses_1", ...body },
     });
   }
 
@@ -397,7 +397,7 @@ describe("Issue #14 consolidated privacy sweep (AC1 and AC2)", () => {
       method: "POST",
       url: `/v1/pending-interactions/${instanceId}/permissions/${requestId}/decision`,
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      payload: body,
+      payload: { sessionId: "ses_2", ...body },
     });
   }
 
@@ -504,8 +504,9 @@ describe("Issue #14 consolidated privacy sweep (AC1 and AC2)", () => {
         commandId: answerCommandId,
         answers: [[SENTINELS.answer]],
       });
-      const sentAnswer = (await answerFrame) as { type: string; answers: string[][] };
+      const sentAnswer = (await answerFrame) as { type: string; sessionID: string; answers: string[][] };
       expect(sentAnswer.type).toBe("question_answer_command");
+      expect(sentAnswer.sessionID).toBe("ses_1");
       expect(sentAnswer.answers).toEqual([[SENTINELS.answer]]);
       instance.ws.send(
         JSON.stringify({
@@ -516,7 +517,7 @@ describe("Issue #14 consolidated privacy sweep (AC1 and AC2)", () => {
         }),
       );
       const answerRes = await answerResponse;
-      expect(answerRes.statusCode).toBe(200);
+      expect(answerRes.statusCode).toBe(202);
 
       // Permission decision POST: same body-free outcome contract.
       const decisionCommandId = randomUUID();
@@ -525,8 +526,9 @@ describe("Issue #14 consolidated privacy sweep (AC1 and AC2)", () => {
         commandId: decisionCommandId,
         decision: "always",
       });
-      const sentDecision = (await decisionFrame) as { type: string; decision: string };
+      const sentDecision = (await decisionFrame) as { type: string; sessionID: string; decision: string };
       expect(sentDecision.type).toBe("permission_decide_command");
+      expect(sentDecision.sessionID).toBe("ses_2");
       expect(sentDecision.decision).toBe("always");
       instance.ws.send(
         JSON.stringify({
@@ -537,7 +539,7 @@ describe("Issue #14 consolidated privacy sweep (AC1 and AC2)", () => {
         }),
       );
       const decisionRes = await decisionResponse;
-      expect(decisionRes.statusCode).toBe(200);
+      expect(decisionRes.statusCode).toBe(202);
 
       // Command outcome GET: body-free by construction — no sentinel content.
       for (const commandId of [answerCommandId, decisionCommandId]) {
@@ -677,7 +679,7 @@ describe("Issue #14 consolidated privacy sweep (AC1 and AC2)", () => {
           status: "confirmed",
         }),
       );
-      expect((await answerResponse).statusCode).toBe(200);
+      expect((await answerResponse).statusCode).toBe(202);
 
       // Permission decision POST.
       const decisionCommandId = randomUUID();
@@ -695,7 +697,7 @@ describe("Issue #14 consolidated privacy sweep (AC1 and AC2)", () => {
           status: "confirmed",
         }),
       );
-      expect((await decisionResponse).statusCode).toBe(200);
+      expect((await decisionResponse).statusCode).toBe(202);
 
       // Command outcome GET for both recorded commands.
       for (const commandId of [answerCommandId, decisionCommandId]) {

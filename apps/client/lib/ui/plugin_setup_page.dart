@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../auth/auth_controller.dart';
+import '../config/server_config.dart';
 
 /// Where OpenCode auto-discovers the plugin bundle.
 const pluginInstallPath = '~/.config/opencode/plugins/session-notify.js';

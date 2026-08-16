@@ -222,13 +222,13 @@ export function createSessionNotifyHooks(
             });
             return pending.list(pendingSource, signal);
           },
-          answerQuestion: (requestId, answerDirectory, answers, signal) => {
+          answerQuestion: (requestId, sessionID, answers, signal) => {
             answerer ??= new QuestionReplyAdapter({ client: v2Client() });
-            return answerer.reply(requestId, answerDirectory, answers, signal);
+            return answerer.reply(requestId, sessionID, answers, signal);
           },
-          decidePermission: (requestId, decisionDirectory, decision, signal) => {
+          decidePermission: (requestId, sessionID, decision, signal) => {
             decider ??= new PermissionReplyAdapter({ client: v2Client() });
-            return decider.reply(requestId, decisionDirectory, decision, signal);
+            return decider.reply(requestId, sessionID, decision, signal);
           },
         })
       : null);

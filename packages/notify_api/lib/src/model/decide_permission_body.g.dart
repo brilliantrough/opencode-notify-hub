@@ -84,13 +84,18 @@ class _$DecidePermissionBody extends DecidePermissionBody {
   final String commandId;
   @override
   final DecidePermissionBodyDecisionEnum decision;
+  @override
+  final String sessionId;
 
   factory _$DecidePermissionBody([
     void Function(DecidePermissionBodyBuilder)? updates,
   ]) => (DecidePermissionBodyBuilder()..update(updates))._build();
 
-  _$DecidePermissionBody._({required this.commandId, required this.decision})
-    : super._();
+  _$DecidePermissionBody._({
+    required this.commandId,
+    required this.decision,
+    required this.sessionId,
+  }) : super._();
   @override
   DecidePermissionBody rebuild(
     void Function(DecidePermissionBodyBuilder) updates,
@@ -105,7 +110,8 @@ class _$DecidePermissionBody extends DecidePermissionBody {
     if (identical(other, this)) return true;
     return other is DecidePermissionBody &&
         commandId == other.commandId &&
-        decision == other.decision;
+        decision == other.decision &&
+        sessionId == other.sessionId;
   }
 
   @override
@@ -113,6 +119,7 @@ class _$DecidePermissionBody extends DecidePermissionBody {
     var _$hash = 0;
     _$hash = $jc(_$hash, commandId.hashCode);
     _$hash = $jc(_$hash, decision.hashCode);
+    _$hash = $jc(_$hash, sessionId.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -121,7 +128,8 @@ class _$DecidePermissionBody extends DecidePermissionBody {
   String toString() {
     return (newBuiltValueToStringHelper(r'DecidePermissionBody')
           ..add('commandId', commandId)
-          ..add('decision', decision))
+          ..add('decision', decision)
+          ..add('sessionId', sessionId))
         .toString();
   }
 }
@@ -139,6 +147,10 @@ class DecidePermissionBodyBuilder
   set decision(DecidePermissionBodyDecisionEnum? decision) =>
       _$this._decision = decision;
 
+  String? _sessionId;
+  String? get sessionId => _$this._sessionId;
+  set sessionId(String? sessionId) => _$this._sessionId = sessionId;
+
   DecidePermissionBodyBuilder() {
     DecidePermissionBody._defaults(this);
   }
@@ -148,6 +160,7 @@ class DecidePermissionBodyBuilder
     if ($v != null) {
       _commandId = $v.commandId;
       _decision = $v.decision;
+      _sessionId = $v.sessionId;
       _$v = null;
     }
     return this;
@@ -179,6 +192,11 @@ class DecidePermissionBodyBuilder
             decision,
             r'DecidePermissionBody',
             'decision',
+          ),
+          sessionId: BuiltValueNullFieldError.checkNotNull(
+            sessionId,
+            r'DecidePermissionBody',
+            'sessionId',
           ),
         );
     replace(_$result);

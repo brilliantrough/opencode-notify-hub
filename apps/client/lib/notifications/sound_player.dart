@@ -8,7 +8,7 @@ class SoundPlayer {
   SoundPlayer({AudioPlayer? player}) : _player = player ?? AudioPlayer();
 
   /// Path (within `assets/`) of the bundled alert sound.
-  static const String alertAsset = 'sounds/alert.wav';
+  static const String alertAsset = 'sounds/soft_chime.wav';
 
   final AudioPlayer _player;
 

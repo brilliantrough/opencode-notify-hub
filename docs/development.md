@@ -77,9 +77,11 @@ reverse proxy.
 
 ```bash
 cd apps/client
-flutter run -d linux \
-  --dart-define=GATEWAY_URL=http://127.0.0.1:8080
+flutter run -d linux
 ```
+
+On the login page, set the server to `http://127.0.0.1:8080`. The selection is
+remembered until it is changed again.
 
 Use a target-specific device id from `flutter devices`. Android background FCM
 still requires matching Firebase configuration even when the HTTP gateway is

@@ -15,9 +15,25 @@ components:
         commandId:
           format: uuid
           type: string
+        sessionId:
+          minLength: 1
+          type: string
       required:
         - commandId
+        - sessionId
         - answers
+      type: object
+    CommandAccepted:
+      additionalProperties: false
+      properties:
+        commandId:
+          format: uuid
+          type: string
+        status:
+          const: accepted
+      required:
+        - commandId
+        - status
       type: object
     CommandOutcome:
       additionalProperties: false
@@ -99,8 +115,12 @@ components:
             - reject
             - always
           type: string
+        sessionId:
+          minLength: 1
+          type: string
       required:
         - commandId
+        - sessionId
         - decision
       type: object
     Device:
@@ -998,23 +1018,6 @@ components:
         - generatedAt
         - interactions
       type: object
-    PermissionCommandResult:
-      additionalProperties: false
-      properties:
-        commandId:
-          format: uuid
-          type: string
-        status:
-          enum:
-            - confirmed
-            - stale
-            - upstream_error
-            - result_unknown
-          type: string
-      required:
-        - commandId
-        - status
-      type: object
     PluginControlClientMessage:
       oneOf:
         - additionalProperties: false
@@ -1322,12 +1325,16 @@ components:
             requestId:
               minLength: 1
               type: string
+            sessionID:
+              minLength: 1
+              type: string
             type:
               const: question_answer_command
           required:
             - type
             - commandId
             - requestId
+            - sessionID
             - answers
           type: object
         - additionalProperties: false
@@ -1344,31 +1351,18 @@ components:
             requestId:
               minLength: 1
               type: string
+            sessionID:
+              minLength: 1
+              type: string
             type:
               const: permission_decide_command
           required:
             - type
             - commandId
             - requestId
+            - sessionID
             - decision
           type: object
-    QuestionCommandResult:
-      additionalProperties: false
-      properties:
-        commandId:
-          format: uuid
-          type: string
-        status:
-          enum:
-            - confirmed
-            - stale
-            - upstream_error
-            - result_unknown
-          type: string
-      required:
-        - commandId
-        - status
-      type: object
     RefreshBody:
       additionalProperties: false
       properties:
@@ -2485,7 +2479,7 @@ paths:
         - pending
   /v1/pending-interactions/commands/{commandId}:
     get:
-      description: "Returns the in-memory outcome correlation for a command submitted by the authenticated account, keyed by the client-generated commandId. The outcome is body-free: it carries only correlation and status metadata, never the question answers or permission decision. A client timeout should query the same commandId to distinguish accepted, confirmed, stale, and result_unknown before resubmitting."
+      description: "Returns the in-memory outcome correlation for a command submitted by the authenticated account, keyed by the client-generated commandId. The outcome is body-free: it carries only correlation and status metadata, never the question answers or permission decision. This is an optional diagnostic surface; successful best-effort submissions do not wait for it."
       operationId: getCommandOutcome
       parameters:
         - description: Client-generated command identifier.
@@ -2521,7 +2515,7 @@ paths:
         - pending
   /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision:
     post:
-      description: Validates and submits one immediate allow-once, always-allow, or reject decision for a pending permission owned by the authenticated account and routes the command to the exact Plugin instance. The response carries the client-generated commandId and the terminal outcome; it confirms gateway routing, not that OpenCode applied the decision. Leaving the request undecided has no OpenCode side effect.
+      description: Validates and submits one immediate allow-once, always-allow, or reject decision for a pending permission owned by the authenticated account and routes the command to the exact Plugin instance. The body includes the event-derived sessionId, and the 202 response only acknowledges best-effort delivery; it does not confirm that OpenCode applied the decision. Leaving the request undecided has no OpenCode side effect.
       operationId: decidePermission
       parameters:
         - description: OpenCode instance identifier.
@@ -2545,12 +2539,12 @@ paths:
               $ref: "#/components/schemas/DecidePermissionBody"
         required: true
       responses:
-        "200":
+        "202":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PermissionCommandResult"
-          description: Terminal command outcome.
+                $ref: "#/components/schemas/CommandAccepted"
+          description: Command accepted for best-effort delivery.
         "400":
           content:
             application/json:
@@ -2582,7 +2576,7 @@ paths:
         - pending
   /v1/pending-interactions/{instanceId}/questions/{requestId}/answer:
     post:
-      description: Validates and submits one complete ordered answer set for a pending question owned by the authenticated account and routes the command to the exact Plugin instance. The response carries the client-generated commandId and the terminal outcome; it confirms gateway routing, not that OpenCode applied the answers. Leaving the request unanswered has no OpenCode side effect and never invokes question reject.
+      description: Validates and submits one complete ordered answer set for a pending question owned by the authenticated account and routes the command to the exact Plugin instance. The body includes the event-derived sessionId, so the Plugin can call the session-scoped OpenCode reply directly. The 202 response only acknowledges best-effort delivery; it does not confirm that OpenCode applied the answers. Leaving the request unanswered has no OpenCode side effect and never invokes question reject.
       operationId: answerQuestion
       parameters:
         - description: OpenCode instance identifier.
@@ -2606,12 +2600,12 @@ paths:
               $ref: "#/components/schemas/AnswerQuestionBody"
         required: true
       responses:
-        "200":
+        "202":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuestionCommandResult"
-          description: Terminal command outcome.
+                $ref: "#/components/schemas/CommandAccepted"
+          description: Command accepted for best-effort delivery.
         "400":
           content:
             application/json:

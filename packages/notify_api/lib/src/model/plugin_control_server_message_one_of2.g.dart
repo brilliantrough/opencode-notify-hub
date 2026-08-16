@@ -74,6 +74,8 @@ class _$PluginControlServerMessageOneOf2
   @override
   final String requestId;
   @override
+  final String sessionID;
+  @override
   final PluginControlServerMessageOneOf2TypeEnum type;
 
   factory _$PluginControlServerMessageOneOf2([
@@ -84,6 +86,7 @@ class _$PluginControlServerMessageOneOf2
     required this.answers,
     required this.commandId,
     required this.requestId,
+    required this.sessionID,
     required this.type,
   }) : super._();
   @override
@@ -102,6 +105,7 @@ class _$PluginControlServerMessageOneOf2
         answers == other.answers &&
         commandId == other.commandId &&
         requestId == other.requestId &&
+        sessionID == other.sessionID &&
         type == other.type;
   }
 
@@ -111,6 +115,7 @@ class _$PluginControlServerMessageOneOf2
     _$hash = $jc(_$hash, answers.hashCode);
     _$hash = $jc(_$hash, commandId.hashCode);
     _$hash = $jc(_$hash, requestId.hashCode);
+    _$hash = $jc(_$hash, sessionID.hashCode);
     _$hash = $jc(_$hash, type.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -122,6 +127,7 @@ class _$PluginControlServerMessageOneOf2
           ..add('answers', answers)
           ..add('commandId', commandId)
           ..add('requestId', requestId)
+          ..add('sessionID', sessionID)
           ..add('type', type))
         .toString();
   }
@@ -149,6 +155,10 @@ class PluginControlServerMessageOneOf2Builder
   String? get requestId => _$this._requestId;
   set requestId(String? requestId) => _$this._requestId = requestId;
 
+  String? _sessionID;
+  String? get sessionID => _$this._sessionID;
+  set sessionID(String? sessionID) => _$this._sessionID = sessionID;
+
   PluginControlServerMessageOneOf2TypeEnum? _type;
   PluginControlServerMessageOneOf2TypeEnum? get type => _$this._type;
   set type(PluginControlServerMessageOneOf2TypeEnum? type) =>
@@ -164,6 +174,7 @@ class PluginControlServerMessageOneOf2Builder
       _answers = $v.answers.toBuilder();
       _commandId = $v.commandId;
       _requestId = $v.requestId;
+      _sessionID = $v.sessionID;
       _type = $v.type;
       _$v = null;
     }
@@ -199,6 +210,11 @@ class PluginControlServerMessageOneOf2Builder
               requestId,
               r'PluginControlServerMessageOneOf2',
               'requestId',
+            ),
+            sessionID: BuiltValueNullFieldError.checkNotNull(
+              sessionID,
+              r'PluginControlServerMessageOneOf2',
+              'sessionID',
             ),
             type: BuiltValueNullFieldError.checkNotNull(
               type,

@@ -165,6 +165,7 @@ class _PendingInteractionPageState
     final submitting = submission == QuestionSubmissionState.submitting;
     final locked =
         submission == QuestionSubmissionState.submitting ||
+        submission == QuestionSubmissionState.sent ||
         submission == QuestionSubmissionState.confirmed;
     final readOnly = widget.readOnly;
     final answers = question == null || readOnly ? null : _answers(question);
@@ -449,6 +450,7 @@ class _SubmissionBanner extends StatelessWidget {
     final (text, icon) = switch (state) {
       QuestionSubmissionState.idle => (null, null),
       QuestionSubmissionState.submitting => ('正在提交回答…', Icons.hourglass_top),
+      QuestionSubmissionState.sent => ('回答已发送。', Icons.send_outlined),
       QuestionSubmissionState.confirmed => (
         'OpenCode 已确认回答，请求已解除。',
         Icons.check_circle_outline,
@@ -502,6 +504,7 @@ class _PermissionActions extends StatelessWidget {
   Widget build(BuildContext context) {
     final locked =
         state == PermissionDecisionState.submitting ||
+        state == PermissionDecisionState.sent ||
         state == PermissionDecisionState.confirmed;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -589,6 +592,7 @@ class _AlwaysConfirmDialogState extends ConsumerState<_AlwaysConfirmDialog> {
     final locked =
         _inFlight ||
         state == PermissionDecisionState.submitting ||
+        state == PermissionDecisionState.sent ||
         state == PermissionDecisionState.confirmed;
     return AlertDialog(
       key: const ValueKey('permission-always-confirm'),
@@ -643,6 +647,7 @@ class _PermissionDecisionBanner extends StatelessWidget {
     final (text, icon) = switch (state) {
       PermissionDecisionState.idle => (null, null),
       PermissionDecisionState.submitting => ('正在提交权限决定…', Icons.hourglass_top),
+      PermissionDecisionState.sent => ('权限决定已发送。', Icons.send_outlined),
       PermissionDecisionState.confirmed => (
         'OpenCode 已确认决定，请求已解除。',
         Icons.check_circle_outline,

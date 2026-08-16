@@ -16,6 +16,9 @@ void main() {
       );
 
       expect(client.dio.options.baseUrl, 'https://gateway.test');
+      expect(client.dio.options.connectTimeout, const Duration(seconds: 10));
+      expect(client.dio.options.sendTimeout, const Duration(seconds: 15));
+      expect(client.dio.options.receiveTimeout, const Duration(seconds: 20));
       expect(client.notifyApi.getAuthApi(), isA<AuthApi>());
       expect(client.accessTokenHolder, isA<AccessTokenHolder>());
       expect(

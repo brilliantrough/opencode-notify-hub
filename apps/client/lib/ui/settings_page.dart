@@ -3,8 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../auth/auth_controller.dart';
+import '../config/server_config.dart';
 import '../devices/device_identity.dart';
 import '../settings/settings_controller.dart';
+import 'server_settings_dialog.dart';
 
 /// Whether the current platform supports OS autostart (desktop only:
 /// Linux/Windows). Overridable in tests.
@@ -43,6 +46,34 @@ class SettingsPage extends ConsumerWidget {
     'settings-text-scale-increase',
   );
   static const Key textScaleResetKey = ValueKey('settings-text-scale-reset');
+  static const Key logoutKey = ValueKey('settings-logout');
+  static const Key confirmLogoutKey = ValueKey('settings-confirm-logout');
+  static const Key serverKey = ValueKey('settings-server');
+
+  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('确认退出登录？'),
+        content: const Text('将清除此设备上保存的登录状态。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton.icon(
+            key: confirmLogoutKey,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.logout),
+            label: const Text('退出登录'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && context.mounted) {
+      await ref.read(authControllerProvider.notifier).logout();
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -51,10 +82,24 @@ class SettingsPage extends ConsumerWidget {
     final desktopSettingsSupported = ref.watch(
       desktopSettingsSupportedProvider,
     );
+    final server = ref.watch(serverConfigProvider).gatewayHttpBase;
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
         children: [
+          ListTile(
+            key: serverKey,
+            leading: const Icon(Icons.dns_outlined),
+            title: const Text('服务器'),
+            subtitle: Text(
+              server,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showServerSettingsDialog(context),
+          ),
+          const Divider(height: 1),
           SwitchListTile(
             key: soundSwitchKey,
             title: const Text('提示声音'),
@@ -142,6 +187,14 @@ class SettingsPage extends ConsumerWidget {
               ),
             ),
           ],
+          const Divider(height: 1),
+          ListTile(
+            key: logoutKey,
+            leading: const Icon(Icons.logout),
+            title: const Text('退出登录'),
+            subtitle: const Text('清除本机登录状态并切换账号'),
+            onTap: () => _confirmLogout(context, ref),
+          ),
         ],
       ),
     );

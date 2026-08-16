@@ -28,9 +28,8 @@ import {
   validatePendingInteraction,
   validatePendingSnapshot,
   validateAnswerQuestionBody,
-  validateQuestionCommandResult,
   validateDecidePermissionBody,
-  validatePermissionCommandResult,
+  validateCommandAccepted,
   validateCommandOutcome,
 } from "../src/index.js";
 
@@ -904,6 +903,7 @@ describe("Plugin control WebSocket messages", () => {
         type: "question_answer_command",
         commandId: answerCommandId,
         requestId: "req_1",
+        sessionID: "ses_1",
         answers: [["Postgres"], ["rust", "go"]],
       }),
     ).toBe(true);
@@ -920,6 +920,7 @@ describe("Plugin control WebSocket messages", () => {
         type: "question_answer_command",
         commandId: answerCommandId,
         requestId: "req_1",
+        sessionID: "ses_1",
         answers,
       }),
     ).toBe(true);
@@ -935,6 +936,7 @@ describe("Plugin control WebSocket messages", () => {
       type: "question_answer_command",
       commandId: answerCommandId,
       requestId: "req_1",
+      sessionID: "ses_1",
       answers: [["Postgres"]],
     };
     expect(validatePluginControlServerMessage({ ...command, commandId: "cmd_1" })).toBe(false);
@@ -1014,6 +1016,7 @@ describe("Plugin control WebSocket messages", () => {
         type: "permission_decide_command",
         commandId: decideCommandId,
         requestId: "per_1",
+        sessionID: "ses_1",
         decision: "once",
       }),
     ).toBe(true);
@@ -1022,6 +1025,7 @@ describe("Plugin control WebSocket messages", () => {
         type: "permission_decide_command",
         commandId: decideCommandId,
         requestId: "per_1",
+        sessionID: "ses_1",
         decision: "always",
       }),
     ).toBe(true);
@@ -1030,6 +1034,7 @@ describe("Plugin control WebSocket messages", () => {
         type: "permission_decide_command",
         commandId: decideCommandId,
         requestId: "per_1",
+        sessionID: "ses_1",
         decision: "reject",
       }),
     ).toBe(true);
@@ -1040,6 +1045,7 @@ describe("Plugin control WebSocket messages", () => {
       type: "permission_decide_command",
       commandId: decideCommandId,
       requestId: "per_1",
+      sessionID: "ses_1",
       decision: "always",
     };
     expect(validatePluginControlServerMessage(command)).toBe(true);
@@ -1051,6 +1057,7 @@ describe("Plugin control WebSocket messages", () => {
       type: "permission_decide_command",
       commandId: decideCommandId,
       requestId: "per_1",
+      sessionID: "ses_1",
       decision: "once",
     };
     expect(validatePluginControlServerMessage({ ...command, commandId: "cmd_1" })).toBe(false);
@@ -1478,14 +1485,25 @@ describe("PendingSnapshot", () => {
 
 describe("AnswerQuestion body", () => {
   const commandId = "7f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
+  const sessionId = "ses_1";
 
   it("accepts a single-select answer with one label", () => {
-    expect(validateAnswerQuestionBody({ commandId, answers: [["Postgres"]] })).toBe(true);
+    expect(
+      validateAnswerQuestionBody({
+        commandId,
+        sessionId,
+        answers: [["Postgres"]],
+      }),
+    ).toBe(true);
   });
 
   it("accepts a multi-select answer with labels plus custom text", () => {
     expect(
-      validateAnswerQuestionBody({ commandId, answers: [["rust", "go", "Custom: polyglot"]] }),
+      validateAnswerQuestionBody({
+        commandId,
+        sessionId,
+        answers: [["rust", "go", "Custom: polyglot"]],
+      }),
     ).toBe(true);
   });
 
@@ -1495,7 +1513,7 @@ describe("AnswerQuestion body", () => {
       ["rust", "go"],
       ["Custom: as needed"],
     ];
-    const body = { commandId, answers };
+    const body = { commandId, sessionId, answers };
     expect(validateAnswerQuestionBody(body)).toBe(true);
     // The schema validates read-only: the exact upstream question order and
     // per-question groupings survive untouched.
@@ -1509,6 +1527,7 @@ describe("AnswerQuestion body", () => {
     expect(
       validateAnswerQuestionBody({
         commandId,
+        sessionId,
         answers: Array.from({ length: 4096 }, () => ["answer"]),
       }),
     ).toBe(true);
@@ -1516,154 +1535,129 @@ describe("AnswerQuestion body", () => {
 
   it("accepts complete answers beyond the 1 MiB transport limit", () => {
     const large = "x".repeat(1_048_577);
-    expect(validateAnswerQuestionBody({ commandId, answers: [[large]] })).toBe(true);
-    expect(validateAnswerQuestionBody({ commandId, answers: [[large], ["y"]] })).toBe(true);
+    expect(
+      validateAnswerQuestionBody({ commandId, sessionId, answers: [[large]] }),
+    ).toBe(true);
+    expect(
+      validateAnswerQuestionBody({ commandId, sessionId, answers: [[large], ["y"]] }),
+    ).toBe(true);
   });
 
   it("rejects an empty outer answers array", () => {
-    expect(validateAnswerQuestionBody({ commandId, answers: [] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId, answers: [] })).toBe(false);
   });
 
   it("rejects an empty inner answers array", () => {
-    expect(validateAnswerQuestionBody({ commandId, answers: [[]] })).toBe(false);
-    expect(validateAnswerQuestionBody({ commandId, answers: [["Postgres"], []] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId, answers: [[]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId, answers: [["Postgres"], []] })).toBe(
+      false,
+    );
   });
 
   it("rejects empty answer strings", () => {
-    expect(validateAnswerQuestionBody({ commandId, answers: [[""]] })).toBe(false);
-    expect(validateAnswerQuestionBody({ commandId, answers: [["Postgres", ""]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId, answers: [[""]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId, answers: [["Postgres", ""]] })).toBe(
+      false,
+    );
   });
 
   it("rejects non-string answer values", () => {
-    expect(validateAnswerQuestionBody({ commandId, answers: [[42]] })).toBe(false);
-    expect(validateAnswerQuestionBody({ commandId, answers: [["Postgres", null]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId, answers: [[42]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId, answers: [["Postgres", null]] })).toBe(
+      false,
+    );
   });
 
   it("rejects a non-array answers value", () => {
-    expect(validateAnswerQuestionBody({ commandId, answers: "Postgres" })).toBe(false);
-    expect(validateAnswerQuestionBody({ commandId, answers: ["Postgres"] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId, answers: "Postgres" })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId, answers: ["Postgres"] })).toBe(false);
   });
 
-  it("requires commandId and answers", () => {
-    expect(validateAnswerQuestionBody({ answers: [["Postgres"]] })).toBe(false);
-    expect(validateAnswerQuestionBody({ commandId })).toBe(false);
+  it("requires commandId, sessionId, and answers", () => {
+    expect(validateAnswerQuestionBody({ sessionId, answers: [["Postgres"]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, answers: [["Postgres"]] })).toBe(false);
+    expect(validateAnswerQuestionBody({ commandId, sessionId })).toBe(false);
     expect(validateAnswerQuestionBody({})).toBe(false);
   });
 
   it("rejects a non-uuid commandId", () => {
-    expect(validateAnswerQuestionBody({ commandId: "cmd_1", answers: [["Postgres"]] })).toBe(false);
+    expect(
+      validateAnswerQuestionBody({ commandId: "cmd_1", sessionId, answers: [["Postgres"]] }),
+    ).toBe(false);
   });
 
   it("rejects unknown properties", () => {
     expect(
-      validateAnswerQuestionBody({ commandId, answers: [["Postgres"]], instanceId: "nope" }),
+      validateAnswerQuestionBody({
+        commandId,
+        sessionId,
+        answers: [["Postgres"]],
+        instanceId: "nope",
+      }),
     ).toBe(false);
-  });
-});
-
-describe("QuestionCommandResult", () => {
-  const commandId = "7f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
-
-  it.each(["confirmed", "stale", "upstream_error", "result_unknown"])(
-    "accepts status %s",
-    (status) => {
-      expect(validateQuestionCommandResult({ commandId, status })).toBe(true);
-    },
-  );
-
-  it("rejects an unknown status", () => {
-    expect(validateQuestionCommandResult({ commandId, status: "pending" })).toBe(false);
-    expect(validateQuestionCommandResult({ commandId, status: "timeout" })).toBe(false);
-  });
-
-  it("rejects a non-uuid commandId", () => {
-    expect(validateQuestionCommandResult({ commandId: "cmd_1", status: "confirmed" })).toBe(false);
-  });
-
-  it("requires commandId and status", () => {
-    expect(validateQuestionCommandResult({ status: "confirmed" })).toBe(false);
-    expect(validateQuestionCommandResult({ commandId })).toBe(false);
-  });
-
-  it("rejects unknown properties", () => {
-    expect(validateQuestionCommandResult({ commandId, status: "confirmed", answers: [] })).toBe(
-      false,
-    );
   });
 });
 
 describe("DecidePermission body", () => {
   const commandId = "9d4c8a1e-5f2b-4a7d-9e6c-1b3d5f7a9c2e";
+  const sessionId = "ses_1";
 
   it("accepts the once decision", () => {
-    expect(validateDecidePermissionBody({ commandId, decision: "once" })).toBe(true);
+    expect(validateDecidePermissionBody({ commandId, sessionId, decision: "once" })).toBe(
+      true,
+    );
   });
 
   it("accepts the reject decision", () => {
-    expect(validateDecidePermissionBody({ commandId, decision: "reject" })).toBe(true);
+    expect(validateDecidePermissionBody({ commandId, sessionId, decision: "reject" })).toBe(
+      true,
+    );
   });
 
   it("accepts the always decision", () => {
-    expect(validateDecidePermissionBody({ commandId, decision: "always" })).toBe(true);
+    expect(validateDecidePermissionBody({ commandId, sessionId, decision: "always" })).toBe(
+      true,
+    );
   });
 
   it("rejects an unknown decision", () => {
-    expect(validateDecidePermissionBody({ commandId, decision: "allow" })).toBe(false);
-    expect(validateDecidePermissionBody({ commandId, decision: "deny" })).toBe(false);
+    expect(validateDecidePermissionBody({ commandId, sessionId, decision: "allow" })).toBe(false);
+    expect(validateDecidePermissionBody({ commandId, sessionId, decision: "deny" })).toBe(false);
   });
 
   it("rejects a non-string decision", () => {
-    expect(validateDecidePermissionBody({ commandId, decision: 1 })).toBe(false);
-    expect(validateDecidePermissionBody({ commandId, decision: null })).toBe(false);
+    expect(validateDecidePermissionBody({ commandId, sessionId, decision: 1 })).toBe(false);
+    expect(validateDecidePermissionBody({ commandId, sessionId, decision: null })).toBe(false);
   });
 
-  it("requires commandId and decision", () => {
-    expect(validateDecidePermissionBody({ commandId })).toBe(false);
-    expect(validateDecidePermissionBody({ decision: "once" })).toBe(false);
+  it("requires commandId, sessionId, and decision", () => {
+    expect(validateDecidePermissionBody({ sessionId, decision: "once" })).toBe(false);
+    expect(validateDecidePermissionBody({ commandId, decision: "once" })).toBe(false);
+    expect(validateDecidePermissionBody({ commandId, sessionId })).toBe(false);
     expect(validateDecidePermissionBody({})).toBe(false);
   });
 
   it("rejects a non-uuid commandId", () => {
-    expect(validateDecidePermissionBody({ commandId: "cmd_1", decision: "once" })).toBe(false);
-  });
-
-  it("rejects unknown properties", () => {
-    expect(
-      validateDecidePermissionBody({ commandId, decision: "once", patterns: [] }),
-    ).toBe(false);
-  });
-});
-
-describe("PermissionCommandResult", () => {
-  const commandId = "9d4c8a1e-5f2b-4a7d-9e6c-1b3d5f7a9c2e";
-
-  it.each(["confirmed", "stale", "upstream_error", "result_unknown"])(
-    "accepts status %s",
-    (status) => {
-      expect(validatePermissionCommandResult({ commandId, status })).toBe(true);
-    },
-  );
-
-  it("rejects an unknown status", () => {
-    expect(validatePermissionCommandResult({ commandId, status: "pending" })).toBe(false);
-    expect(validatePermissionCommandResult({ commandId, status: "timeout" })).toBe(false);
-  });
-
-  it("rejects a non-uuid commandId", () => {
-    expect(validatePermissionCommandResult({ commandId: "cmd_1", status: "confirmed" })).toBe(
+    expect(validateDecidePermissionBody({ commandId: "cmd_1", sessionId, decision: "once" })).toBe(
       false,
     );
   });
 
-  it("requires commandId and status", () => {
-    expect(validatePermissionCommandResult({ status: "confirmed" })).toBe(false);
-    expect(validatePermissionCommandResult({ commandId })).toBe(false);
-  });
-
   it("rejects unknown properties", () => {
     expect(
-      validatePermissionCommandResult({ commandId, status: "confirmed", decision: "once" }),
+      validateDecidePermissionBody({ commandId, sessionId, decision: "once", patterns: [] }),
     ).toBe(false);
+  });
+});
+
+describe("CommandAccepted", () => {
+  const commandId = "7f3a9b6c-2d4e-4f5a-8b7c-1d2e3f4a5b6c";
+
+  it("accepts only the one-way accepted acknowledgement", () => {
+    expect(validateCommandAccepted({ commandId, status: "accepted" })).toBe(true);
+    expect(validateCommandAccepted({ commandId, status: "confirmed" })).toBe(false);
+    expect(validateCommandAccepted({ commandId })).toBe(false);
+    expect(validateCommandAccepted({ commandId, status: "accepted", answers: [] })).toBe(false);
   });
 });
 
@@ -1907,11 +1901,11 @@ describe("OpenAPI generation", () => {
     expect(operation?.security).toEqual([{ bearerAuth: [] }]);
     const parameterNames = (operation?.parameters ?? []).map(({ name }) => name);
     expect(parameterNames).toEqual(["instanceId", "requestId"]);
-    expect(operation?.responses["200"].content?.["application/json"]?.schema).toEqual({
-      $ref: "#/components/schemas/QuestionCommandResult",
+    expect(operation?.responses["202"].content?.["application/json"]?.schema).toEqual({
+      $ref: "#/components/schemas/CommandAccepted",
     });
     expect(Object.keys(operation?.responses ?? {}).sort()).toEqual([
-      "200",
+      "202",
       "400",
       "401",
       "404",
@@ -1940,11 +1934,11 @@ describe("OpenAPI generation", () => {
     expect(operation?.security).toEqual([{ bearerAuth: [] }]);
     const parameterNames = (operation?.parameters ?? []).map(({ name }) => name);
     expect(parameterNames).toEqual(["instanceId", "requestId"]);
-    expect(operation?.responses["200"].content?.["application/json"]?.schema).toEqual({
-      $ref: "#/components/schemas/PermissionCommandResult",
+    expect(operation?.responses["202"].content?.["application/json"]?.schema).toEqual({
+      $ref: "#/components/schemas/CommandAccepted",
     });
     expect(Object.keys(operation?.responses ?? {}).sort()).toEqual([
-      "200",
+      "202",
       "400",
       "401",
       "404",

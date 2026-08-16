@@ -47,12 +47,13 @@ class FakePendingInteractions extends PendingInteractionsController {
 class AnswerScript {
   int calls = 0;
   Completer<QuestionAnswerResult>? gate;
-  QuestionAnswerOutcome outcome = QuestionAnswerOutcome.confirmed;
+  QuestionAnswerOutcome outcome = QuestionAnswerOutcome.accepted;
   Object? throwError;
 
   Future<QuestionAnswerResult> call({
     required String instanceId,
     required String requestId,
+    required String sessionId,
     required String commandId,
     required List<List<String>> answers,
   }) async {
@@ -72,12 +73,13 @@ class AnswerScript {
 class DecideScript {
   int calls = 0;
   Completer<PermissionDecisionResult>? gate;
-  PermissionDecisionOutcome outcome = PermissionDecisionOutcome.confirmed;
+  PermissionDecisionOutcome outcome = PermissionDecisionOutcome.accepted;
   Object? throwError;
 
   Future<PermissionDecisionResult> call({
     required String instanceId,
     required String requestId,
+    required String sessionId,
     required String commandId,
     required PermissionDecision decision,
   }) async {
@@ -454,17 +456,18 @@ void main() {
   });
 
   testWidgets(
-    'the request leaves the workbench only after OpenCode confirms it',
+    'the request leaves the workbench as soon as the gateway accepts it',
     (tester) async {
       final script = AnswerScript()..gate = Completer<QuestionAnswerResult>();
-      var confirmed = false;
       final pending = pendingQuestion(
         'question-1',
         DateTime.now().subtract(const Duration(minutes: 10)),
       );
+      // The gateway snapshot keeps listing the request; the accepted outcome
+      // must still remove it from the workbench without waiting on a reload.
       await pumpAnswerableHome(
         tester,
-        loader: () => confirmed ? const <PendingInteraction>[] : [pending],
+        loader: () => [pending],
         script: script,
       );
       expect(find.byKey(tileKey), findsOneWidget);
@@ -479,11 +482,10 @@ void main() {
       expect(find.byKey(const ValueKey('answer-submitting')), findsOneWidget);
       expect(script.calls, 1);
 
-      confirmed = true;
       script.gate!.complete(
         const QuestionAnswerResult(
           commandId: 'cmd-1',
-          outcome: QuestionAnswerOutcome.confirmed,
+          outcome: QuestionAnswerOutcome.accepted,
         ),
       );
       await tester.pumpAndSettle();
@@ -559,19 +561,19 @@ void main() {
     }
 
     testWidgets(
-      'a confirmed permission decision leaves the workbench only after '
-      'OpenCode confirms it',
+      'an accepted permission decision leaves the workbench immediately',
       (tester) async {
         final script = DecideScript()
           ..gate = Completer<PermissionDecisionResult>();
-        var confirmed = false;
         final pending = pendingPermission(
           'permission-1',
           DateTime.now().subtract(const Duration(minutes: 10)),
         );
+        // The gateway snapshot keeps listing the request; the accepted outcome
+        // must still remove it from the workbench without waiting on a reload.
         await pumpAnswerableHome(
           tester,
-          loader: () => confirmed ? const <PendingInteraction>[] : [pending],
+          loader: () => [pending],
           script: AnswerScript(),
           decide: script,
         );
@@ -588,11 +590,10 @@ void main() {
         );
         expect(script.calls, 1);
 
-        confirmed = true;
         script.gate!.complete(
           const PermissionDecisionResult(
             commandId: 'cmd-1',
-            outcome: PermissionDecisionOutcome.confirmed,
+            outcome: PermissionDecisionOutcome.accepted,
           ),
         );
         await tester.pumpAndSettle();

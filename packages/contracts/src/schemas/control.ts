@@ -81,17 +81,18 @@ const pendingSnapshotResponseSchema = {
 const questionAnswerCommandSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["type", "commandId", "requestId", "answers"],
+  required: ["type", "commandId", "requestId", "sessionID", "answers"],
   properties: {
     type: { const: "question_answer_command" },
     commandId: uuidString,
     requestId: nonEmptyString,
+    sessionID: nonEmptyString,
     answers: questionAnswersSchema,
   },
 } as const satisfies JSONSchema;
 
 // The Plugin reports the terminal outcome of one answer command back to the
-// gateway. `status` is the same terminal enum as the QuestionCommandResult.
+// gateway using the shared question command status enum.
 const questionAnswerResultSchema = {
   type: "object",
   additionalProperties: false,
@@ -110,17 +111,18 @@ const questionAnswerResultSchema = {
 const permissionDecideCommandSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["type", "commandId", "requestId", "decision"],
+  required: ["type", "commandId", "requestId", "sessionID", "decision"],
   properties: {
     type: { const: "permission_decide_command" },
     commandId: uuidString,
     requestId: nonEmptyString,
+    sessionID: nonEmptyString,
     decision: permissionDecisionSchema,
   },
 } as const satisfies JSONSchema;
 
 // The Plugin reports the terminal outcome of one decision command back to the
-// gateway. `status` is the same terminal enum as the PermissionCommandResult.
+// gateway using the shared permission command status enum.
 const permissionDecideResultSchema = {
   type: "object",
   additionalProperties: false,

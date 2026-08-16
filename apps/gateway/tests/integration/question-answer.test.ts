@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 
 import {
+  validateCommandAccepted,
+  validateCommandOutcome,
   validateErrorResponse,
-  validateQuestionCommandResult,
 } from "@notify/contracts";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -328,8 +329,55 @@ describe("question answering", () => {
         "content-type": "application/json",
         ...overrides,
       },
-      payload: body,
+      // The session id is a required field of the strict body; default it so
+      // tests about auth and other validation failures keep exercising the
+      // condition they name rather than a missing session id.
+      payload: { sessionId: "ses_1", ...body },
     });
+  }
+
+  function commandOutcome(
+    token: string,
+    commandId: string,
+    overrides: Record<string, string> = {},
+  ) {
+    return app.inject({
+      method: "GET",
+      url: `/v1/pending-interactions/commands/${commandId}`,
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...overrides,
+      },
+    });
+  }
+
+  /**
+   * Poll the body-free command outcome endpoint until the command settles on
+   * the expected terminal status, returning the validated outcome. The POST
+   * acknowledges routing immediately, so terminal outcomes surface through
+   * this GET endpoint instead.
+   */
+  async function expectOutcome(
+    token: string,
+    commandId: string,
+    status: string,
+    timeoutMs = 3_000,
+  ): Promise<Record<string, unknown>> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const res = await commandOutcome(token, commandId);
+      if (res.statusCode === 200) {
+        const body = res.json() as Record<string, unknown>;
+        if (body.status === status) {
+          expect(validateCommandOutcome(body)).toBe(true);
+          return body;
+        }
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for command ${commandId} outcome ${status}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
   }
 
   describe("authentication and validation", () => {
@@ -385,11 +433,28 @@ describe("question answering", () => {
         expect(validateErrorResponse(res.json())).toBe(true);
         expect((res.json() as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
       }
+
+      // The session id is a required field of the strict body; the helper
+      // defaults it for the cases above, so omitting it is a distinct failure.
+      const missingSessionId = await app.inject({
+        method: "POST",
+        url: `/v1/pending-interactions/${instance.instanceId}/questions/req_1/answer`,
+        headers: {
+          authorization: `Bearer ${alice.token}`,
+          "content-type": "application/json",
+        },
+        payload: { commandId: randomUUID(), answers: [["Postgres"]] },
+      });
+      expect(missingSessionId.statusCode).toBe(400);
+      expect(validateErrorResponse(missingSessionId.json())).toBe(true);
+      expect((missingSessionId.json() as { error: { code: string } }).error.code).toBe(
+        "VALIDATION_FAILED",
+      );
     });
   });
 
   describe("happy path", () => {
-    it("routes a complete ordered answer to the owning Plugin and returns the confirmed result", async () => {
+    it("accepts after routing a complete answer without waiting for the Plugin result", async () => {
       const alice = await createUser("answer@example.com");
       const credential = await createPluginCredential(alice.token);
       const instance = await registerPlugin(credential);
@@ -436,10 +501,41 @@ describe("question answering", () => {
       const command = nextMessage(instance.ws);
       const response = answerQuestion(alice.token, instance.instanceId, "req_1", {
         commandId,
+        sessionId: "ses_1",
         answers,
       });
       const frame = (await command) as Record<string, unknown>;
-      expect(frame).toEqual({ type: "question_answer_command", commandId, requestId: "req_1", answers });
+      expect(frame).toEqual({
+        type: "question_answer_command",
+        commandId,
+        requestId: "req_1",
+        sessionID: "ses_1",
+        answers,
+      });
+
+      const res = await response;
+      expect(res.statusCode).toBe(202);
+      const body = res.json();
+      expect(validateCommandAccepted(body)).toBe(true);
+      expect(body).toEqual({ commandId, status: "accepted" });
+
+      // The moment the command is routed, the body-free outcome correlation
+      // records it as accepted; the GET endpoint serves it to the owner.
+      const accepted = await commandOutcome(alice.token, commandId);
+      expect(accepted.statusCode).toBe(200);
+      expect(validateCommandOutcome(accepted.json())).toBe(true);
+      expect(accepted.json()).toEqual({
+        commandId,
+        requestId: "req_1",
+        instanceId: instance.instanceId,
+        kind: "question",
+        status: "accepted",
+        updatedAt: new Date(T0).toISOString(),
+      });
+
+      // The HTTP submission has already completed and does not depend on the
+      // Plugin result; the terminal outcome still surfaces through the GET
+      // endpoint once the owning Plugin reports it.
       instance.ws.send(
         JSON.stringify({
           type: "question_answer_result",
@@ -448,12 +544,15 @@ describe("question answering", () => {
           status: "confirmed",
         }),
       );
-
-      const res = await response;
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(validateQuestionCommandResult(body)).toBe(true);
-      expect(body).toEqual({ commandId, status: "confirmed" });
+      const outcome = await expectOutcome(alice.token, commandId, "confirmed");
+      expect(outcome).toEqual({
+        commandId,
+        requestId: "req_1",
+        instanceId: instance.instanceId,
+        kind: "question",
+        status: "confirmed",
+        updatedAt: new Date(T0).toISOString(),
+      });
     });
   });
 
@@ -550,6 +649,18 @@ describe("question answering", () => {
         permissionInteraction(instance.instanceId, "req_permission"),
       ]);
 
+      // The request id alone is insufficient: a client must echo the session
+      // carried by the projected interaction.
+      silence = expectSilence(instance.ws);
+      res = await answerQuestion(alice.token, instance.instanceId, "req_question", {
+        commandId: randomUUID(),
+        sessionId: "ses_wrong",
+        answers: [["Postgres"]],
+      });
+      await silence;
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe("CONFLICT");
+
       // A projected permission request is the wrong kind: conflict, no command.
       silence = expectSilence(instance.ws);
       res = await answerQuestion(alice.token, instance.instanceId, "req_permission", {
@@ -576,7 +687,7 @@ describe("question answering", () => {
 
   describe("outcomes", () => {
     it.each(["confirmed", "stale", "upstream_error", "result_unknown"])(
-      "returns the Plugin's terminal %s outcome",
+      "tracks the Plugin's terminal %s outcome via the command outcome endpoint",
       async (status) => {
         const alice = await createUser(`outcome-${status}@example.com`);
         const credential = await createPluginCredential(alice.token);
@@ -593,6 +704,13 @@ describe("question answering", () => {
         });
         const frame = (await command) as { commandId: string };
         expect(frame.commandId).toBe(commandId);
+
+        // The POST acknowledges routing immediately and never reports a
+        // terminal status.
+        const res = await response;
+        expect(res.statusCode).toBe(202);
+        expect(res.json()).toEqual({ commandId, status: "accepted" });
+
         instance.ws.send(
           JSON.stringify({
             type: "question_answer_result",
@@ -602,11 +720,15 @@ describe("question answering", () => {
           }),
         );
 
-        const res = await response;
-        expect(res.statusCode).toBe(200);
-        const body = res.json();
-        expect(validateQuestionCommandResult(body)).toBe(true);
-        expect(body).toEqual({ commandId, status });
+        const outcome = await expectOutcome(alice.token, commandId, status);
+        expect(outcome).toEqual({
+          commandId,
+          requestId: "req_1",
+          instanceId: instance.instanceId,
+          kind: "question",
+          status,
+          updatedAt: new Date(T0).toISOString(),
+        });
       },
     );
 
@@ -626,6 +748,13 @@ describe("question answering", () => {
       });
       const frame = (await command) as { commandId: string };
       expect(frame.commandId).toBe(commandId);
+      const res = await response;
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ commandId, status: "accepted" });
+
+      // A confirmed result drops the request from the projection; the GET
+      // outcome reaching `confirmed` confirms the result was applied before
+      // the racing client is refused.
       instance.ws.send(
         JSON.stringify({
           type: "question_answer_result",
@@ -634,9 +763,8 @@ describe("question answering", () => {
           status: "confirmed",
         }),
       );
-      const res = await response;
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ commandId, status: "confirmed" });
+      const outcome = await expectOutcome(alice.token, commandId, "confirmed");
+      expect(outcome).toMatchObject({ commandId, status: "confirmed" });
 
       // A racing client targeting the same request is refused before any
       // second command reaches the Plugin.
@@ -669,10 +797,13 @@ describe("question answering", () => {
       });
       const frame = (await command) as { commandId: string };
       expect(frame.commandId).toBe(commandId);
-      // The Plugin never replies; the command settles as result_unknown.
       const res = await response;
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ commandId, status: "result_unknown" });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ commandId, status: "accepted" });
+      // The Plugin never replies; the command settles as result_unknown on the
+      // outcome endpoint.
+      const outcome = await expectOutcome(alice.token, commandId, "result_unknown");
+      expect(outcome).toMatchObject({ commandId, status: "result_unknown" });
       // The connection remains healthy after the timeout.
       expect(instance.ws.readyState).toBe(WebSocket.OPEN);
     });
@@ -695,8 +826,10 @@ describe("question answering", () => {
       expect(frame.commandId).toBe(commandId);
       instance.ws.close();
       const res = await response;
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ commandId, status: "result_unknown" });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ commandId, status: "accepted" });
+      const outcome = await expectOutcome(alice.token, commandId, "result_unknown");
+      expect(outcome).toMatchObject({ commandId, status: "result_unknown" });
     });
   });
 
@@ -724,6 +857,10 @@ describe("question answering", () => {
       expect(second.statusCode).toBe(409);
       await expectSilence(instance.ws);
 
+      const firstRes = await firstResponse;
+      expect(firstRes.statusCode).toBe(202);
+      expect(firstRes.json()).toEqual({ commandId: firstCommandId, status: "accepted" });
+
       instance.ws.send(
         JSON.stringify({
           type: "question_answer_result",
@@ -732,7 +869,8 @@ describe("question answering", () => {
           status: "confirmed",
         }),
       );
-      expect((await firstResponse).json().status).toBe("confirmed");
+      const outcome = await expectOutcome(alice.token, firstCommandId, "confirmed");
+      expect(outcome).toMatchObject({ commandId: firstCommandId, status: "confirmed" });
     });
 
     it("correlates commands by connection+commandId and ignores late, duplicate, foreign-instance, and foreign-connection results", async () => {
@@ -759,6 +897,7 @@ describe("question answering", () => {
       const frameB = nextMessage(instance.ws);
       const responseB = answerQuestion(alice.token, instance.instanceId, "req_b", {
         commandId: commandB,
+        sessionId: "ses_b",
         answers: [["y"]],
       });
       const sentB = (await frameB) as { commandId: string };
@@ -810,7 +949,10 @@ describe("question answering", () => {
         }),
       );
       const resB = await responseB;
-      expect(resB.json()).toEqual({ commandId: commandB, status: "confirmed" });
+      expect(resB.statusCode).toBe(202);
+      expect(resB.json()).toEqual({ commandId: commandB, status: "accepted" });
+      const outcomeB = await expectOutcome(alice.token, commandB, "confirmed");
+      expect(outcomeB).toMatchObject({ commandId: commandB, status: "confirmed" });
       instance.ws.send(
         JSON.stringify({
           type: "question_answer_result",
@@ -819,6 +961,10 @@ describe("question answering", () => {
           status: "stale",
         }),
       );
+      // The late duplicate after settlement must not overwrite the outcome.
+      const afterLate = await commandOutcome(alice.token, commandB);
+      expect(afterLate.statusCode).toBe(200);
+      expect(afterLate.json()).toMatchObject({ commandId: commandB, status: "confirmed" });
 
       // Settle A with the correct result on the exact connection.
       instance.ws.send(
@@ -830,7 +976,12 @@ describe("question answering", () => {
         }),
       );
       const resA = await responseA;
-      expect(resA.json()).toEqual({ commandId: commandA, status: "upstream_error" });
+      expect(resA.statusCode).toBe(202);
+      expect(resA.json()).toEqual({ commandId: commandA, status: "accepted" });
+      // The foreign-instance and foreign-connection confirmed results never
+      // settled A: only the exact connection's result advances it.
+      const outcomeA = await expectOutcome(alice.token, commandA, "upstream_error");
+      expect(outcomeA).toMatchObject({ commandId: commandA, status: "upstream_error" });
 
       // The first connection remains healthy and still answers a fresh snapshot.
       await seedSnapshot(alice.token, instance.ws, instance.instanceId, [
@@ -884,16 +1035,9 @@ describe("question answering", () => {
       // channel — the only place the content is allowed to travel.
       const frame = (await command) as { answers: string[][] };
       expect(frame.answers).toEqual([[answerSentinel]]);
-      instance.ws.send(
-        JSON.stringify({
-          type: "question_answer_result",
-          commandId,
-          instanceId: instance.instanceId,
-          status: "confirmed",
-        }),
-      );
       const res = await response;
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ commandId, status: "accepted" });
 
       // Log an answer body directly: the answer path must be redacted.
       const probe = await app.inject({

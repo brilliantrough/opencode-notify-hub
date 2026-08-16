@@ -103,11 +103,7 @@ void main() {
   });
 
   group('AppConfig', () {
-    test('gatewayHttpBase defaults to https://notify.example.com', () {
-      expect(AppConfig().gatewayHttpBase, 'https://notify.example.com');
-    });
-
-    test('gatewayHttpBase honors GATEWAY_URL dart-define override', () {
+    test('gatewayHttpBase uses the provided runtime server', () {
       final config = AppConfig(
         gatewayHttpBase: 'https://gateway.internal.example.com',
       );

@@ -23,6 +23,7 @@ part 'plugin_control_server_message.g.dart';
 /// * [requestId]
 /// * [answers]
 /// * [commandId]
+/// * [sessionID]
 /// * [decision]
 @BuiltValue()
 abstract class PluginControlServerMessage

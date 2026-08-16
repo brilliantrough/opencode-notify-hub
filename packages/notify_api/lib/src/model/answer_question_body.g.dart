@@ -11,13 +11,18 @@ class _$AnswerQuestionBody extends AnswerQuestionBody {
   final BuiltList<BuiltList<String>> answers;
   @override
   final String commandId;
+  @override
+  final String sessionId;
 
   factory _$AnswerQuestionBody([
     void Function(AnswerQuestionBodyBuilder)? updates,
   ]) => (AnswerQuestionBodyBuilder()..update(updates))._build();
 
-  _$AnswerQuestionBody._({required this.answers, required this.commandId})
-    : super._();
+  _$AnswerQuestionBody._({
+    required this.answers,
+    required this.commandId,
+    required this.sessionId,
+  }) : super._();
   @override
   AnswerQuestionBody rebuild(
     void Function(AnswerQuestionBodyBuilder) updates,
@@ -32,7 +37,8 @@ class _$AnswerQuestionBody extends AnswerQuestionBody {
     if (identical(other, this)) return true;
     return other is AnswerQuestionBody &&
         answers == other.answers &&
-        commandId == other.commandId;
+        commandId == other.commandId &&
+        sessionId == other.sessionId;
   }
 
   @override
@@ -40,6 +46,7 @@ class _$AnswerQuestionBody extends AnswerQuestionBody {
     var _$hash = 0;
     _$hash = $jc(_$hash, answers.hashCode);
     _$hash = $jc(_$hash, commandId.hashCode);
+    _$hash = $jc(_$hash, sessionId.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -48,7 +55,8 @@ class _$AnswerQuestionBody extends AnswerQuestionBody {
   String toString() {
     return (newBuiltValueToStringHelper(r'AnswerQuestionBody')
           ..add('answers', answers)
-          ..add('commandId', commandId))
+          ..add('commandId', commandId)
+          ..add('sessionId', sessionId))
         .toString();
   }
 }
@@ -67,6 +75,10 @@ class AnswerQuestionBodyBuilder
   String? get commandId => _$this._commandId;
   set commandId(String? commandId) => _$this._commandId = commandId;
 
+  String? _sessionId;
+  String? get sessionId => _$this._sessionId;
+  set sessionId(String? sessionId) => _$this._sessionId = sessionId;
+
   AnswerQuestionBodyBuilder() {
     AnswerQuestionBody._defaults(this);
   }
@@ -76,6 +88,7 @@ class AnswerQuestionBodyBuilder
     if ($v != null) {
       _answers = $v.answers.toBuilder();
       _commandId = $v.commandId;
+      _sessionId = $v.sessionId;
       _$v = null;
     }
     return this;
@@ -105,6 +118,11 @@ class AnswerQuestionBodyBuilder
               commandId,
               r'AnswerQuestionBody',
               'commandId',
+            ),
+            sessionId: BuiltValueNullFieldError.checkNotNull(
+              sessionId,
+              r'AnswerQuestionBody',
+              'sessionId',
             ),
           );
     } catch (_) {

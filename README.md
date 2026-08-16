@@ -56,12 +56,11 @@ before starting.
 
 ### Use an existing gateway
 
-1. Build and start the client with your gateway URL:
+1. Build and start the client, then choose the gateway from the login page:
 
    ```bash
    flutter pub get
-   (cd apps/client && flutter run -d linux \
-     --dart-define=GATEWAY_URL=https://notify.example.com)
+   (cd apps/client && flutter run -d linux)
    ```
 
 2. Register and verify an account in the client.

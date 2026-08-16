@@ -62,7 +62,7 @@ export interface ControlChannelOptions {
    */
   answerQuestion?: (
     requestId: string,
-    directory: string,
+    sessionID: string,
     answers: QuestionAnswers,
     signal: AbortSignal,
   ) => Promise<QuestionCommandStatus>;
@@ -78,7 +78,7 @@ export interface ControlChannelOptions {
    */
   decidePermission?: (
     requestId: string,
-    directory: string,
+    sessionID: string,
     decision: PermissionDecision,
     signal: AbortSignal,
   ) => Promise<PermissionCommandStatus>;
@@ -356,7 +356,7 @@ export class ControlChannel implements PluginControl {
       return await Promise.race([
         this.options.answerQuestion(
           command.requestId,
-          this.options.directory,
+          command.sessionID,
           command.answers,
           abort.signal,
         ),
@@ -412,7 +412,7 @@ export class ControlChannel implements PluginControl {
       return await Promise.race([
         this.options.decidePermission(
           command.requestId,
-          this.options.directory,
+          command.sessionID,
           command.decision,
           abort.signal,
         ),
@@ -538,6 +538,7 @@ function controlUrl(gatewayUrl: string): string {
 interface AnswerCommand {
   commandId: string;
   requestId: string;
+  sessionID: string;
   answers: QuestionAnswers;
 }
 
@@ -545,6 +546,7 @@ interface AnswerCommand {
 interface DecideCommand {
   commandId: string;
   requestId: string;
+  sessionID: string;
   decision: PermissionDecision;
 }
 
@@ -561,6 +563,9 @@ function parseDecisionCommand(frame: Record<string, unknown>): DecideCommand | n
   if (typeof frame.requestId !== "string" || frame.requestId.length === 0) {
     return null;
   }
+  if (typeof frame.sessionID !== "string" || frame.sessionID.length === 0) {
+    return null;
+  }
   const decision = frame.decision;
   if (decision !== "once" && decision !== "reject" && decision !== "always") {
     return null;
@@ -568,6 +573,7 @@ function parseDecisionCommand(frame: Record<string, unknown>): DecideCommand | n
   return {
     commandId: frame.commandId,
     requestId: frame.requestId,
+    sessionID: frame.sessionID,
     decision,
   };
 }
@@ -585,12 +591,16 @@ function parseAnswerCommand(frame: Record<string, unknown>): AnswerCommand | nul
   if (typeof frame.requestId !== "string" || frame.requestId.length === 0) {
     return null;
   }
+  if (typeof frame.sessionID !== "string" || frame.sessionID.length === 0) {
+    return null;
+  }
   if (!isQuestionAnswers(frame.answers)) {
     return null;
   }
   return {
     commandId: frame.commandId,
     requestId: frame.requestId,
+    sessionID: frame.sessionID,
     answers: frame.answers,
   };
 }

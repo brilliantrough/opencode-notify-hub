@@ -14,6 +14,7 @@ part 'answer_question_body.g.dart';
 /// Properties:
 /// * [answers]
 /// * [commandId]
+/// * [sessionId]
 @BuiltValue()
 abstract class AnswerQuestionBody
     implements Built<AnswerQuestionBody, AnswerQuestionBodyBuilder> {
@@ -22,6 +23,9 @@ abstract class AnswerQuestionBody
 
   @BuiltValueField(wireName: r'commandId')
   String get commandId;
+
+  @BuiltValueField(wireName: r'sessionId')
+  String get sessionId;
 
   AnswerQuestionBody._();
 
@@ -59,6 +63,11 @@ class _$AnswerQuestionBodySerializer
     yield r'commandId';
     yield serializers.serialize(
       object.commandId,
+      specifiedType: const FullType(String),
+    );
+    yield r'sessionId';
+    yield serializers.serialize(
+      object.sessionId,
       specifiedType: const FullType(String),
     );
   }
@@ -107,6 +116,15 @@ class _$AnswerQuestionBodySerializer
                   )
                   as String;
           result.commandId = valueDes;
+          break;
+        case r'sessionId':
+          final valueDes =
+              serializers.deserialize(
+                    value,
+                    specifiedType: const FullType(String),
+                  )
+                  as String;
+          result.sessionId = valueDes;
           break;
         default:
           unhandled.add(key);

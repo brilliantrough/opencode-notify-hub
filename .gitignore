@@ -29,3 +29,7 @@ backups/
 .omo/
 .codegraph/
 docs/project_memory/
+
+# Local tool and shell configuration.
+/envs.sh
+/openapi_generator_config.json

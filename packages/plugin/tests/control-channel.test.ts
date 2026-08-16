@@ -581,6 +581,7 @@ describe("ControlChannel", () => {
         type: "question_answer_command",
         commandId: answerCommandId,
         requestId: "req_1",
+        sessionID: "ses_1",
         answers: [["Postgres"]],
       }),
     });
@@ -620,6 +621,7 @@ describe("ControlChannel", () => {
         type: "question_answer_command",
         commandId: answerCommandId,
         requestId: "req_1",
+        sessionID: "ses_event",
         answers,
       }),
     });
@@ -627,7 +629,7 @@ describe("ControlChannel", () => {
 
     expect(answerQuestion).toHaveBeenCalledWith(
       "req_1",
-      "/work/notify",
+      "ses_event",
       answers,
       expect.any(AbortSignal),
     );
@@ -665,6 +667,7 @@ describe("ControlChannel", () => {
           type: "question_answer_command",
           commandId,
           requestId: "req_1",
+          sessionID: "ses_1",
           answers: [["Postgres"]],
         }),
       });
@@ -710,6 +713,7 @@ describe("ControlChannel", () => {
         type: "question_answer_command",
         commandId: answerCommandId,
         requestId: "req_1",
+        sessionID: "ses_1",
         answers: [["Postgres"]],
       }),
     });
@@ -745,6 +749,7 @@ describe("ControlChannel", () => {
       type: "question_answer_command",
       commandId: answerCommandId,
       requestId: "req_1",
+      sessionID: "ses_1",
       answers: [["Postgres"]],
     };
     const garbage: Record<string, unknown>[] = [
@@ -753,6 +758,8 @@ describe("ControlChannel", () => {
       { ...valid, commandId: 7 },
       { ...valid, requestId: "" },
       { ...valid, requestId: 7 },
+      { ...valid, sessionID: "" },
+      { ...valid, sessionID: 7 },
       { ...valid, answers: [] },
       { ...valid, answers: [[]] },
       { ...valid, answers: [[""]] },
@@ -809,6 +816,7 @@ describe("ControlChannel", () => {
         type: "question_answer_command",
         commandId: answerCommandId,
         requestId: "req_1",
+        sessionID: "ses_1",
         answers: [["Postgres"]],
       }),
     });
@@ -848,6 +856,7 @@ describe("ControlChannel", () => {
         type: "question_answer_command",
         commandId: answerCommandId,
         requestId: "req_1",
+        sessionID: "ses_1",
         answers: [["Postgres"]],
       }),
     });
@@ -866,7 +875,12 @@ describe("ControlChannel", () => {
     const socket = new FakeSocket();
     let latestSignal: AbortSignal | undefined;
     const answerQuestion = vi.fn(
-      (_requestId: string, _directory: string, _answers: unknown[], signal: AbortSignal) => {
+      (
+        _requestId: string,
+        _sessionID: string,
+        _answers: unknown[],
+        signal: AbortSignal,
+      ) => {
         latestSignal = signal;
         return new Promise<"confirmed">(() => undefined); // hangs forever
       },
@@ -892,6 +906,7 @@ describe("ControlChannel", () => {
         type: "question_answer_command",
         commandId: answerCommandId,
         requestId: "req_1",
+        sessionID: "ses_1",
         answers: [["Postgres"]],
       }),
     });
@@ -930,6 +945,7 @@ describe("ControlChannel", () => {
         type: "question_answer_command",
         commandId: answerCommandId,
         requestId: "req_1",
+        sessionID: "ses_1",
         answers: [["SECRET-ANSWER"]],
       }),
     });
@@ -972,6 +988,7 @@ describe("ControlChannel", () => {
         type: "permission_decide_command",
         commandId: decisionCommandId,
         requestId: "per_req_1",
+        sessionID: "ses_1",
         decision: "once",
       }),
     });
@@ -1010,6 +1027,7 @@ describe("ControlChannel", () => {
         type: "permission_decide_command",
         commandId: decisionCommandId,
         requestId: "per_req_1",
+        sessionID: "ses_event",
         decision: "reject",
       }),
     });
@@ -1017,7 +1035,7 @@ describe("ControlChannel", () => {
 
     expect(decidePermission).toHaveBeenCalledWith(
       "per_req_1",
-      "/work/notify",
+      "ses_event",
       "reject",
       expect.any(AbortSignal),
     );
@@ -1047,6 +1065,7 @@ describe("ControlChannel", () => {
         type: "permission_decide_command",
         commandId: decisionCommandId,
         requestId: "per_req_1",
+        sessionID: "ses_event",
         decision: "always",
       }),
     });
@@ -1055,7 +1074,7 @@ describe("ControlChannel", () => {
     expect(decidePermission).toHaveBeenCalledTimes(1);
     expect(decidePermission).toHaveBeenCalledWith(
       "per_req_1",
-      "/work/notify",
+      "ses_event",
       "always",
       expect.any(AbortSignal),
     );
@@ -1099,6 +1118,7 @@ describe("ControlChannel", () => {
           type: "permission_decide_command",
           commandId,
           requestId: "per_req_1",
+          sessionID: "ses_1",
           decision: "once",
         }),
       });
@@ -1144,6 +1164,7 @@ describe("ControlChannel", () => {
         type: "permission_decide_command",
         commandId: decisionCommandId,
         requestId: "per_req_1",
+        sessionID: "ses_1",
         decision: "once",
       }),
     });
@@ -1179,6 +1200,7 @@ describe("ControlChannel", () => {
       type: "permission_decide_command",
       commandId: decisionCommandId,
       requestId: "per_req_1",
+      sessionID: "ses_1",
       decision: "once",
     };
     const garbage: Record<string, unknown>[] = [
@@ -1187,6 +1209,8 @@ describe("ControlChannel", () => {
       { ...valid, commandId: 7 },
       { ...valid, requestId: "" },
       { ...valid, requestId: 7 },
+      { ...valid, sessionID: "" },
+      { ...valid, sessionID: 7 },
       { ...valid, decision: "" },
       { ...valid, decision: 1 },
       { ...valid, decision: null },
@@ -1240,6 +1264,7 @@ describe("ControlChannel", () => {
         type: "permission_decide_command",
         commandId: decisionCommandId,
         requestId: "per_req_1",
+        sessionID: "ses_1",
         decision: "once",
       }),
     });
@@ -1279,6 +1304,7 @@ describe("ControlChannel", () => {
         type: "permission_decide_command",
         commandId: decisionCommandId,
         requestId: "per_req_1",
+        sessionID: "ses_1",
         decision: "reject",
       }),
     });
@@ -1297,7 +1323,12 @@ describe("ControlChannel", () => {
     const socket = new FakeSocket();
     let latestSignal: AbortSignal | undefined;
     const decidePermission = vi.fn(
-      (_requestId: string, _directory: string, _decision: unknown, signal: AbortSignal) => {
+      (
+        _requestId: string,
+        _sessionID: string,
+        _decision: unknown,
+        signal: AbortSignal,
+      ) => {
         latestSignal = signal;
         return new Promise<"confirmed">(() => undefined); // hangs forever
       },
@@ -1323,6 +1354,7 @@ describe("ControlChannel", () => {
         type: "permission_decide_command",
         commandId: decisionCommandId,
         requestId: "per_req_1",
+        sessionID: "ses_1",
         decision: "once",
       }),
     });
@@ -1361,6 +1393,7 @@ describe("ControlChannel", () => {
         type: "permission_decide_command",
         commandId: decisionCommandId,
         requestId: "per_req_1",
+        sessionID: "ses_1",
         decision: "once",
       }),
     });

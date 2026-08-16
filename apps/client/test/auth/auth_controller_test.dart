@@ -170,21 +170,19 @@ void main() {
     });
 
     test(
-      'a non-Dio refresh error becomes Unauthenticated instead of wedging '
-      'on the loading spinner',
+      'a transient refresh error preserves a retryable restore state',
       () async {
         await store.save(refreshToken: 'refresh-0', accountEmail: email);
         when(() => refresher.refresh()).thenThrow(StateError('boom'));
 
         await controller().bootstrap();
 
-        expect(state(), isA<Unauthenticated>());
+        expect(state(), isA<AuthRestoreFailed>());
       },
     );
 
     test(
-      'a failing credentials read becomes Unauthenticated instead of '
-      'wedging on the loading spinner',
+      'a failing credentials read preserves a retryable restore state',
       () async {
         final failingStore = _ThrowingReadStore();
         final c = ProviderContainer(
@@ -199,10 +197,19 @@ void main() {
 
         await c.read(authControllerProvider.notifier).bootstrap();
 
-        expect(c.read(authControllerProvider), isA<Unauthenticated>());
+        expect(c.read(authControllerProvider), isA<AuthRestoreFailed>());
         verifyNever(() => refresher.refresh());
       },
     );
+
+    test('abandon restore clears credentials and opens login', () async {
+      await store.save(refreshToken: 'refresh-0', accountEmail: email);
+
+      await controller().abandonSessionRestore();
+
+      expect(state(), isA<Unauthenticated>());
+      expect(await store.read(), isNull);
+    });
   });
 
   group('register', () {

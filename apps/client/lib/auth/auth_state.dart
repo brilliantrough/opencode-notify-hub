@@ -2,9 +2,10 @@
 ///
 /// ```text
 /// AuthUnknown ──bootstrap──> Unauthenticated ──register──> AwaitingVerification
-///      │                          │   ^                          │
-///      └────────Authenticated <───┴───┴────── verifyEmail ───────┘
-///                  (login / verify success)        (after register login)
+///      │       └──transient──> AuthRestoreFailed                   │
+///      │                          │ retry                           │
+///      └────────Authenticated <───┴──────── verifyEmail ───────────┘
+///                  (login / verify success)       (after register login)
 /// ```
 ///
 /// `Authenticated` is the only state in which gateway calls beyond `/auth/`
@@ -16,6 +17,13 @@ sealed class AuthState {
 /// Initial state: the stored session (if any) has not been restored yet.
 class AuthUnknown extends AuthState {
   const AuthUnknown();
+}
+
+/// Stored credentials exist, but the client could not restore them because a
+/// local store or transient gateway operation failed. The credentials are
+/// retained so the user can retry without signing in again.
+class AuthRestoreFailed extends AuthState {
+  const AuthRestoreFailed();
 }
 
 /// No valid session. The user must log in (or register and verify).

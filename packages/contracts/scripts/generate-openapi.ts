@@ -14,7 +14,7 @@ import {
   verifyEmailBodySchema,
 } from "../src/schemas/auth.js";
 import { errorResponseSchema, healthStatusSchema } from "../src/schemas/common.js";
-import { commandOutcomeSchema } from "../src/schemas/commands.js";
+import { commandAcceptedSchema, commandOutcomeSchema } from "../src/schemas/commands.js";
 import {
   instancePresenceSchema,
   pluginControlClientMessageSchema,
@@ -33,11 +33,8 @@ import {
   ingestKeyListResponseSchema,
 } from "../src/schemas/ingest-keys.js";
 import { pendingInteractionSchema, pendingSnapshotSchema } from "../src/schemas/pending.js";
-import {
-  decidePermissionBodySchema,
-  permissionCommandResultSchema,
-} from "../src/schemas/permissions.js";
-import { answerQuestionBodySchema, questionCommandResultSchema } from "../src/schemas/questions.js";
+import { decidePermissionBodySchema } from "../src/schemas/permissions.js";
+import { answerQuestionBodySchema } from "../src/schemas/questions.js";
 import { wsServerMessageSchema } from "../src/schemas/ws.js";
 
 // The API version is sourced from the package metadata so the document can
@@ -412,14 +409,15 @@ const document = {
         description:
           "Validates and submits one complete ordered answer set for a pending " +
           "question owned by the authenticated account and routes the command to " +
-          "the exact Plugin instance. The response carries the client-generated " +
-          "commandId and the terminal outcome; it confirms gateway routing, not " +
+          "the exact Plugin instance. The body includes the event-derived sessionId, " +
+          "so the Plugin can call the session-scoped OpenCode reply directly. The " +
+          "202 response only acknowledges best-effort delivery; it does not confirm " +
           "that OpenCode applied the answers. Leaving the request unanswered has " +
           "no OpenCode side effect and never invokes question reject.",
         parameters: [instanceIdPathParameter, requestIdPathParameter],
         requestBody: jsonBody("AnswerQuestionBody"),
         responses: {
-          "200": jsonResponse("Terminal command outcome.", "QuestionCommandResult"),
+          "202": jsonResponse("Command accepted for best-effort delivery.", "CommandAccepted"),
           "400": errorResponse("Validation failed."),
           "401": errorResponse("Missing or invalid access token."),
           "404": errorResponse(
@@ -441,14 +439,14 @@ const document = {
         description:
           "Validates and submits one immediate allow-once, always-allow, or " +
           "reject decision for a pending permission owned by the authenticated " +
-          "account and routes the command to the exact Plugin instance. The " +
-          "response carries the client-generated commandId and the terminal " +
-          "outcome; it confirms gateway routing, not that OpenCode applied the " +
+          "account and routes the command to the exact Plugin instance. The body " +
+          "includes the event-derived sessionId, and the 202 response only " +
+          "acknowledges best-effort delivery; it does not confirm that OpenCode applied the " +
           "decision. Leaving the request undecided has no OpenCode side effect.",
         parameters: [instanceIdPathParameter, permissionRequestIdPathParameter],
         requestBody: jsonBody("DecidePermissionBody"),
         responses: {
-          "200": jsonResponse("Terminal command outcome.", "PermissionCommandResult"),
+          "202": jsonResponse("Command accepted for best-effort delivery.", "CommandAccepted"),
           "400": errorResponse("Validation failed."),
           "401": errorResponse("Missing or invalid access token."),
           "404": errorResponse(
@@ -471,9 +469,9 @@ const document = {
           "Returns the in-memory outcome correlation for a command submitted by " +
           "the authenticated account, keyed by the client-generated commandId. " +
           "The outcome is body-free: it carries only correlation and status " +
-          "metadata, never the question answers or permission decision. A client " +
-          "timeout should query the same commandId to distinguish accepted, " +
-          "confirmed, stale, and result_unknown before resubmitting.",
+          "metadata, never the question answers or permission decision. This is " +
+          "an optional diagnostic surface; successful best-effort submissions " +
+          "do not wait for it.",
         parameters: [commandIdPathParameter],
         responses: {
           "200": jsonResponse("Body-free command outcome.", "CommandOutcome"),
@@ -571,6 +569,7 @@ const document = {
     },
     schemas: {
       AnswerQuestionBody: answerQuestionBodySchema,
+      CommandAccepted: commandAcceptedSchema,
       CommandOutcome: commandOutcomeSchema,
       CreateIngestKeyBody: createIngestKeyBodySchema,
       CreateIngestKeyResponse: createIngestKeyResponseSchema,
@@ -587,11 +586,9 @@ const document = {
       NotifyEvent: notifyEventSchema,
       PendingInteraction: pendingInteractionSchema,
       PendingSnapshot: pendingSnapshotSchema,
-      PermissionCommandResult: permissionCommandResultSchema,
       PluginControlClientMessage: pluginControlClientMessageSchema,
       PluginControlServerMessage: pluginControlServerMessageSchema,
       PatchDeviceBody: patchDeviceBodySchema,
-      QuestionCommandResult: questionCommandResultSchema,
       RefreshBody: refreshBodySchema,
       RegisterBody: registerBodySchema,
       RegisterDeviceBody: registerDeviceBodySchema,

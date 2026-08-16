@@ -1,4 +1,4 @@
-import 'package:client/auth/auth_controller.dart';
+import 'package:client/config/server_config.dart';
 import 'package:client/config/app_config.dart';
 import 'package:client/ui/plugin_setup_page.dart';
 import 'package:flutter/material.dart';

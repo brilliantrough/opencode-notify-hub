@@ -4,6 +4,7 @@ import 'dart:ui' show AppExitResponse;
 import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
 import 'package:client/bootstrap.dart';
+import 'package:client/config/server_config.dart';
 import 'package:client/devices/device_identity.dart';
 import 'package:client/fcm/fcm_service.dart';
 import 'package:client/notifications/notification_service.dart';
@@ -33,6 +34,25 @@ class FakeNotificationService implements NotificationService {
 }
 
 void main() {
+  test('bootstrap restores the persisted server selection', () async {
+    SharedPreferences.setMockInitialValues({
+      SharedPreferencesServerConfigStore.preferenceKey:
+          'https://gateway.saved.example',
+    });
+    final bootstrap = await AppBootstrap.initialize(
+      platform: ClientPlatform.linux,
+      notificationService: FakeNotificationService(),
+      initDesktopWindowing: false,
+    );
+    final container = ProviderContainer(overrides: bootstrap.overrides);
+    addTearDown(container.dispose);
+
+    expect(
+      container.read(serverConfigProvider).gatewayHttpBase,
+      'https://gateway.saved.example',
+    );
+  });
+
   group('realtimeForegroundFor', () {
     const cases = {
       AppLifecycleState.resumed: true,
@@ -123,9 +143,9 @@ void main() {
     );
   });
 
-  test(
-    'desktop attach keeps tray event listeners alive until shutdown',
-    () async {
+  testWidgets(
+    'desktop attach initializes close-to-tray only after the first frame',
+    (tester) async {
       TestWidgetsFlutterBinding.ensureInitialized();
       SharedPreferences.setMockInitialValues({});
       const trayChannel = MethodChannel('tray_manager');
@@ -133,7 +153,11 @@ void main() {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(trayChannel, (_) async => true);
-      messenger.setMockMethodCallHandler(windowChannel, (_) async => true);
+      final windowCalls = <String>[];
+      messenger.setMockMethodCallHandler(windowChannel, (call) async {
+        windowCalls.add(call.method);
+        return true;
+      });
       addTearDown(() {
         messenger.setMockMethodCallHandler(trayChannel, null);
         messenger.setMockMethodCallHandler(windowChannel, null);
@@ -145,8 +169,14 @@ void main() {
       final container = ProviderContainer(overrides: bootstrap.overrides);
 
       bootstrap.attach(container);
-      await pumpEventQueue();
 
+      expect(windowCalls, isNot(contains('setPreventClose')));
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump();
+
+      expect(windowCalls, contains('setPreventClose'));
       expect(trayManager.hasListeners, isTrue);
 
       await bootstrap.shutdown();
@@ -154,7 +184,9 @@ void main() {
     },
   );
 
-  test('desktop app-exit requests keep tray listeners alive', () async {
+  testWidgets('desktop app-exit requests keep tray listeners alive', (
+    tester,
+  ) async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
     const trayChannel = MethodChannel('tray_manager');
@@ -177,7 +209,9 @@ void main() {
     );
     final container = ProviderContainer(overrides: bootstrap.overrides);
     bootstrap.attach(container);
-    await pumpEventQueue();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump();
 
     final response = await WidgetsBinding.instance.handleRequestAppExit();
 

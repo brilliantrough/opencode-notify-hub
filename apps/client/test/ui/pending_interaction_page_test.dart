@@ -103,18 +103,20 @@ class ScriptedAnswerSender {
     ({
       String instanceId,
       String requestId,
+      String sessionId,
       String commandId,
       List<List<String>> answers,
     })
   >
   received = [];
   Completer<QuestionAnswerResult>? gate;
-  QuestionAnswerOutcome outcome = QuestionAnswerOutcome.confirmed;
+  QuestionAnswerOutcome outcome = QuestionAnswerOutcome.accepted;
   Object? throwError;
 
   Future<QuestionAnswerResult> call({
     required String instanceId,
     required String requestId,
+    required String sessionId,
     required String commandId,
     required List<List<String>> answers,
   }) async {
@@ -122,6 +124,7 @@ class ScriptedAnswerSender {
     received.add((
       instanceId: instanceId,
       requestId: requestId,
+      sessionId: sessionId,
       commandId: commandId,
       answers: answers,
     ));
@@ -143,18 +146,20 @@ class ScriptedDecisionSender {
     ({
       String instanceId,
       String requestId,
+      String sessionId,
       String commandId,
       PermissionDecision decision,
     })
   >
   received = [];
   Completer<PermissionDecisionResult>? gate;
-  PermissionDecisionOutcome outcome = PermissionDecisionOutcome.confirmed;
+  PermissionDecisionOutcome outcome = PermissionDecisionOutcome.accepted;
   Object? throwError;
 
   Future<PermissionDecisionResult> call({
     required String instanceId,
     required String requestId,
+    required String sessionId,
     required String commandId,
     required PermissionDecision decision,
   }) async {
@@ -162,6 +167,7 @@ class ScriptedDecisionSender {
     received.add((
       instanceId: instanceId,
       requestId: requestId,
+      sessionId: sessionId,
       commandId: commandId,
       decision: decision,
     ));
@@ -461,6 +467,25 @@ void main() {
 
     expect(find.textContaining('已确认'), findsOneWidget);
     expect(sender.calls, 1);
+  });
+
+  testWidgets('accepted shows the sent banner, forwards the session, and locks '
+      'the form', (tester) async {
+    final sender = ScriptedAnswerSender()
+      ..outcome = QuestionAnswerOutcome.accepted;
+    await pumpPage(tester, interaction: question(), sender: sender.call);
+
+    await answerEverything(tester);
+    await tester.tap(find.byKey(const ValueKey('submit-answer')));
+    await tester.pumpAndSettle();
+
+    expect(sender.received.single.sessionId, 'ses-1');
+    expect(find.text('回答已发送。'), findsOneWidget);
+    expect(submitEnabled(tester), isFalse);
+    final custom = tester.widget<TextField>(
+      find.byKey(const ValueKey('question-0-custom')),
+    );
+    expect(custom.enabled, isFalse);
   });
 
   for (final scenario in [
@@ -829,6 +854,27 @@ void main() {
     expect(sender.calls, 1);
     expect(sender.received.single.decision, PermissionDecision.reject);
     expect(find.textContaining('已确认'), findsOneWidget);
+  });
+
+  testWidgets('accepted shows the sent banner, forwards the session, and locks '
+      'the actions', (tester) async {
+    final sender = ScriptedDecisionSender()
+      ..outcome = PermissionDecisionOutcome.accepted;
+    await pumpPage(
+      tester,
+      interaction: permission(),
+      sender: ScriptedAnswerSender().call,
+      decisionSender: sender.call,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('permission-allow-once')));
+    await tester.pumpAndSettle();
+
+    expect(sender.received.single.sessionId, 'ses-2');
+    expect(find.text('权限决定已发送。'), findsOneWidget);
+    expect(allowOnceEnabled(tester), isFalse);
+    expect(rejectEnabled(tester), isFalse);
+    expect(alwaysEnabled(tester), isFalse);
   });
 
   testWidgets(

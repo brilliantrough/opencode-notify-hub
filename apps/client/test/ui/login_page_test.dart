@@ -1,10 +1,12 @@
 import 'package:client/app.dart';
 import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
+import 'package:client/config/server_config.dart';
 import 'package:client/realtime/ws_client.dart';
 import 'package:client/ui/home_page.dart';
 import 'package:client/ui/login_page.dart';
 import 'package:client/ui/register_page.dart';
+import 'package:client/ui/server_settings_dialog.dart';
 import 'package:client/ui/verify_email_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -71,12 +73,41 @@ void main() {
     expect(submitButton(tester).onPressed, isNotNull);
   });
 
+  testWidgets('server selector changes the persisted login origin', (
+    tester,
+  ) async {
+    final store = MemoryServerConfigStore('https://old.example.com');
+    await pumpLogin(
+      tester,
+      extraOverrides: [serverConfigStoreProvider.overrideWithValue(store)],
+    );
+
+    expect(find.text('https://old.example.com'), findsOneWidget);
+    await tester.tap(find.byKey(LoginPage.serverKey));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(ServerSettingsDialog.addressFieldKey),
+      'https://new.example.com',
+    );
+    await tester.tap(find.byKey(ServerSettingsDialog.saveKey));
+    await tester.pumpAndSettle();
+
+    expect(store.read(), 'https://new.example.com');
+    expect(find.text('https://new.example.com'), findsOneWidget);
+  });
+
   testWidgets('tapping 登录 calls login with the entered credentials', (
     tester,
   ) async {
-    await pumpLogin(tester, extraOverrides: [
-      wsStatusProvider.overrideWith((ref) => Stream.value(WsStatus.connected)),
-    ], home: const AuthGate());
+    await pumpLogin(
+      tester,
+      extraOverrides: [
+        wsStatusProvider.overrideWith(
+          (ref) => Stream.value(WsStatus.connected),
+        ),
+      ],
+      home: const AuthGate(),
+    );
 
     await enterCredentials(
       tester,
@@ -86,9 +117,7 @@ void main() {
     await tester.tap(find.byKey(LoginPage.submitKey));
     await tester.pumpAndSettle();
 
-    expect(auth.logins, [
-      (email: 'user@example.com', password: 'secret1'),
-    ]);
+    expect(auth.logins, [(email: 'user@example.com', password: 'secret1')]);
   });
 
   testWidgets('401 invalid credentials shows 邮箱或密码错误', (tester) async {

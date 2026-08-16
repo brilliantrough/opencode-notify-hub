@@ -29,14 +29,9 @@ export PUB_HOSTED_URL=https://pub.flutter-io.cn
 
 ## Gateway URL
 
-The client has no runtime server picker. Set the gateway base URL at build time:
-
-```bash
---dart-define=GATEWAY_URL=https://notify.example.com
-```
-
-Omitting it compiles the documentation placeholder
-`https://notify.example.com`, which is not a running service.
+The client selects and persists its gateway at runtime. The login page and
+settings page both expose the current server. Builds are portable between
+servers and require no gateway-specific `--dart-define`.
 
 ## Linux
 
@@ -54,8 +49,7 @@ Build a release bundle:
 
 ```bash
 cd apps/client
-flutter build linux --release \
-  --dart-define=GATEWAY_URL=https://notify.example.com
+flutter build linux --release
 ```
 
 The complete portable bundle is
@@ -68,8 +62,7 @@ On a Windows host with Visual Studio and Flutter desktop support enabled:
 
 ```powershell
 cd apps/client
-flutter build windows --release `
-  --dart-define=GATEWAY_URL=https://notify.example.com
+flutter build windows --release
 ```
 
 Distribute the complete `build\windows\x64\runner\Release\` directory. Test the
@@ -82,8 +75,7 @@ on every supported Windows version before publishing it.
 
 ```bash
 cd apps/client
-flutter build apk --debug \
-  --dart-define=GATEWAY_URL=https://notify.example.com
+flutter build apk --debug
 ```
 
 Output: `build/app/outputs/flutter-apk/app-debug.apk`.
@@ -113,10 +105,8 @@ AAB signature.
 Typical release commands after signing is configured:
 
 ```bash
-flutter build apk --release \
-  --dart-define=GATEWAY_URL=https://notify.example.com
-flutter build appbundle --release \
-  --dart-define=GATEWAY_URL=https://notify.example.com
+flutter build apk --release
+flutter build appbundle --release
 ```
 
 ## Verification

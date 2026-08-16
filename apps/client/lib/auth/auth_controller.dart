@@ -4,7 +4,7 @@ import 'package:notify_api/notify_api.dart';
 
 import '../api/api_client.dart';
 import '../api/auth_interceptor.dart';
-import '../config/app_config.dart';
+import '../config/server_config.dart';
 import 'auth_state.dart';
 import 'credentials_store.dart';
 import 'token_refresher.dart';
@@ -51,8 +51,6 @@ class AuthUnknownFailure extends AuthFailure {
   const AuthUnknownFailure([super.message = 'Unexpected authentication error']);
 }
 
-final appConfigProvider = Provider<AppConfig>((ref) => AppConfig());
-
 final credentialsStoreProvider = Provider<CredentialsStore>(
   (ref) => SecureCredentialsStore(),
 );
@@ -88,7 +86,12 @@ final authApiProvider = Provider<AuthApi>(
 /// depending on [apiClientProvider] (which consumes this provider).
 final tokenRefresherProvider = Provider<TokenRefresher>((ref) {
   final dio = Dio(
-    BaseOptions(baseUrl: ref.watch(appConfigProvider).gatewayHttpBase),
+    BaseOptions(
+      baseUrl: ref.watch(appConfigProvider).gatewayHttpBase,
+      connectTimeout: gatewayConnectTimeout,
+      sendTimeout: gatewaySendTimeout,
+      receiveTimeout: gatewayReceiveTimeout,
+    ),
   );
   ref.onDispose(dio.close);
   return DioTokenRefresher(
@@ -135,30 +138,29 @@ class AuthController extends Notifier<AuthState> {
   ///
   /// Without stored credentials, or when the refresh token was rejected
   /// (and cleared by the [TokenRefresher]), the state becomes
-  /// [Unauthenticated]. A refresh failure (network or otherwise) also yields
-  /// [Unauthenticated], but the stored credentials survive, so a later
-  /// bootstrap can still recover the session. Every failure path lands on a
-  /// terminal state: bootstrap must never leave the app wedged on the
-  /// [AuthUnknown] loading spinner, so errors of any kind — not just
-  /// [DioException] — are caught here.
+  /// [Unauthenticated]. A local store or transient refresh failure becomes
+  /// [AuthRestoreFailed] and preserves credentials for a retry. Every failure
+  /// path lands on a terminal state, so errors of any kind are caught here.
   Future<void> bootstrap() async {
+    state = const AuthUnknown();
     final Credentials? credentials;
     try {
       credentials = await _store.read();
     } catch (_) {
       // Unreadable store (e.g. platform keychain unavailable).
-      state = const Unauthenticated();
+      state = const AuthRestoreFailed();
       return;
     }
     if (credentials == null) {
       state = const Unauthenticated();
       return;
     }
-    String? token;
+    final String? token;
     try {
       token = await _refresher.refresh();
     } catch (_) {
-      token = null;
+      state = const AuthRestoreFailed();
+      return;
     }
     if (token == null) {
       state = const Unauthenticated();
@@ -166,6 +168,18 @@ class AuthController extends Notifier<AuthState> {
     }
     _tokenHolder.accessToken = token;
     state = Authenticated(accessToken: token, email: credentials.accountEmail);
+  }
+
+  /// Discards a failed stored-session restore and opens the normal login flow.
+  Future<void> abandonSessionRestore() async {
+    try {
+      await _store.clear();
+    } catch (_) {
+      // Login must remain reachable even when the platform store is unhealthy.
+    }
+    _tokenHolder.accessToken = null;
+    _pendingPassword = null;
+    state = const Unauthenticated();
   }
 
   /// Registers a new account. On success the state becomes

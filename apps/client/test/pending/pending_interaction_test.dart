@@ -2,7 +2,7 @@ import 'package:client/pending/pending_answer.dart';
 import 'package:client/pending/pending_interaction.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:notify_api/notify_api.dart'
-    show PendingSnapshot, QuestionCommandResultStatusEnum, standardSerializers;
+    show PendingSnapshot, standardSerializers;
 
 const orderedQuestions = [
   PendingQuestionItem(
@@ -29,31 +29,6 @@ const orderedQuestions = [
 ];
 
 void main() {
-  test('maps question answer outcomes from the generated statuses', () {
-    expect(
-      questionAnswerOutcomeFromStatus(
-        QuestionCommandResultStatusEnum.confirmed,
-      ),
-      QuestionAnswerOutcome.confirmed,
-    );
-    expect(
-      questionAnswerOutcomeFromStatus(QuestionCommandResultStatusEnum.stale),
-      QuestionAnswerOutcome.stale,
-    );
-    expect(
-      questionAnswerOutcomeFromStatus(
-        QuestionCommandResultStatusEnum.upstreamError,
-      ),
-      QuestionAnswerOutcome.upstreamError,
-    );
-    expect(
-      questionAnswerOutcomeFromStatus(
-        QuestionCommandResultStatusEnum.resultUnknown,
-      ),
-      QuestionAnswerOutcome.resultUnknown,
-    );
-  });
-
   group('composeQuestionAnswers', () {
     test('builds an ordered answer set for every question', () {
       final answers = composeQuestionAnswers(

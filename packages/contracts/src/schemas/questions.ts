@@ -29,19 +29,10 @@ export const questionCommandStatusSchema = {
 export const answerQuestionBodySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["commandId", "answers"],
+  required: ["commandId", "sessionId", "answers"],
   properties: {
     commandId: { type: "string", format: "uuid" },
+    sessionId: { type: "string", minLength: 1 },
     answers: questionAnswersSchema,
-  },
-} as const satisfies JSONSchema;
-
-export const questionCommandResultSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["commandId", "status"],
-  properties: {
-    commandId: { type: "string", format: "uuid" },
-    status: questionCommandStatusSchema,
   },
 } as const satisfies JSONSchema;

@@ -23,7 +23,8 @@ environment is a Linux OpenCode host and Linux desktop client.
 - automatic synchronization on client start, login recovery, and Plugin
   reconnect;
 - read-only last-known requests while an instance is offline;
-- explicit accepted, confirmed, failed, stale, and result-unknown outcomes.
+- explicit sent, rejected, and result-unknown client submission states, with
+  body-free terminal outcomes retained only for diagnostics.
 
 ## Not Included
 
@@ -164,12 +165,16 @@ elsewhere and returns to the workbench.
 ## Command Semantics
 
 - Every submission has a client-generated `commandId`.
-- Gateway acceptance is not success; only an OpenCode reply confirms success.
-- The first OpenCode-confirmed answer wins across concurrent clients.
-- Other clients refresh and report that another device handled the request.
-- A timeout means result unknown, not failed.
-- Unknown results are queried by the same `commandId` and reconciled against a
-  fresh pending snapshot. The client does not automatically submit again.
+- Every submission carries the `sessionId` captured with the original pending
+  interaction, so the Plugin can call the V2 session-scoped reply directly.
+- The Gateway returns `202 accepted` as soon as it writes the command to the
+  owning Plugin connection. This means sent, not OpenCode-confirmed.
+- The client optimistically removes an accepted request and does not query the
+  terminal outcome or reconcile a fresh pending snapshot.
+- OpenCode remains the final arbiter. If somebody already handled the request,
+  the direct reply is stale and becomes a no-op.
+- The Gateway retains body-free terminal outcomes for diagnostics only.
+- No offline queue is introduced and clients do not automatically resubmit.
 
 ## Identity And Privacy
 
@@ -226,8 +231,9 @@ harness source were removed after recording these results.
   ordinary notifications.
 - Single, multi, multi-question, and custom answers resume the correct session.
 - Permission once, confirmed always, and reject resume the correct session.
-- Two clients racing the same request produce one success and one handled-elsewhere
-  result.
-- Client restart, login refresh, Plugin reconnect, offline display, stale 404,
-  and result-unknown timeout converge to the OpenCode pending lists.
+- Two clients racing the same request may both receive `accepted`; OpenCode
+  applies the first valid reply and treats the later reply as stale.
+- Client restart, login refresh, Plugin reconnect, offline display, and stale
+  local requests remain best-effort projections rather than a consistency
+  protocol.
 - Interaction bodies are absent from the database and production logs.

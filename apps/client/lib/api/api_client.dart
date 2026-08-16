@@ -6,6 +6,10 @@ import '../auth/token_refresher.dart';
 import '../config/app_config.dart';
 import 'auth_interceptor.dart';
 
+const gatewayConnectTimeout = Duration(seconds: 10);
+const gatewaySendTimeout = Duration(seconds: 15);
+const gatewayReceiveTimeout = Duration(seconds: 20);
+
 /// The app's HTTP client bundle: a configured [Dio], the generated gateway
 /// API, and the session's access-token holder.
 class ApiClient {
@@ -36,7 +40,14 @@ ApiClient buildApiClient({
   AccessTokenHolder? accessTokenHolder,
   TokenRefresher? tokenRefresher,
 }) {
-  final dio = Dio(BaseOptions(baseUrl: config.gatewayHttpBase));
+  final dio = Dio(
+    BaseOptions(
+      baseUrl: config.gatewayHttpBase,
+      connectTimeout: gatewayConnectTimeout,
+      sendTimeout: gatewaySendTimeout,
+      receiveTimeout: gatewayReceiveTimeout,
+    ),
+  );
   // `interceptors: const []` keeps the generated default auth interceptors
   // off; bearer attachment is handled by [AuthInterceptor] below.
   final notifyApi = NotifyApi(dio: dio, interceptors: const []);

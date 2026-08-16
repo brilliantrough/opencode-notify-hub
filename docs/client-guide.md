@@ -6,23 +6,22 @@ Android are supported; signed public binaries are not available during the
 pre-release phase, so use the build instructions in
 [client-setup.md](client-setup.md).
 
-## Build-time gateway selection
+## Server selection
 
-The gateway URL is compiled into the app. Always pass the public HTTPS base URL
-when building or running:
-
-```bash
-flutter run -d linux \
-  --dart-define=GATEWAY_URL=https://notify.example.com
-```
+The client stores its gateway URL locally. Select the server on the login page,
+or change it later from **Settings > Server**. Changing servers signs out the
+current account and returns to the login and registration flow for the selected
+server.
 
 Do not include `/v1`, `/v1/ws`, a query, or a fragment. Production gateways
-must use HTTPS so the client derives a secure `wss://` WebSocket URL.
+must use HTTPS so the client derives a secure `wss://` WebSocket URL. Loopback
+development servers may use HTTP.
 
 ## First run
 
 1. Start the client.
-2. Select **Register**, enter an email address and password, and submit.
+2. Confirm or edit the server, then select **Register**, enter an email address
+   and password, and submit.
 3. Enter the eight-character verification code sent by the gateway's SMTP
    service.
 4. After authentication, the client registers the current device and opens its
@@ -99,8 +98,9 @@ the old app and loses local credentials/history.
 
 ### Login or verification fails
 
-- Confirm the compiled `GATEWAY_URL` is correct by rebuilding the client.
-- Check `https://notify.example.com/health/ready`.
+- Confirm the server shown on the login page is correct; edit it there when
+  necessary.
+- Check the selected server's `/health/ready` endpoint.
 - Ask the gateway operator to verify SMTP delivery and gateway logs.
 
 ### No desktop popup

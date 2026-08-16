@@ -8,6 +8,7 @@ import 'package:client/auth/auth_state.dart';
 import 'package:client/auth/credentials_store.dart';
 import 'package:client/bootstrap.dart';
 import 'package:client/config/app_config.dart';
+import 'package:client/config/server_config.dart';
 import 'package:client/history/notification_history.dart';
 import 'package:client/ingest_keys/ingest_keys_controller.dart';
 import 'package:client/notifications/notification_service.dart';

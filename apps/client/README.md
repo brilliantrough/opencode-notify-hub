@@ -11,12 +11,14 @@ Start with the repository documentation:
 - [Development guide](../../docs/development.md)
 - [Testing guide](../../docs/testing.md)
 
-The gateway URL is a required build-time choice for real use:
+Run the client and select the server from the login page or settings:
 
 ```bash
-flutter run -d linux \
-  --dart-define=GATEWAY_URL=https://notify.example.com
+flutter run -d linux
 ```
+
+The selected HTTPS origin is persisted locally. Changing it signs out the
+current account so credentials are never reused against another server.
 
 The checked-in Android Firebase configuration is a placeholder. Do not publish
 an Android artifact until Firebase and release signing are configured as

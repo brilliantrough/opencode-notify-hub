@@ -263,14 +263,6 @@ function defaultQuestionList(): Response {
   );
 }
 
-/** An empty V2 pending-question list (the request was already resolved). */
-function emptyQuestionList(): Response {
-  return new Response(
-    JSON.stringify({ location: { directory: "/home/dev/project" }, data: [] }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
-  );
-}
-
 /** OpenCode's real reply body is JSON `true`; keep the stub's content type honest. */
 function defaultReply(): Response {
   return new Response("true", { status: 202, headers: { "Content-Type": "application/json" } });
@@ -315,6 +307,7 @@ function driveAnswerCommand(socket: CapturingSocket): void {
       type: "question_answer_command",
       commandId: ANSWER_COMMAND_ID,
       requestId: "qst_req1",
+      sessionID: "ses_1",
       answers: [["Postgres"], ["rust", "go", "Custom: polyglot"]],
     }),
   });
@@ -360,14 +353,6 @@ function defaultPermissionList(): Response {
   );
 }
 
-/** An empty V2 pending-permission list (the request was already resolved). */
-function emptyPermissionList(): Response {
-  return new Response(
-    JSON.stringify({ location: { directory: "/home/dev/project" }, data: [] }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
-  );
-}
-
 const DECISION_COMMAND_ID = "2a4b8d9c-3e5f-4a6b-9c7d-1e2f3a4b5c6d";
 
 /** Drive an open control socket into registration and submit one decision command. */
@@ -385,6 +370,7 @@ function driveDecisionCommand(socket: CapturingSocket, decision = "once"): void 
       type: "permission_decide_command",
       commandId: DECISION_COMMAND_ID,
       requestId: "per_req1",
+      sessionID: "ses_1",
       decision,
     }),
   });
@@ -1111,13 +1097,12 @@ describe("SessionNotifyPlugin", () => {
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
-    // One list read (to confirm the request is pending) then one reply.
+    // The event-carried session id goes straight to the session reply.
     const listCall = selfCalls.find((call) => call.url.includes("/api/question/request"));
     const replyCall = selfCalls.find(
       (call) => call.url.includes("/question/") && call.url.includes("/reply"),
     );
-    expect(listCall).toBeTruthy();
-    expect(listCall!.url).toContain("location%5Bdirectory%5D=");
+    expect(listCall).toBeUndefined();
     expect(replyCall).toBeTruthy();
     expect(replyCall!.url).toContain("/api/session/ses_1/question/qst_req1/reply");
     // The answers travel through the session-scoped reply body.
@@ -1171,7 +1156,10 @@ describe("SessionNotifyPlugin", () => {
   });
 
   it("reports stale when OpenCode already resolved the request", async () => {
-    const { calls, fetchImpl } = makeAnswerFetch({ list: emptyQuestionList });
+    const { calls, fetchImpl } = makeAnswerFetch({
+      reply: () =>
+        new Response(JSON.stringify({ _tag: "QuestionNotFoundError" }), { status: 404 }),
+    });
     vi.stubGlobal("fetch", fetchImpl);
     const { sockets, WebSocketClass } = makeCapturedSockets();
     vi.stubGlobal("WebSocket", WebSocketClass);
@@ -1183,9 +1171,9 @@ describe("SessionNotifyPlugin", () => {
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
-    // The list confirmed the request is gone; no reply call is ever made.
+    // The direct reply is OpenCode's authority check; a 404 is a stale no-op.
     expect(selfCalls).toHaveLength(1);
-    expect(selfCalls[0].url).toContain("/api/question/request");
+    expect(selfCalls[0].url).toContain("/api/session/ses_1/question/qst_req1/reply");
     const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
     expect(frames).toContainEqual(
       expect.objectContaining({
@@ -1250,13 +1238,12 @@ describe("SessionNotifyPlugin", () => {
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
-    // One list read (to confirm the request is pending) then one reply.
+    // The event-carried session id goes straight to the session reply.
     const listCall = selfCalls.find((call) => call.url.includes("/api/permission/request"));
     const replyCall = selfCalls.find(
       (call) => call.url.includes("/permission/") && call.url.includes("/reply"),
     );
-    expect(listCall).toBeTruthy();
-    expect(listCall!.url).toContain("location%5Bdirectory%5D=");
+    expect(listCall).toBeUndefined();
     expect(replyCall).toBeTruthy();
     expect(replyCall!.url).toContain("/api/session/ses_1/permission/per_req1/reply");
     // The decision travels through the reply body; no reject/respond
@@ -1309,7 +1296,10 @@ describe("SessionNotifyPlugin", () => {
   });
 
   it("reports stale when OpenCode already resolved the permission request", async () => {
-    const { calls, fetchImpl } = makePermissionFetch({ list: emptyPermissionList });
+    const { calls, fetchImpl } = makePermissionFetch({
+      reply: () =>
+        new Response(JSON.stringify({ _tag: "PermissionNotFoundError" }), { status: 404 }),
+    });
     vi.stubGlobal("fetch", fetchImpl);
     const { sockets, WebSocketClass } = makeCapturedSockets();
     vi.stubGlobal("WebSocket", WebSocketClass);
@@ -1321,9 +1311,9 @@ describe("SessionNotifyPlugin", () => {
     await settle();
 
     const selfCalls = calls.filter((call) => call.url.startsWith("http://127.0.0.1"));
-    // The list confirmed the request is gone; no reply call is ever made.
+    // The direct reply is OpenCode's authority check; a 404 is a stale no-op.
     expect(selfCalls).toHaveLength(1);
-    expect(selfCalls[0].url).toContain("/api/permission/request");
+    expect(selfCalls[0].url).toContain("/api/session/ses_1/permission/per_req1/reply");
     const frames = sockets[0].sent.map((frame) => JSON.parse(frame));
     expect(frames).toContainEqual(
       expect.objectContaining({

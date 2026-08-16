@@ -52,14 +52,13 @@ clone, build, run, test, and submit Windows client changes.
    own clone or `git worktree`; agents never share a mutable checkout.
 3. Record a sanitized `flutter doctor -v` result and exact bootstrap commands in
    the Windows section of `docs/client-setup.md`.
-4. Build the first unsigned Windows release bundle with the staging gateway:
+4. Build the first unsigned, server-portable Windows release bundle:
 
    ```powershell
    flutter pub get
    flutter analyze
    flutter test
-   flutter build windows --release `
-     --dart-define=GATEWAY_URL=https://notify.example.com
+   flutter build windows --release
    ```
 
 5. Add a `windows-latest` CI job that at minimum resolves dependencies, runs

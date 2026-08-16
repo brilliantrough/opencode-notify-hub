@@ -11,3 +11,9 @@ The repository uses the five canonical engineering-skill triage labels. See `doc
 ### Domain docs
 
 This is a single-context repository with a root glossary and root architectural decisions. See `docs/agents/domain.md`.
+
+### Windows client work
+
+Before changing or validating the Windows client, read
+`docs/windows-agent-handoff.md` and follow its branch reconciliation, test, and
+manual acceptance sequence.

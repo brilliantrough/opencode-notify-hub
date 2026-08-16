@@ -6,10 +6,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'auth/auth_controller.dart';
 import 'auth/auth_state.dart';
+import 'config/server_config.dart';
 import 'devices/device_identity.dart';
 import 'devices/devices_controller.dart';
 import 'fcm/fcm_service.dart';
@@ -95,6 +97,15 @@ class AppBootstrap {
   }) async {
     final resolvedPlatform = platform ?? currentPlatform();
     final overrides = <Override>[];
+    final preferences = await SharedPreferences.getInstance();
+    overrides.add(
+      serverConfigStoreProvider.overrideWithValue(
+        SharedPreferencesServerConfigStore(preferences),
+      ),
+    );
+    overrides.add(
+      sharedPreferencesProvider.overrideWithValue(Future.value(preferences)),
+    );
 
     final NotificationService service;
     switch (resolvedPlatform) {
@@ -237,18 +248,28 @@ class AppBootstrap {
           unawaited(_refreshTrayMenu(container));
         }).close,
       );
-      unawaited(() async {
-        try {
-          await container.read(trayControllerProvider).init();
-        } catch (error, stackTrace) {
-          log(
-            'tray initialization failed',
-            name: 'AppBootstrap',
-            error: error,
-            stackTrace: stackTrace,
-          );
-        }
-      }());
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Let the native runner map the first Flutter frame before asking
+        // window_manager to install close prevention. On Linux, doing this
+        // before the window is mapped waits for the plugin's 15s timeout.
+        unawaited(
+          Future<void>.delayed(Duration.zero, () async {
+            if (_container != container) {
+              return;
+            }
+            try {
+              await container.read(trayControllerProvider).init();
+            } catch (error, stackTrace) {
+              log(
+                'tray initialization failed',
+                name: 'AppBootstrap',
+                error: error,
+                stackTrace: stackTrace,
+              );
+            }
+          }),
+        );
+      });
     }
   }
 

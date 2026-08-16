@@ -92,10 +92,12 @@ class FakeWebSocketSink implements WebSocketSink {
 
 class FakeWebSocketChannel extends StreamChannelMixin<Object?>
     implements WebSocketChannel {
-  FakeWebSocketChannel({Object? readyError})
-    : _ready = readyError == null
-          ? Future<void>.value()
-          : Future<void>.error(readyError);
+  FakeWebSocketChannel({Object? readyError, Future<void>? ready})
+    : _ready =
+          ready ??
+          (readyError == null
+              ? Future<void>.value()
+              : Future<void>.error(readyError));
 
   final StreamController<Object?> _incoming = StreamController<Object?>();
   final Future<void> _ready;
@@ -138,14 +140,22 @@ class FakeConnector {
   final List<ConnectorCall> calls = [];
   final List<FakeWebSocketChannel> channels = [];
   final List<Object> readyErrors = [];
+  int pendingReadyCount = 0;
 
   void failNextReady(Object error) => readyErrors.add(error);
 
+  void hangNextReady() => pendingReadyCount++;
+
   WebSocketChannel call(Uri uri, Map<String, dynamic> headers) {
     calls.add(ConnectorCall(uri, headers));
-    final channel = FakeWebSocketChannel(
-      readyError: readyErrors.isEmpty ? null : readyErrors.removeAt(0),
-    );
+    final channel = pendingReadyCount > 0
+        ? FakeWebSocketChannel(ready: Completer<void>().future)
+        : FakeWebSocketChannel(
+            readyError: readyErrors.isEmpty ? null : readyErrors.removeAt(0),
+          );
+    if (pendingReadyCount > 0) {
+      pendingReadyCount--;
+    }
     channels.add(channel);
     return channel;
   }
@@ -172,13 +182,17 @@ void main() {
   late List<NotifyEvent> events;
   late List<List<OpenCodeInstancePresence>> presences;
 
-  GatewayWsClient buildClient({double jitter = 0.5}) {
+  GatewayWsClient buildClient({
+    double jitter = 0.5,
+    Duration connectTimeout = const Duration(seconds: 10),
+  }) {
     final client = GatewayWsClient(
       config: AppConfig(gatewayHttpBase: 'https://gateway.example.com'),
       tokenHolder: holder,
       refresher: refresher,
       connector: connector.call,
       random: FixedRandom(jitter),
+      connectTimeout: connectTimeout,
     );
     client.status.listen(statuses.add);
     client.events.listen(events.add);
@@ -211,6 +225,28 @@ void main() {
         );
         expect(connector.calls.single.headers['Authorization'], 'Bearer tok-1');
         expect(statuses, [WsStatus.connecting, WsStatus.connected]);
+      });
+    });
+
+    test('times out a hung upgrade and retries through backoff', () {
+      fakeAsync((async) {
+        holder.accessToken = 'tok-1';
+        connector.hangNextReady();
+        final client = buildClient(connectTimeout: const Duration(seconds: 1));
+
+        client.connect();
+        async.flushMicrotasks();
+        expect(connector.calls, hasLength(1));
+        expect(connector.channels.single.sink.closed, isFalse);
+
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(connector.channels.first.sink.closed, isTrue);
+
+        async.elapse(const Duration(milliseconds: 500));
+        async.flushMicrotasks();
+        expect(connector.calls, hasLength(2));
+        expect(statuses.last, WsStatus.connected);
       });
     });
 

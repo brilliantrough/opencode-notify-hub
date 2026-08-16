@@ -1,15 +1,14 @@
-import 'package:notify_api/notify_api.dart' as api;
-
 import 'pending_interaction.dart';
 
-/// Terminal outcome OpenCode reports for a submitted question answer.
+/// Gateway acceptance or a legacy terminal outcome for a submitted answer.
 ///
-/// Only [confirmed] lets the client drop the request from the workbench;
+/// [accepted] removes the request optimistically; [confirmed] remains a
+/// supported legacy outcome. Otherwise,
 /// [stale] and [upstreamError] mean the authoritative snapshot should be
 /// re-read, while [resultUnknown] keeps the request visible and pending.
-enum QuestionAnswerOutcome { confirmed, stale, upstreamError, resultUnknown }
+enum QuestionAnswerOutcome { accepted, confirmed, stale, upstreamError, resultUnknown }
 
-/// The gateway's correlated answer reply, mapped from the generated contract.
+/// The Gateway's answer acknowledgement mapped into the client domain.
 class QuestionAnswerResult {
   const QuestionAnswerResult({required this.commandId, required this.outcome});
 
@@ -24,6 +23,9 @@ enum QuestionSubmissionState {
 
   /// The answer command is in flight; gateway acceptance is not yet known.
   submitting,
+
+  /// The Gateway accepted the command for best-effort delivery.
+  sent,
 
   /// OpenCode confirmed the answers; the request leaves the workbench.
   confirmed,
@@ -43,22 +45,6 @@ enum QuestionSubmissionState {
 
   /// The gateway rejected the command (client/4xx error).
   rejected,
-}
-
-/// Maps a generated gateway status onto the domain outcome.
-QuestionAnswerOutcome questionAnswerOutcomeFromStatus(
-  api.QuestionCommandResultStatusEnum status,
-) {
-  if (status == api.QuestionCommandResultStatusEnum.confirmed) {
-    return QuestionAnswerOutcome.confirmed;
-  }
-  if (status == api.QuestionCommandResultStatusEnum.stale) {
-    return QuestionAnswerOutcome.stale;
-  }
-  if (status == api.QuestionCommandResultStatusEnum.upstreamError) {
-    return QuestionAnswerOutcome.upstreamError;
-  }
-  return QuestionAnswerOutcome.resultUnknown;
 }
 
 /// Composes the ordered `string[][]` answer set for [questions] in exact

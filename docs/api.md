@@ -117,32 +117,32 @@ OpenCode Server. The OpenAPI document defines the exact discriminated unions.
 ### Question answers
 
 `POST /v1/pending-interactions/{instanceId}/questions/{requestId}/answer`
-carries a client-generated UUID `commandId` and `answers: string[][]` — one
-non-empty entry per upstream question, in exact order. The command is routed
+carries a client-generated UUID `commandId`, the event-derived `sessionId`, and
+`answers: string[][]` — one non-empty entry per upstream question, in exact
+order. The command is routed
 only to the owning account's connected `controllable` instance whose pending
 projection contains that question; unknown or foreign instances answer `404`,
 stale or wrong-kind targets answer `409`, and a second command for the same
-request while one is in flight answers `409`. The Plugin maps the command to
-the OpenCode V2 question reply API and returns `confirmed`, `stale`, or
-`upstream_error`. A gateway timeout or disconnect returns `result_unknown`,
-which never means failure: the client must reconcile against a fresh snapshot
-instead of blindly resubmitting. Answers transit memory only and are redacted
-from logs.
+request while one is in flight answers `409`. After writing the command to the
+Plugin connection, the Gateway immediately returns `202 {commandId,
+status:"accepted"}`. This is a best-effort delivery acknowledgement, not an
+OpenCode confirmation. The Plugin calls the V2 session-scoped question reply
+directly; if the request was already handled locally, OpenCode returns stale
+and the command becomes a no-op. The client marks an accepted request sent and
+removes its local card without waiting for that terminal result. Answers transit
+memory only and are redacted from logs.
 
 ### Permission decisions
 
 `POST /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision`
-carries a client-generated UUID `commandId` and `decision: "once" | "always" |
-"reject"`. The `always` decision persists a reusable pattern in OpenCode, so
+carries a client-generated UUID `commandId`, the event-derived `sessionId`, and
+`decision: "once" | "always" | "reject"`. The `always` decision persists a
+reusable pattern in OpenCode, so
 the gateway accepts it but never constructs it: the client must have surfaced
-the exact `always` patterns first and confirmed the intent. The same
-ownership, pending-projection, in-flight, timeout, and
-`result_unknown` rules as question answers apply: the owning account's
-connected `controllable` instance only, `404` for unknown/foreign targets,
-`409` for stale/wrong-kind/in-flight commands, and correlated terminal
-statuses `confirmed | stale | upstream_error | result_unknown`. Permission
-patterns, metadata, and decisions transit memory only and are redacted from
-logs; nothing is persisted.
+the exact `always` patterns first and confirmed the intent. The same ownership,
+pending-projection, in-flight, `202 accepted`, direct V2 reply, and stale no-op
+rules as question answers apply. Permission patterns, metadata, and decisions
+transit memory only and are redacted from logs; nothing is persisted.
 
 ### Command outcomes
 
@@ -151,12 +151,11 @@ The gateway keeps a body-free, in-memory outcome record per command
 (`accepted | confirmed | stale | upstream_error | result_unknown` with the
 request/instance identity and `updatedAt` only — never answers, decisions,
 patterns, or metadata) for about ten minutes.
-`GET /v1/pending-interactions/commands/{commandId}` returns the outcome to
-the owning account and a uniform `404` for unknown, expired, or foreign
-ids. Clients use it to reconcile a `result_unknown` timeout against the same
-command id and a fresh pending snapshot instead of resubmitting. The cache
-is deliberately volatile: a gateway restart loses outcomes, and clients
-re-converge through OpenCode's authoritative pending lists.
+`GET /v1/pending-interactions/commands/{commandId}` returns the outcome to the
+owning account and a uniform `404` for unknown, expired, or foreign ids. It is
+an optional diagnostic surface; the desktop client does not wait for or
+reconcile against it after a `202 accepted` submission. The cache is
+deliberately volatile and has no bearing on delivery semantics.
 
 ## Regeneration
 

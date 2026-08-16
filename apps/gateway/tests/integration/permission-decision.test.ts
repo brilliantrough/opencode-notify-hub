@@ -2,8 +2,9 @@ import { createHmac, randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 
 import {
+  validateCommandAccepted,
+  validateCommandOutcome,
   validateErrorResponse,
-  validatePermissionCommandResult,
 } from "@notify/contracts";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -64,7 +65,7 @@ function permissionInteraction(
     machine: "spoofed-machine",
     project: "spoofed-project",
     directory: "/spoofed",
-    sessionId: "ses_2",
+    sessionId: "ses_1",
     sessionTitle: "Implement API",
     requestId,
     occurredAt: "2026-08-14T09:00:01.000Z",
@@ -332,6 +333,48 @@ describe("permission decisions", () => {
     });
   }
 
+  /** Query the body-free command-outcome correlation for one commandId. */
+  function getCommandOutcome(token: string | null, commandId: string) {
+    return app.inject({
+      method: "GET",
+      url: `/v1/pending-interactions/commands/${commandId}`,
+      headers: {
+        ...(token === null ? {} : { authorization: `Bearer ${token}` }),
+      },
+    });
+  }
+
+  /**
+   * Poll the command-outcome endpoint until it reports `status`. The POST
+   * already acknowledged without waiting, so the body-free outcome
+   * correlation is the only way to observe a terminal transition after the
+   * Plugin settles a command. Returns the validated outcome body.
+   */
+  async function expectCommandOutcome(
+    token: string,
+    commandId: string,
+    status: string,
+  ): Promise<Record<string, unknown>> {
+    const deadline = Date.now() + 2_000;
+    for (;;) {
+      const res = await getCommandOutcome(token, commandId);
+      if (res.statusCode === 200) {
+        const body = res.json() as Record<string, unknown>;
+        if (body.status === status) {
+          expect(validateCommandOutcome(body)).toBe(true);
+          expect(body.commandId).toBe(commandId);
+          return body;
+        }
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `timed out waiting for command ${commandId} outcome ${status}; last ${res.statusCode} ${res.body}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
   describe("authentication and validation", () => {
     it("rejects unauthenticated and malformed tokens with 401 UNAUTHORIZED", async () => {
       const alice = await createUser("unauth-decision@example.com");
@@ -351,7 +394,7 @@ describe("permission decisions", () => {
           token === undefined ? "" : token,
           instance.instanceId,
           "per_1",
-          { commandId: randomUUID(), decision: "once" },
+          { commandId: randomUUID(), sessionId: "ses_1", decision: "once" },
           token === undefined ? { authorization: "Token abc" } : {},
         );
         expect(res.statusCode, name).toBe(401);
@@ -369,13 +412,16 @@ describe("permission decisions", () => {
       ]);
 
       const commandId = randomUUID();
+      const sessionId = "ses_1";
       const malformed: [string, Record<string, unknown>][] = [
-        ["missing commandId", { decision: "once" }],
-        ["missing decision", { commandId }],
-        ["non-uuid commandId", { commandId: "cmd_1", decision: "once" }],
-        ["unknown decision", { commandId, decision: "allow" }],
-        ["non-string decision", { commandId, decision: 1 }],
-        ["unknown property", { commandId, decision: "once", patterns: [] }],
+        ["missing commandId", { sessionId, decision: "once" }],
+        ["missing decision", { commandId, sessionId }],
+        ["missing sessionId", { commandId, decision: "once" }],
+        ["empty sessionId", { commandId, sessionId: "", decision: "once" }],
+        ["non-uuid commandId", { commandId: "cmd_1", sessionId, decision: "once" }],
+        ["unknown decision", { commandId, sessionId, decision: "allow" }],
+        ["non-string decision", { commandId, sessionId, decision: 1 }],
+        ["unknown property", { commandId, sessionId, decision: "once", patterns: [] }],
       ];
       for (const [name, body] of malformed) {
         const res = await decidePermission(alice.token, instance.instanceId, "per_1", body);
@@ -387,7 +433,7 @@ describe("permission decisions", () => {
   });
 
   describe("happy path", () => {
-    it("routes a once decision to the owning Plugin and returns the confirmed result", async () => {
+    it("accepts after routing a once decision without waiting for the Plugin result", async () => {
       const alice = await createUser("decide-once@example.com");
       const credential = await createPluginCredential(alice.token);
       const instance = await registerPlugin(credential);
@@ -401,6 +447,7 @@ describe("permission decisions", () => {
       const command = nextMessage(instance.ws);
       const response = decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId,
+        sessionId: "ses_1",
         decision: "once",
       });
       const frame = (await command) as Record<string, unknown>;
@@ -408,8 +455,16 @@ describe("permission decisions", () => {
         type: "permission_decide_command",
         commandId,
         requestId: "per_1",
+        sessionID: "ses_1",
         decision: "once",
       });
+
+      const res = await response;
+      expect(res.statusCode).toBe(202);
+      const body = res.json();
+      expect(validateCommandAccepted(body)).toBe(true);
+      expect(body).toEqual({ commandId, status: "accepted" });
+
       instance.ws.send(
         JSON.stringify({
           type: "permission_decide_result",
@@ -419,14 +474,20 @@ describe("permission decisions", () => {
         }),
       );
 
-      const res = await response;
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(validatePermissionCommandResult(body)).toBe(true);
-      expect(body).toEqual({ commandId, status: "confirmed" });
+      // The acknowledgment did not wait for the Plugin: the confirmed result
+      // is observable only through the body-free outcome correlation.
+      const outcome = await expectCommandOutcome(alice.token, commandId, "confirmed");
+      expect(outcome).toMatchObject({
+        commandId,
+        requestId: "per_1",
+        instanceId: instance.instanceId,
+        kind: "permission",
+        status: "confirmed",
+      });
+      expect(typeof outcome.updatedAt).toBe("string");
     });
 
-    it("routes a reject decision to the owning Plugin and returns the confirmed result", async () => {
+    it("accepts a reject decision after routing and settles the command outcome", async () => {
       const alice = await createUser("decide-reject@example.com");
       const credential = await createPluginCredential(alice.token);
       const instance = await registerPlugin(credential);
@@ -440,6 +501,7 @@ describe("permission decisions", () => {
       const command = nextMessage(instance.ws);
       const response = decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId,
+        sessionId: "ses_1",
         decision: "reject",
       });
       const frame = (await command) as Record<string, unknown>;
@@ -447,8 +509,16 @@ describe("permission decisions", () => {
         type: "permission_decide_command",
         commandId,
         requestId: "per_1",
+        sessionID: "ses_1",
         decision: "reject",
       });
+
+      const res = await response;
+      expect(res.statusCode).toBe(202);
+      const body = res.json();
+      expect(validateCommandAccepted(body)).toBe(true);
+      expect(body).toEqual({ commandId, status: "accepted" });
+
       instance.ws.send(
         JSON.stringify({
           type: "permission_decide_result",
@@ -457,15 +527,10 @@ describe("permission decisions", () => {
           status: "confirmed",
         }),
       );
-
-      const res = await response;
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(validatePermissionCommandResult(body)).toBe(true);
-      expect(body).toEqual({ commandId, status: "confirmed" });
+      await expectCommandOutcome(alice.token, commandId, "confirmed");
     });
 
-    it("routes an always decision to the owning Plugin, returns the confirmed result, and clears the projection", async () => {
+    it("accepts an always decision after routing and clears the projection once confirmed", async () => {
       const alice = await createUser("decide-always@example.com");
       const credential = await createPluginCredential(alice.token);
       const instance = await registerPlugin(credential);
@@ -479,6 +544,7 @@ describe("permission decisions", () => {
       const command = nextMessage(instance.ws);
       const response = decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId,
+        sessionId: "ses_1",
         decision: "always",
       });
       const frame = (await command) as Record<string, unknown>;
@@ -486,8 +552,16 @@ describe("permission decisions", () => {
         type: "permission_decide_command",
         commandId,
         requestId: "per_1",
+        sessionID: "ses_1",
         decision: "always",
       });
+
+      const res = await response;
+      expect(res.statusCode).toBe(202);
+      const body = res.json();
+      expect(validateCommandAccepted(body)).toBe(true);
+      expect(body).toEqual({ commandId, status: "accepted" });
+
       instance.ws.send(
         JSON.stringify({
           type: "permission_decide_result",
@@ -496,12 +570,7 @@ describe("permission decisions", () => {
           status: "confirmed",
         }),
       );
-
-      const res = await response;
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(validatePermissionCommandResult(body)).toBe(true);
-      expect(body).toEqual({ commandId, status: "confirmed" });
+      await expectCommandOutcome(alice.token, commandId, "confirmed");
 
       // A confirmed always decision resolves the request exactly like once or
       // reject: the projection drops it, so a repeat decision is a 409 and no
@@ -509,6 +578,7 @@ describe("permission decisions", () => {
       const silence = expectSilence(instance.ws);
       const again = await decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId: randomUUID(),
+        sessionId: "ses_1",
         decision: "reject",
       });
       await silence;
@@ -578,6 +648,7 @@ describe("permission decisions", () => {
       for (const c of cases) {
         const res = await decidePermission(c.token, c.instanceId, "per_1", {
           commandId: randomUUID(),
+          sessionId: "ses_1",
           decision: "once",
         });
         expect(res.statusCode, c.name).toBe(404);
@@ -599,6 +670,7 @@ describe("permission decisions", () => {
       let silence = expectSilence(instance.ws);
       let res = await decidePermission(alice.token, instance.instanceId, "never_seen", {
         commandId: randomUUID(),
+        sessionId: "ses_1",
         decision: "once",
       });
       await silence;
@@ -610,10 +682,22 @@ describe("permission decisions", () => {
         questionInteraction(instance.instanceId, "req_question"),
       ]);
 
+      // Permission decisions must name the exact projected session.
+      silence = expectSilence(instance.ws);
+      res = await decidePermission(alice.token, instance.instanceId, "req_permission", {
+        commandId: randomUUID(),
+        sessionId: "ses_wrong",
+        decision: "once",
+      });
+      await silence;
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe("CONFLICT");
+
       // A projected question request is the wrong kind: conflict, no command.
       silence = expectSilence(instance.ws);
       res = await decidePermission(alice.token, instance.instanceId, "req_question", {
         commandId: randomUUID(),
+        sessionId: "ses_1",
         decision: "once",
       });
       await silence;
@@ -626,6 +710,7 @@ describe("permission decisions", () => {
       silence = expectSilence(instance.ws);
       res = await decidePermission(alice.token, instance.instanceId, "req_permission", {
         commandId: randomUUID(),
+        sessionId: "ses_1",
         decision: "once",
       });
       await silence;
@@ -636,7 +721,7 @@ describe("permission decisions", () => {
 
   describe("outcomes", () => {
     it.each(["confirmed", "stale", "upstream_error", "result_unknown"])(
-      "returns the Plugin's terminal %s outcome",
+      "settles the command outcome to the Plugin's terminal %s result",
       async (status) => {
         const alice = await createUser(`outcome-decision-${status}@example.com`);
         const credential = await createPluginCredential(alice.token);
@@ -649,10 +734,15 @@ describe("permission decisions", () => {
         const command = nextMessage(instance.ws);
         const response = decidePermission(alice.token, instance.instanceId, "per_1", {
           commandId,
+          sessionId: "ses_1",
           decision: "once",
         });
         const frame = (await command) as { commandId: string };
         expect(frame.commandId).toBe(commandId);
+        const res = await response;
+        expect(res.statusCode).toBe(202);
+        expect(res.json()).toEqual({ commandId, status: "accepted" });
+
         instance.ws.send(
           JSON.stringify({
             type: "permission_decide_result",
@@ -661,12 +751,7 @@ describe("permission decisions", () => {
             status,
           }),
         );
-
-        const res = await response;
-        expect(res.statusCode).toBe(200);
-        const body = res.json();
-        expect(validatePermissionCommandResult(body)).toBe(true);
-        expect(body).toEqual({ commandId, status });
+        await expectCommandOutcome(alice.token, commandId, status);
       },
     );
 
@@ -682,6 +767,7 @@ describe("permission decisions", () => {
       const command = nextMessage(instance.ws);
       const response = decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId,
+        sessionId: "ses_1",
         decision: "once",
       });
       const frame = (await command) as { commandId: string };
@@ -695,14 +781,16 @@ describe("permission decisions", () => {
         }),
       );
       const res = await response;
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ commandId, status: "confirmed" });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ commandId, status: "accepted" });
+      await expectCommandOutcome(alice.token, commandId, "confirmed");
 
       // A racing client targeting the same request is refused before any
       // second command reaches the Plugin.
       const silence = expectSilence(instance.ws);
       const again = await decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId: randomUUID(),
+        sessionId: "ses_1",
         decision: "reject",
       });
       await silence;
@@ -712,7 +800,7 @@ describe("permission decisions", () => {
   });
 
   describe("timeout and disconnect", () => {
-    it("returns result_unknown when the Plugin never answers within the bounded timeout", async () => {
+    it("settles the command outcome to result_unknown when the Plugin never answers within the bounded timeout", async () => {
       await startApp({ answerTimeoutMs: SHORT_DECISION_TIMEOUT_MS });
       const alice = await createUser("decision-timeout@example.com");
       const credential = await createPluginCredential(alice.token);
@@ -725,19 +813,22 @@ describe("permission decisions", () => {
       const command = nextMessage(instance.ws);
       const response = decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId,
+        sessionId: "ses_1",
         decision: "once",
       });
       const frame = (await command) as { commandId: string };
       expect(frame.commandId).toBe(commandId);
-      // The Plugin never replies; the command settles as result_unknown.
+      // The POST acknowledged without waiting; the Plugin never replies, so
+      // the command settles as result_unknown.
       const res = await response;
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ commandId, status: "result_unknown" });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ commandId, status: "accepted" });
+      await expectCommandOutcome(alice.token, commandId, "result_unknown");
       // The connection remains healthy after the timeout.
       expect(instance.ws.readyState).toBe(WebSocket.OPEN);
     });
 
-    it("returns result_unknown when the owning Plugin disconnects mid-command", async () => {
+    it("settles the command outcome to result_unknown when the owning Plugin disconnects mid-command", async () => {
       const alice = await createUser("decision-disconnect@example.com");
       const credential = await createPluginCredential(alice.token);
       const instance = await registerPlugin(credential);
@@ -749,14 +840,16 @@ describe("permission decisions", () => {
       const command = nextMessage(instance.ws);
       const response = decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId,
+        sessionId: "ses_1",
         decision: "once",
       });
       const frame = (await command) as { commandId: string };
       expect(frame.commandId).toBe(commandId);
-      instance.ws.close();
       const res = await response;
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ commandId, status: "result_unknown" });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ commandId, status: "accepted" });
+      instance.ws.close();
+      await expectCommandOutcome(alice.token, commandId, "result_unknown");
     });
   });
 
@@ -773,12 +866,14 @@ describe("permission decisions", () => {
       const firstFrame = nextMessage(instance.ws);
       const firstResponse = decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId: firstCommandId,
+        sessionId: "ses_1",
         decision: "once",
       });
       await firstFrame;
 
       const second = await decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId: randomUUID(),
+        sessionId: "ses_1",
         decision: "reject",
       });
       expect(second.statusCode).toBe(409);
@@ -792,7 +887,11 @@ describe("permission decisions", () => {
           status: "confirmed",
         }),
       );
-      expect((await firstResponse).json().status).toBe("confirmed");
+      expect((await firstResponse).json()).toEqual({
+        commandId: firstCommandId,
+        status: "accepted",
+      });
+      await expectCommandOutcome(alice.token, firstCommandId, "confirmed");
     });
 
     it("rejects a duplicate commandId on the same connection while the first is in flight", async () => {
@@ -811,6 +910,7 @@ describe("permission decisions", () => {
       const firstFrame = nextMessage(instance.ws);
       const firstResponse = decidePermission(alice.token, instance.instanceId, "per_a", {
         commandId: sharedCommandId,
+        sessionId: "ses_1",
         decision: "once",
       });
       const sent = (await firstFrame) as { commandId: string };
@@ -820,6 +920,7 @@ describe("permission decisions", () => {
       // is a conflict: the correlation keys are connection+commandId.
       const second = await decidePermission(alice.token, instance.instanceId, "per_b", {
         commandId: sharedCommandId,
+        sessionId: "ses_b",
         decision: "reject",
       });
       expect(second.statusCode).toBe(409);
@@ -833,7 +934,11 @@ describe("permission decisions", () => {
           status: "confirmed",
         }),
       );
-      expect((await firstResponse).json().status).toBe("confirmed");
+      expect((await firstResponse).json()).toEqual({
+        commandId: sharedCommandId,
+        status: "accepted",
+      });
+      await expectCommandOutcome(alice.token, sharedCommandId, "confirmed");
     });
 
     it("correlates commands by connection+commandId and ignores late, duplicate, foreign-instance, and foreign-connection results", async () => {
@@ -850,11 +955,13 @@ describe("permission decisions", () => {
 
       const commandA = randomUUID();
       const commandB = randomUUID();
+      const neverIssued = randomUUID();
       // Issue each command and read its frame before issuing the next, so the
       // two frames are correlated deterministically; both stay in flight.
       const frameA = nextMessage(instance.ws);
       const responseA = decidePermission(alice.token, instance.instanceId, "per_a", {
         commandId: commandA,
+        sessionId: "ses_1",
         decision: "once",
       });
       const sentA = (await frameA) as { commandId: string };
@@ -863,20 +970,26 @@ describe("permission decisions", () => {
       const frameB = nextMessage(instance.ws);
       const responseB = decidePermission(alice.token, instance.instanceId, "per_b", {
         commandId: commandB,
+        sessionId: "ses_b",
         decision: "reject",
       });
       const sentB = (await frameB) as { commandId: string };
       expect(sentB.commandId).toBe(commandB);
 
-      // A result for a command that was never issued is ignored.
+      expect((await responseA).json()).toEqual({ commandId: commandA, status: "accepted" });
+      expect((await responseB).json()).toEqual({ commandId: commandB, status: "accepted" });
+
+      // A result for a command that was never issued is ignored and never
+      // created an outcome: querying its correlation is a uniform 404.
       instance.ws.send(
         JSON.stringify({
           type: "permission_decide_result",
-          commandId: randomUUID(),
+          commandId: neverIssued,
           instanceId: instance.instanceId,
           status: "confirmed",
         }),
       );
+      expect((await getCommandOutcome(alice.token, neverIssued)).statusCode).toBe(404);
       // A result naming a different instance is ignored even for a real commandId.
       instance.ws.send(
         JSON.stringify({
@@ -886,6 +999,7 @@ describe("permission decisions", () => {
           status: "confirmed",
         }),
       );
+      await expectCommandOutcome(alice.token, commandA, "accepted");
 
       // A result from a different connection (another instance of the same
       // user) for a real commandId is ignored: the command was issued on the
@@ -903,6 +1017,7 @@ describe("permission decisions", () => {
           status: "confirmed",
         }),
       );
+      await expectCommandOutcome(alice.token, commandA, "accepted");
 
       // Settle B; a duplicate late reply for B after settlement is ignored.
       instance.ws.send(
@@ -913,8 +1028,7 @@ describe("permission decisions", () => {
           status: "confirmed",
         }),
       );
-      const resB = await responseB;
-      expect(resB.json()).toEqual({ commandId: commandB, status: "confirmed" });
+      await expectCommandOutcome(alice.token, commandB, "confirmed");
       instance.ws.send(
         JSON.stringify({
           type: "permission_decide_result",
@@ -923,6 +1037,7 @@ describe("permission decisions", () => {
           status: "stale",
         }),
       );
+      await expectCommandOutcome(alice.token, commandB, "confirmed");
 
       // Settle A with the correct result on the exact connection.
       instance.ws.send(
@@ -933,8 +1048,7 @@ describe("permission decisions", () => {
           status: "upstream_error",
         }),
       );
-      const resA = await responseA;
-      expect(resA.json()).toEqual({ commandId: commandA, status: "upstream_error" });
+      await expectCommandOutcome(alice.token, commandA, "upstream_error");
 
       // The first connection remains healthy and still answers a fresh snapshot.
       await seedSnapshot(alice.token, instance.ws, instance.instanceId, [
@@ -959,6 +1073,7 @@ describe("permission decisions", () => {
       const permissionFrame = nextMessage(instance.ws);
       const permissionResponse = decidePermission(alice.token, instance.instanceId, "per_1", {
         commandId: permissionCommandId,
+        sessionId: "ses_1",
         decision: "once",
       });
       const sentPermission = (await permissionFrame) as { type: string; commandId: string };
@@ -974,7 +1089,7 @@ describe("permission decisions", () => {
           authorization: `Bearer ${alice.token}`,
           "content-type": "application/json",
         },
-        payload: { commandId: answerCommandId, answers: [["Postgres"]] },
+        payload: { commandId: answerCommandId, sessionId: "ses_1", answers: [["Postgres"]] },
       });
       const sentAnswer = (await answerFrame) as { type: string; commandId: string };
       expect(sentAnswer.type).toBe("question_answer_command");
@@ -998,17 +1113,20 @@ describe("permission decisions", () => {
       );
       expect((await permissionResponse).json()).toEqual({
         commandId: permissionCommandId,
-        status: "confirmed",
+        status: "accepted",
       });
       expect((await answerResponse).json()).toEqual({
         commandId: answerCommandId,
-        status: "confirmed",
+        status: "accepted",
       });
+      await expectCommandOutcome(alice.token, permissionCommandId, "confirmed");
+      await expectCommandOutcome(alice.token, answerCommandId, "confirmed");
 
       // A question answer targeting the permission request is still the wrong
       // kind (conflict), and vice versa, with no command sent.
       const wrongPermission = await decidePermission(alice.token, instance.instanceId, "req_1", {
         commandId: randomUUID(),
+        sessionId: "ses_1",
         decision: "once",
       });
       expect(wrongPermission.statusCode).toBe(409);
@@ -1019,7 +1137,7 @@ describe("permission decisions", () => {
           authorization: `Bearer ${alice.token}`,
           "content-type": "application/json",
         },
-        payload: { commandId: randomUUID(), answers: [["Postgres"]] },
+        payload: { commandId: randomUUID(), sessionId: "ses_1", answers: [["Postgres"]] },
       });
       expect(wrongAnswer.statusCode).toBe(409);
       await expectSilence(instance.ws);
@@ -1076,6 +1194,7 @@ describe("permission decisions", () => {
       const silence = expectSilence(instance.ws);
       const res = await decidePermission(alice.token, instance.instanceId, "pro_1", {
         commandId: randomUUID(),
+        sessionId: "ses_1",
         decision: "once",
       });
       await silence;
@@ -1130,6 +1249,7 @@ describe("permission decisions", () => {
       const command = nextMessage(instance.ws);
       const response = decidePermission(alice.token, instance.instanceId, "per_sentinel", {
         commandId,
+        sessionId: "ses_1",
         decision: "once",
       });
       const frame = (await command) as { decision: string };
@@ -1143,7 +1263,8 @@ describe("permission decisions", () => {
         }),
       );
       const res = await response;
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(202);
+      await expectCommandOutcome(alice.token, commandId, "confirmed");
 
       // Log a decision body and a full interaction body directly: every
       // sensitive path must be redacted.
