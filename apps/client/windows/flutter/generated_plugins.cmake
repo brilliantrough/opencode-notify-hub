@@ -9,6 +9,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   local_notifier
   screen_retriever_windows
   tray_manager
+  win_toast
   window_manager
 )
 

@@ -35,7 +35,7 @@ Record before testing:
 | Scenario | Linux | Windows | Android foreground | Android background/lock screen |
 | --- | --- | --- | --- | --- |
 | Heartbeats update status silently | [ ] | [ ] | [ ] | n/a |
-| Completed: exactly one popup and history entry | [ ] | [ ] | [ ] | [ ] |
+| Completed: exactly one popup and history entry | [ ] | [x] | [ ] | [ ] |
 | Stopped: immediate, no later completed | [ ] | [ ] | [ ] | [ ] |
 | Failed: exactly one alert | [ ] | [ ] | [ ] | [ ] |
 | Question: immediate, labels only | [ ] | [ ] | [ ] | [ ] |
@@ -51,10 +51,10 @@ Record before testing:
 
 | Scenario | Windows |
 | --- | --- |
-| Tray left-click restores, shows, and focuses the window | [ ] |
-| Tray right-click shows Open window, Pause notifications, and Quit | [ ] |
-| Close hides the window and notifications continue | [ ] |
-| Notification click restores the window after close and minimize | [ ] |
+| Tray left-click restores, shows, and focuses the window | [x] |
+| Tray right-click shows Open window, Pause notifications, and Quit | [x] |
+| Close hides the window and notifications continue | [x] |
+| Notification click restores the window after close and minimize | [x] |
 | Tray and notification behavior survives sleep/resume | [ ] |
 | Tray behavior recovers after Explorer restarts | [ ] |
 | Notification shortcut/AUMID follows the moved release directory | [ ] |
@@ -100,3 +100,23 @@ Keep sanitized:
 Never retain passwords, verification/reset codes, access/refresh tokens, ingest
 secrets, HMAC signatures, Firebase tokens, service-account JSON, private file
 paths, or user conversation content.
+
+### Windows notification evidence (2026-08-17)
+
+- Source: `windows/client-parity-20260816`, based on `9eefda6`.
+- Client: local portable Release; `client.exe` SHA-256
+  `026b275375892ed2c35de8056e589dcb10ee2630217775134d3b9ed3d9b9c506`,
+  `data/app.so` SHA-256
+  `66bc7054e21285eece2a3a3fe4e256ab0221a378bb28f1e659fa67ef1e343981`,
+  and `win_toast_plugin.dll` SHA-256
+  `d8ee52067a01dac9d7174f4677f7d8f145c542e6aa031b128544a8b3d0c4003f`.
+- Host: Windows 11 `10.0.26200`, AMD64.
+- Origin: `https://notify.pezayo.com`, using an isolated synthetic account.
+- Close-to-tray event `3f948030-6393-4a2a-906c-ac7e6a0fad92` returned `202`;
+  its temporary ingest key was revoked with `204`, History contained exactly one
+  entry, and the Action Center click restored and focused the existing process.
+- Minimized event `6e335df0-f583-4059-8e75-a6ecbe08b915` produced the same
+  `202`/`204`/one-entry result and restored and focused the existing process.
+- Both activation checks ended with exactly one `client.exe` process. This
+  evidence covers the tray-resident process; activation after Quit is not
+  claimed.
