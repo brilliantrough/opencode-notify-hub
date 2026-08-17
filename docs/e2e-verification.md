@@ -35,7 +35,7 @@ Record before testing:
 | Scenario | Linux | Windows | Android foreground | Android background/lock screen |
 | --- | --- | --- | --- | --- |
 | Heartbeats update status silently | [ ] | [ ] | [ ] | n/a |
-| Completed: exactly one popup and history entry | [ ] | [x] | [ ] | [ ] |
+| Completed: exactly one popup and history entry | [ ] | [ ] | [ ] | [ ] |
 | Stopped: immediate, no later completed | [ ] | [ ] | [ ] | [ ] |
 | Failed: exactly one alert | [ ] | [ ] | [ ] | [ ] |
 | Question: immediate, labels only | [ ] | [ ] | [ ] | [ ] |
@@ -51,10 +51,10 @@ Record before testing:
 
 | Scenario | Windows |
 | --- | --- |
-| Tray left-click restores, shows, and focuses the window | [x] |
-| Tray right-click shows Open window, Pause notifications, and Quit | [x] |
-| Close hides the window and notifications continue | [x] |
-| Notification click restores the window after close and minimize | [x] |
+| Tray left-click restores, shows, and focuses the window | [ ] |
+| Tray right-click shows Open window, Pause notifications, and Quit | [ ] |
+| Close hides the window and notifications continue | [ ] |
+| Notification click restores the window after close and minimize | [ ] |
 | Tray and notification behavior survives sleep/resume | [ ] |
 | Tray behavior recovers after Explorer restarts | [ ] |
 | Notification shortcut/AUMID follows the moved release directory | [ ] |
@@ -101,7 +101,11 @@ Never retain passwords, verification/reset codes, access/refresh tokens, ingest
 secrets, HMAC signatures, Firebase tokens, service-account JSON, private file
 paths, or user conversation content.
 
-### Windows notification evidence (2026-08-17)
+### Focused Windows production-compatibility evidence (2026-08-17)
+
+This focused evidence used a production-compatible synthetic event path. It did
+not run the isolated staging gateway or the complete desktop tray sequence above,
+so it does not mark any staging matrix row complete.
 
 - Source: `windows/client-parity-20260816`, based on `9eefda6`.
 - Client: local portable Release; `client.exe` SHA-256
@@ -117,6 +121,11 @@ paths, or user conversation content.
   entry, and the Action Center click restored and focused the existing process.
 - Minimized event `6e335df0-f583-4059-8e75-a6ecbe08b915` produced the same
   `202`/`204`/one-entry result and restored and focused the existing process.
+- Sound-enabled event `61b6ec39-d82d-4e47-94a0-2a489fcec208` returned `202`,
+  its temporary ingest key was revoked with `204`, and History contained exactly
+  one entry. A direct comparison with the bundled `soft_chime.wav` confirmed one
+  matching C5-E5 chime and no additional Windows toast sound; the generated
+  Windows toast XML is also regression-tested as `<audio silent="true"/>`.
 - Both activation checks ended with exactly one `client.exe` process. This
   evidence covers the tray-resident process; activation after Quit is not
   claimed.

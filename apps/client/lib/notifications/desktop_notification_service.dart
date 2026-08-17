@@ -11,7 +11,7 @@ import 'notification_service.dart';
 import 'sound_player.dart';
 
 /// Abstraction over the OS notification popup so the service stays testable
-/// without the `local_notifier` platform channel.
+/// without invoking platform channels.
 abstract class DesktopNotifier {
   Future<void> init();
 

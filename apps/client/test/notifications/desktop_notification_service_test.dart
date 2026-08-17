@@ -276,6 +276,7 @@ void main() {
         expect(shown.toXmlString(), contains('launch="evt-click"'));
         expect(shown.toXmlString(), contains('A &lt; B'));
         expect(shown.toXmlString(), contains('Ready &amp; waiting'));
+        expect(shown.toXmlString(), contains('<audio silent="true"/>'));
 
         activated(ActivatedEvent(argument: 'evt-click', userInput: const {}));
         activated(ActivatedEvent(argument: 'evt-click', userInput: const {}));
