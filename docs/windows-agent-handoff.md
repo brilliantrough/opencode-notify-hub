@@ -1,14 +1,14 @@
 # Windows Development Handoff
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 This tracked document is the entry point for the Windows development agent.
 Linux and Windows are sequential continuations of one shared branch, not
 separate implementations. The previous `windows/client-parity-20260816` and
 `windows/dev-node` branches are already ancestors of `main` and are retired.
 Resume neither branch. Start only from a clean, fast-forwarded `main` at the
-alignment SHA reported by the Linux agent in the manually synchronized project
-memory.
+alignment SHA reported by the Linux agent in the manually synchronized
+`docs/project_memory/linux-current-state.md` memory.
 
 ## Safety Rules
 
@@ -70,7 +70,7 @@ dropped. For new Windows fixes, start from clean, updated `main`:
 
 ```powershell
 git switch main
-git switch -c windows/client-parity-20260818
+git switch -c windows/client-parity-20260819
 ```
 
 ## Read Before Editing
@@ -85,7 +85,8 @@ Read these in order:
 6. `docs/client-guide.md`
 7. `docs/client-setup.md`
 8. `docs/e2e-verification.md`
-9. local `docs/project_memory/current-state.md`, when present
+9. local `docs/project_memory/linux-current-state.md` and
+   `docs/project_memory/windows-current-state.md`, when present
 
 Confirm the pull contains all of these files. Their absence means the pull is
 incomplete and the build must not be trusted:
@@ -127,6 +128,13 @@ separate Windows port:
 - notification titles containing machine, directory, session, and status;
 - history rows containing machine context while retaining expanded details;
 - generated protocol-v2 `notify_api` models for Session prompt and WebUI control.
+- V1 `prompt_async` Session control for the `opencode --port` TUI/WebUI agent
+  loop; the V2 input-admission endpoint is not used for native prompt control.
+- Completed short Sessions are retained from terminal events even when no
+  heartbeat arrived first, so the client can open their Session WebUI.
+- WebUI Session links carry the encoded directory and Session ID. The Plugin
+  adds the directory query to OpenCode API requests, streams SSE directly, and
+  the client keeps each local HTTP handler alive until its response ends.
 
 Production `https://notify.pezayo.com` runs gateway image
 `opencode-notify-gateway:20260818-machine-webui`, deployed from the current Linux
@@ -151,6 +159,8 @@ acceptance checks against production after installing a protocol-v2 Plugin.
 
 ## Linux Versus Windows Status
 
+Linux `main` now contains the Windows parity merge plus the shared remote
+control fixes from `1793ffc`; the merged main SHA is recorded after the merge.
 Linux has verified the shared code with TypeScript and Flutter analysis/tests,
 generated-client tests, release builds, X11 integration, real OpenCode smoke,
 runtime server selection, Prompt/WebUI tunnels, notification/history machine
@@ -248,8 +258,28 @@ environment-only drift without understanding each hunk.
 12. Context: confirm Windows notifications and History rows visibly include the
     machine name, while expanded History retains the complete detail table.
 
-Record each result in local `docs/project_memory/current-state.md` and update
-the Windows rows in `docs/e2e-verification.md` when evidence is complete.
+Record Windows-owned results only in local
+`docs/project_memory/windows-current-state.md`; read Linux-owned status from
+`docs/project_memory/linux-current-state.md`. Update the Windows rows in
+`docs/e2e-verification.md` when evidence is complete.
+
+## Next Windows Alignment Branch
+
+After the maintainer pushes the merged Linux `main`, do not continue the old
+`windows/client-parity-20260818` checkout. Start a fresh branch from the exact
+remote `main` SHA:
+
+```powershell
+git fetch origin
+git switch main
+git pull --ff-only origin main
+git switch -c windows/client-parity-20260819
+```
+
+Read this handoff, `CONTEXT.md`, and both platform memory files before editing.
+The next Windows pass is native validation and focused Windows repair against
+the complete Linux baseline. Do not modify Plugin, Gateway, Contracts, or
+shared protocol behavior on that branch.
 
 ## Returning Windows Work
 
