@@ -212,6 +212,9 @@ void main() {
       find.byKey(SettingsPage.soundOptionKey(selected.id)),
       findsOneWidget,
     );
+    await tester.ensureVisible(
+      find.byKey(SettingsPage.soundPreviewKey(selected.id)),
+    );
     await tester.tap(find.byKey(SettingsPage.soundPreviewKey(selected.id)));
     await tester.pumpAndSettle();
     verify(() => preview.play(selected)).called(1);
@@ -219,6 +222,25 @@ void main() {
     await tester.tap(find.byKey(SettingsPage.soundOptionKey(selected.id)));
     await tester.pumpAndSettle();
     expect(container.read(settingsControllerProvider).alertSound, selected);
+  });
+
+  testWidgets('sound picker keeps its actions visible in a short window', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await _pumpSettingsPage(tester);
+
+    await tester.tap(find.byKey(SettingsPage.alertSoundPickerKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('完成'), findsOneWidget);
+    expect(
+      tester.getRect(find.byKey(SettingsPage.importSoundKey)).bottom,
+      lessThanOrEqualTo(450),
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('imports and selects a custom desktop sound', (tester) async {
