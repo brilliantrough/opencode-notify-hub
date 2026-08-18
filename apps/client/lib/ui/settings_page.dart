@@ -109,13 +109,16 @@ class SettingsPage extends ConsumerWidget {
               ...bundledAlertSounds,
               if (settings.customSound != null) settings.customSound!,
             ];
+            final maxSoundListHeight =
+                (MediaQuery.sizeOf(context).height * 0.22).clamp(160.0, 430.0);
             return AlertDialog(
               key: alertSoundDialogKey,
+              scrollable: true,
               title: const Text('选择提示音'),
               content: SizedBox(
                 width: 440,
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 430),
+                  constraints: BoxConstraints(maxHeight: maxSoundListHeight),
                   child: SingleChildScrollView(
                     child: RadioGroup<String>(
                       groupValue: settings.alertSoundId,
