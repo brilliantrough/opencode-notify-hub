@@ -241,6 +241,10 @@ export function createSessionNotifyHooks(
   function enqueueSafe(event: NotifyEvent): void {
     try {
       pump.enqueue(event);
+      logger.debug("notify: event handed to delivery pump", {
+        eventId: event.eventId,
+        eventType: event.type,
+      });
     } catch (error) {
       logger.error("notify: failed to queue event; dropping it", {
         eventId: event.eventId,
@@ -322,6 +326,10 @@ export function createSessionNotifyHooks(
     } catch {
       logger.error("notify: control channel failed to start");
     }
+  });
+  logger.info("opencode-notify enabled", {
+    machine: source.machine,
+    project: source.project,
   });
 
   /** Route one normalized main-session event; never throws. */

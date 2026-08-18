@@ -4,8 +4,9 @@ import { defineConfig } from "tsup";
 // The entry is the thin `session-notify.ts` re-export so the artifact
 // presents EXACTLY one default function export (older OpenCode loaders
 // reject plugin modules with extra named runtime exports).
-// @notify/contracts is bundled so the artifact is self-contained, while the
-// OpenCode runtime packages stay external and are provided by the host.
+// @notify/contracts and the runtime SDK client are bundled so the installed
+// artifact is self-contained. @opencode-ai/plugin is type-only and may remain
+// external.
 export default defineConfig({
   entry: {
     "session-notify": "src/session-notify.ts",
@@ -16,6 +17,9 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  noExternal: ["@notify/contracts"],
-  external: ["@opencode-ai/plugin", "@opencode-ai/sdk"],
+  banner: {
+    js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
+  },
+  noExternal: ["@notify/contracts", "@opencode-ai/sdk"],
+  external: ["@opencode-ai/plugin"],
 });

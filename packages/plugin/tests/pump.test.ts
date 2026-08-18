@@ -140,6 +140,24 @@ describe("QueuePump — non-blocking drain", () => {
     await flush();
   });
 
+  it("logs successful delivery without including the event payload", async () => {
+    const { pump, sender, records } = makePump();
+
+    pump.enqueue(terminal("t-success"));
+    sender.deferreds[0].resolve();
+    await flush();
+
+    const success = records.find(
+      (record) => record.level === "debug" && record.message.includes("delivery succeeded"),
+    );
+    expect(success).toEqual({
+      level: "debug",
+      message: "gateway delivery succeeded for event t-success",
+      context: { eventId: "t-success", eventType: "terminal" },
+    });
+    expect(JSON.stringify(success)).not.toContain("elapsedSeconds");
+  });
+
   it("re-drives the loop when an enqueue lands as an empty drain settles", async () => {
     const { pump, sender } = makePump();
 

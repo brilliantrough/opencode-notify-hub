@@ -176,6 +176,10 @@ export class QueuePump {
       }
       try {
         await this.sender.send(event);
+        this.logger.debug(`gateway delivery succeeded for event ${event.eventId}`, {
+          eventId: event.eventId,
+          eventType: event.type,
+        });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         this.logger.error(`gateway delivery failed; dropping event ${event.eventId}: ${detail}`, {

@@ -53,6 +53,14 @@ unique service/network alias or stable database DNS name.
 
 ## Incident: WebSocket disconnects
 
+- Identify the affected channel first. `/v1/plugin/ws` carries remote-control
+  traffic from the Plugin; notification events use the independent signed
+  HTTPS `POST /v1/events` path. A blocked Plugin WebSocket disables instance
+  presence and remote answers/decisions, but does not stop event ingestion.
+- `/v1/ws` carries desktop and foreground-client notifications. There is no
+  HTTP fallback, gateway event store, or reconnect replay, so events emitted
+  while this channel is blocked are not delivered to those clients. Eligible
+  Android `action_required` and `terminal` events can still arrive through FCM.
 - Confirm `/v1/ws` uses HTTP/1.1 Upgrade and Connection headers.
 - Set proxy read/send timeouts to at least 3600 seconds.
 - Confirm load balancers/CDNs also support long-lived WebSockets.

@@ -441,6 +441,51 @@ describe("SessionNotifyPlugin", () => {
     expect(starts).toEqual(["start", "stop"]);
   });
 
+  it("logs enabled state without exposing the ingest credential", async () => {
+    const { client, logBodies } = makeClient();
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+
+    expect(logBodies).toContainEqual({
+      service: "opencode-notify",
+      level: "info",
+      message: "opencode-notify enabled",
+      extra: { machine: "test-machine", project: "project" },
+    });
+    expect(JSON.stringify(logBodies)).not.toContain(SECRET);
+    expect(JSON.stringify(logBodies)).not.toContain(KEY_ID);
+
+    await hooks.dispose?.();
+  });
+
+  it("continues posting notifications when control WebSocket egress is blocked", async () => {
+    const { calls, fetchImpl } = makeRecordingFetch();
+    vi.stubGlobal("fetch", fetchImpl);
+    let connectionAttempts = 0;
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        constructor() {
+          connectionAttempts += 1;
+          throw new Error("WebSocket egress blocked");
+        }
+      },
+    );
+    const { client } = makeClient();
+    const hooks = await SessionNotifyPlugin(makeInput(client));
+
+    await vi.advanceTimersByTimeAsync(0);
+    await emit(hooks, sessionCreated());
+    await emit(hooks, devQuestionAsked());
+    await settle();
+
+    expect(connectionAttempts).toBe(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(`${GATEWAY_URL}/v1/events`);
+    expect(postedEvents(calls)[0].type).toBe("action_required");
+
+    await hooks.dispose?.();
+  });
+
   it("ignores events for a child session without any SDK lookup", async () => {
     const { calls, fetchImpl } = makeRecordingFetch();
     vi.stubGlobal("fetch", fetchImpl);
@@ -847,12 +892,12 @@ describe("SessionNotifyPlugin", () => {
     });
     const hooks = await SessionNotifyPlugin(makeInput(client));
 
-    // First event: warn logging throws synchronously — absorbed.
+    // Startup logging throws synchronously; both warning calls reject. Every
+    // failure is absorbed and event handling continues.
     await expect(emit(hooks, devQuestionAsked())).resolves.toBeUndefined();
-    // Second event: warn logging rejects — absorbed.
     await expect(emit(hooks, devQuestionReplied())).resolves.toBeUndefined();
     await settle();
-    expect(logCalls).toBe(2);
+    expect(logCalls).toBe(3);
     expect(calls).toHaveLength(0);
 
     // Delivery still works with a broken logger.

@@ -139,6 +139,37 @@ describe("ControlChannel", () => {
     expect(sockets[1].closed).toBe(true);
   });
 
+  it("retries a blocked WebSocket constructor and stops without an unhandled failure", async () => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      random: () => 0.5,
+      socketFactory: () => {
+        attempts += 1;
+        throw new Error("WebSocket egress blocked");
+      },
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attempts).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(499);
+    expect(attempts).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(attempts).toBe(2);
+
+    channel.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(attempts).toBe(2);
+  });
+
   it("stops reconnecting after the Gateway reports a revoked Plugin key", async () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
