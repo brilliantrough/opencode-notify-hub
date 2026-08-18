@@ -1,40 +1,48 @@
 import type { PromptCommandStatus } from "@notify/contracts";
 
-/** Minimal structural surface of the OpenCode V2 Session prompt endpoint. */
-export interface SessionPromptClient {
-  session: {
-    prompt(
-      parameters: { sessionID: string; prompt: { text: string } },
-      options?: { signal?: AbortSignal },
-    ): Promise<unknown>;
-  };
+export interface SessionPromptAdapterOptions {
+  baseUrl: URL;
+  directory: string;
+  fetch?: typeof fetch;
 }
 
 export class SessionPromptAdapter {
-  constructor(private readonly client: SessionPromptClient) {}
+  private readonly baseUrl: URL;
+  private readonly directory: string;
+  private readonly fetch: typeof fetch;
 
-  /** Send one exact text prompt. Every failure becomes an explicit status. */
+  constructor(options: SessionPromptAdapterOptions) {
+    this.baseUrl = options.baseUrl;
+    this.directory = options.directory;
+    this.fetch = options.fetch ?? fetch;
+  }
+
+  /**
+   * Start one exact text prompt through the V1 agent loop.
+   *
+   * The V2 input-admission endpoint accepts an input into its projection but
+   * does not resume the TUI/WebUI loop started by `opencode --port`.
+   */
   async send(
     sessionID: string,
     text: string,
     signal: AbortSignal,
   ): Promise<PromptCommandStatus> {
-    let response: unknown;
+    const url = new URL(
+      `/session/${encodeURIComponent(sessionID)}/prompt_async`,
+      this.baseUrl,
+    );
+    url.searchParams.set("directory", this.directory);
     try {
-      response = await this.client.session.prompt(
-        { sessionID, prompt: { text } },
-        { signal },
-      );
+      const response = await this.fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ parts: [{ type: "text", text }] }),
+        signal,
+      });
+      return response.ok ? "confirmed" : "upstream_error";
     } catch {
       return "result_unknown";
     }
-    if (response === null || typeof response !== "object" || Array.isArray(response)) {
-      return "result_unknown";
-    }
-    const error = (response as Record<string, unknown>).error;
-    if (error === undefined || error === null) {
-      return "confirmed";
-    }
-    return error instanceof TypeError ? "result_unknown" : "upstream_error";
   }
 }

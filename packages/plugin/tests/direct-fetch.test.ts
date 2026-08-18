@@ -89,4 +89,26 @@ describe("createLoopbackDirectFetch", () => {
       }
     }
   });
+
+  it("returns SSE response headers before the stream ends", async () => {
+    let finish: (() => void) | undefined;
+    const base = await serve((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write('data: {"type":"server.connected"}\n\n');
+      finish = () => res.end();
+    });
+    const fetchDirect = createLoopbackDirectFetch();
+    const responsePromise = fetchDirect(`${base}/global/event`);
+
+    const outcome = await Promise.race([
+      responsePromise.then(() => "response" as const),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 250)),
+    ]);
+    finish?.();
+    const response = await responsePromise;
+
+    expect(outcome).toBe("response");
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    await expect(response.text()).resolves.toContain("server.connected");
+  });
 });

@@ -1,6 +1,9 @@
+import { createServer, type Server } from "node:http";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { WebUiHttpRequest, WebUiResponseFrame } from "../src/control-channel.js";
+import { createLoopbackDirectFetch } from "../src/direct-fetch.js";
 import { WebUiProxy } from "../src/webui-proxy.js";
 
 const request: WebUiHttpRequest = {
@@ -41,7 +44,7 @@ describe("WebUiProxy", () => {
     await proxy.request(request, new AbortController().signal, (frame) => frames.push(frame));
 
     expect(fetchMock.mock.calls[0][0].toString()).toBe(
-      "http://127.0.0.1:4096/api/session/ses_1/prompt?mode=steer",
+      "http://127.0.0.1:4096/api/session/ses_1/prompt?mode=steer&directory=%2Fwork%2Fnotify",
     );
     expect(frames[0]).toMatchObject({
       type: "webui_http_response_start",
@@ -76,4 +79,54 @@ describe("WebUiProxy", () => {
       Buffer.concat(chunks.map((frame) => Buffer.from(frame.body, "base64"))).length,
     ).toBe(bytes.length);
   });
+
+  it("forwards SSE response frames before the upstream stream ends", async () => {
+    let server: Server | undefined;
+    let finish: (() => void) | undefined;
+    try {
+      server = createServer((_request, response) => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write('data: {"type":"server.connected"}\n\n');
+        finish = () => response.end();
+      });
+      await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("no port");
+
+      const proxy = new WebUiProxy({
+        baseUrl: new URL(`http://127.0.0.1:${address.port}/`),
+        directory: "/work/notify",
+        fetch: createLoopbackDirectFetch(),
+      });
+      const frames: WebUiResponseFrame[] = [];
+      const completed = proxy.request(
+        { ...request, method: "GET", path: "/global/event", body: undefined },
+        new AbortController().signal,
+        (frame) => frames.push(frame),
+      );
+
+      await waitFor(() => frames.some((frame) => frame.type === "webui_http_response_chunk"));
+      expect(frames[0]).toMatchObject({
+        type: "webui_http_response_start",
+        status: 200,
+      });
+      expect(frames[1]).toMatchObject({
+        type: "webui_http_response_chunk",
+        body: Buffer.from('data: {"type":"server.connected"}\n\n').toString("base64"),
+      });
+
+      finish?.();
+      await completed;
+    } finally {
+      await new Promise<void>((resolve) => server?.close(() => resolve()) ?? resolve());
+    }
+  });
 });
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error("condition not reached");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}

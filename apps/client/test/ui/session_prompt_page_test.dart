@@ -28,7 +28,7 @@ void main() {
     lastSeenAt: DateTime.utc(2026, 8, 18),
   );
 
-  testWidgets('submits text once and locks the accepted prompt', (
+  testWidgets('submits text once and reopens the composer after acceptance', (
     tester,
   ) async {
     final sent = <String>[];
@@ -60,14 +60,21 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(sent, ['instance-1|ses-1|command-1|Continue and run the tests']);
-    expect(find.text('已发送到 OpenCode。'), findsOneWidget);
+    expect(find.text('命令已交给 OpenCode Plugin，等待会话更新。'), findsOneWidget);
     expect(
       tester
           .widget<FilledButton>(
             find.byKey(const ValueKey('send-session-prompt')),
           )
           .onPressed,
-      isNull,
+      isNotNull,
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('session-prompt-input')))
+          .controller
+          ?.text,
+      isEmpty,
     );
   });
 }

@@ -50,14 +50,22 @@ class FakeWebUiBrowserController extends WebUiBrowserController {
   var openCalls = 0;
   var closeCalls = 0;
   String? openedInstanceId;
+  String? openedDirectory;
+  String? openedSessionId;
 
   @override
   WebUiBrowserState build() => const WebUiBrowserState.idle();
 
   @override
-  Future<String?> open(String instanceId) async {
+  Future<String?> open(
+    String instanceId, {
+    String? directory,
+    String? sessionId,
+  }) async {
     openCalls++;
     openedInstanceId = instanceId;
+    openedDirectory = directory;
+    openedSessionId = sessionId;
     state = WebUiBrowserState.active(
       instanceId,
       Uri.parse('http://127.0.0.1:42000/'),
@@ -337,7 +345,7 @@ void main() {
 
   testWidgets('empty state when there are no active sessions', (tester) async {
     await pumpHome(tester);
-    expect(find.text('暂无活动会话'), findsOneWidget);
+    expect(find.text('暂无会话'), findsOneWidget);
   });
 
   testWidgets(
@@ -355,7 +363,7 @@ void main() {
       );
 
       final pendingHeader = tester.getTopLeft(find.text('待处理请求')).dy;
-      final sessionHeader = tester.getTopLeft(find.text('活动会话')).dy;
+      final sessionHeader = tester.getTopLeft(find.text('会话')).dy;
       expect(pendingHeader, lessThan(sessionHeader));
       expect(find.text('待回答'), findsOneWidget);
       expect(find.byKey(const ValueKey('pending-refresh')), findsOneWidget);
@@ -451,12 +459,34 @@ void main() {
 
     expect(webUi.openCalls, 1);
     expect(webUi.openedInstanceId, target.instanceId);
+    expect(webUi.openedDirectory, active.directory);
+    expect(webUi.openedSessionId, active.sessionId);
     expect(find.byKey(const ValueKey('webui-tunnel-close')), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('webui-tunnel-close')));
     await tester.pump();
     expect(webUi.closeCalls, 1);
     expect(find.byKey(const ValueKey('webui-tunnel-close')), findsNothing);
+  });
+
+  testWidgets('a controllable instance opens WebUI without an active session', (
+    tester,
+  ) async {
+    final target = instance('one', InstancePresenceState.controllable);
+    final webUi = FakeWebUiBrowserController();
+    await pumpHome(
+      tester,
+      instances: {target.instanceId: target},
+      webUiController: webUi,
+    );
+
+    expect(find.textContaining('/work/shop-api'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('webui-instance-one')));
+    await tester.pump();
+
+    expect(webUi.openCalls, 1);
+    expect(webUi.openedInstanceId, target.instanceId);
+    expect(find.byKey(const ValueKey('webui-tunnel-close')), findsOneWidget);
   });
 
   testWidgets('renders every OpenCode instance presence state', (tester) async {
@@ -531,7 +561,7 @@ void main() {
       instances: {offlineId: offlinePresence(offlineId)},
     );
 
-    expect(find.text('暂无活动会话'), findsNothing);
+    expect(find.text('暂无会话'), findsNothing);
     expect(find.text('离线请求（只读）'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('offline-off-1-req-offline')),

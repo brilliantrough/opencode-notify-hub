@@ -2,55 +2,70 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   SessionPromptAdapter,
-  type SessionPromptClient,
 } from "../src/session-prompt-adapter.js";
 
 const SESSION_ID = "ses_1";
 const TEXT = "Continue with the migration and run the tests.";
 
-function makeClient(promptImpl: (...args: unknown[]) => unknown) {
-  const prompt = vi.fn(async (...args: unknown[]) => promptImpl(...args));
-  const client = { session: { prompt } } as SessionPromptClient;
-  return { client, prompt };
+function makeFetch(response: () => Response | Promise<Response>) {
+  return vi.fn(async () => response()) as typeof fetch;
 }
 
 describe("SessionPromptAdapter", () => {
-  it("passes the exact session id and text to the V2 prompt endpoint", async () => {
-    const { client, prompt } = makeClient(() => ({ data: { data: { admitted: true } } }));
+  it("sends the exact session id and text to the V1 async prompt endpoint", async () => {
+    const fetch = makeFetch(() => new Response(null, { status: 204 }));
+    const adapter = new SessionPromptAdapter({
+      baseUrl: new URL("http://127.0.0.1:1142/"),
+      directory: "/work/notify",
+      fetch,
+    });
     const signal = new AbortController().signal;
 
-    await expect(new SessionPromptAdapter(client).send(SESSION_ID, TEXT, signal)).resolves.toBe(
-      "confirmed",
-    );
-    expect(prompt).toHaveBeenCalledWith(
-      { sessionID: SESSION_ID, prompt: { text: TEXT } },
-      { signal },
+    await expect(adapter.send(SESSION_ID, TEXT, signal)).resolves.toBe("confirmed");
+    expect(fetch).toHaveBeenCalledWith(
+      new URL(
+        "http://127.0.0.1:1142/session/ses_1/prompt_async?directory=%2Fwork%2Fnotify",
+      ),
+      expect.objectContaining({
+        method: "POST",
+        signal,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ parts: [{ type: "text", text: TEXT }] }),
+      }),
     );
   });
 
-  it("maps SDK errors to upstream_error and transport failures to result_unknown", async () => {
-    const { client: rejected } = makeClient(() => ({ error: { _tag: "BadRequestError" } }));
-    await expect(
-      new SessionPromptAdapter(rejected).send(SESSION_ID, TEXT, new AbortController().signal),
-    ).resolves.toBe("upstream_error");
-
-    const { client: failed } = makeClient(() => {
-      throw new Error("connection lost");
+  it("maps non-success responses to upstream_error and transport failures to result_unknown", async () => {
+    const rejected = new SessionPromptAdapter({
+      baseUrl: new URL("http://127.0.0.1:1142/"),
+      directory: "/work/notify",
+      fetch: makeFetch(() => new Response(null, { status: 409 })),
     });
     await expect(
-      new SessionPromptAdapter(failed).send(SESSION_ID, TEXT, new AbortController().signal),
+      rejected.send(SESSION_ID, TEXT, new AbortController().signal),
+    ).resolves.toBe("upstream_error");
+
+    const failed = new SessionPromptAdapter({
+      baseUrl: new URL("http://127.0.0.1:1142/"),
+      directory: "/work/notify",
+      fetch: vi.fn(() => {
+        throw new Error("connection lost");
+      }) as typeof fetch,
+    });
+    await expect(
+      failed.send(SESSION_ID, TEXT, new AbortController().signal),
     ).resolves.toBe("result_unknown");
   });
 
   it("never exposes the prompt text through a status", async () => {
-    const { client } = makeClient(() => {
-      throw new Error(`sensitive prompt: ${TEXT}`);
+    const adapter = new SessionPromptAdapter({
+      baseUrl: new URL("http://127.0.0.1:1142/"),
+      directory: "/work/notify",
+      fetch: vi.fn(() => {
+        throw new Error(`sensitive prompt: ${TEXT}`);
+      }) as typeof fetch,
     });
-    const status = await new SessionPromptAdapter(client).send(
-      SESSION_ID,
-      TEXT,
-      new AbortController().signal,
-    );
+    const status = await adapter.send(SESSION_ID, TEXT, new AbortController().signal);
     expect(status).toBe("result_unknown");
     expect(JSON.stringify(status)).not.toContain(TEXT);
   });

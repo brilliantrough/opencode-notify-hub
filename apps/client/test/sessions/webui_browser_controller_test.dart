@@ -30,6 +30,7 @@ class _FakeTunnel extends GatewayWebUiTunnel {
   final Completer<void> _done = Completer<void>();
   var startCalls = 0;
   var closeCalls = 0;
+  String? startedPath;
 
   @override
   Future<void> get done => _done.future;
@@ -37,6 +38,7 @@ class _FakeTunnel extends GatewayWebUiTunnel {
   @override
   Future<Uri> start() async {
     startCalls++;
+    startedPath = initialPath;
     return uri;
   }
 
@@ -116,6 +118,35 @@ void main() {
       WebUiBrowserStatus.idle,
     );
   });
+
+  test(
+    'opens a Session-scoped directory route when a target is provided',
+    () async {
+      final auth = _FakeAuthController();
+      final tunnel = _FakeTunnel(Uri.parse('http://127.0.0.1:42004/'));
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(() => auth),
+          webUiTunnelFactoryProvider.overrideWithValue((_) => tunnel),
+          webUiBrowserLauncherProvider.overrideWithValue((_) async => true),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(webUiBrowserControllerProvider.notifier)
+          .open(
+            'instance-1',
+            directory: '/home/pzy000/test_temp',
+            sessionId: 'ses-1',
+          );
+
+      expect(
+        tunnel.startedPath,
+        '/L2hvbWUvcHp5MDAwL3Rlc3RfdGVtcA/session/ses-1',
+      );
+    },
+  );
 
   test('returns to idle when the remote tunnel closes', () async {
     final auth = _FakeAuthController();

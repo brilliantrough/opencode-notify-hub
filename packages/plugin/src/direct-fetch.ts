@@ -12,6 +12,7 @@
  */
 
 import { request as httpRequest } from "node:http";
+import { Readable } from "node:stream";
 
 /** Fetch-compatible function that bypasses proxies for http:// loopback URLs. */
 export function createLoopbackDirectFetch(): typeof fetch {
@@ -76,28 +77,30 @@ function directHttp(parts: RequestParts): Promise<Response> {
         // Never consult proxy environment for this hop.
       },
       (response) => {
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer) => chunks.push(chunk));
-        response.on("end", () => {
-          const headers = new Headers();
-          for (const [name, value] of Object.entries(response.headers)) {
-            if (typeof value === "string") {
-              headers.set(name, value);
-            } else if (Array.isArray(value)) {
-              for (const entry of value) {
-                headers.append(name, entry);
-              }
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(response.headers)) {
+          if (typeof value === "string") {
+            headers.set(name, value);
+          } else if (Array.isArray(value)) {
+            for (const entry of value) {
+              headers.append(name, entry);
             }
           }
-          resolve(
-            new Response(Buffer.concat(chunks), {
-              status: response.statusCode ?? 0,
-              statusText: response.statusMessage ?? "",
-              headers,
-            }),
-          );
-        });
-        response.on("error", reject);
+        }
+        const status = response.statusCode ?? 500;
+        const emptyBody =
+          parts.method === "HEAD" || status === 204 || status === 205 || status === 304;
+        const body = emptyBody
+          ? null
+          : (Readable.toWeb(response) as ReadableStream<Uint8Array>);
+        if (emptyBody) response.resume();
+        resolve(
+          new Response(body, {
+            status,
+            statusText: response.statusMessage ?? "",
+            headers,
+          }),
+        );
       },
     );
     request.on("error", reject);

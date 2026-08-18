@@ -74,7 +74,7 @@ class HomePage extends ConsumerWidget {
               offline.isEmpty &&
               !pending.isLoading &&
               !pending.hasError
-          ? const Center(child: Text('暂无活动会话'))
+          ? const Center(child: Text('暂无会话'))
           : ListView(
               children: [
                 if (pending.isLoading && interactions.isEmpty)
@@ -111,18 +111,28 @@ class HomePage extends ConsumerWidget {
                 if (instances.isNotEmpty) ...[
                   const _SectionHeader('OpenCode 实例'),
                   for (final instance in instances.values)
-                    _InstanceTile(instance: instance),
+                    _InstanceTile(
+                      instance: instance,
+                      webUi: webUi,
+                      onOpenWebUi: (target) =>
+                          _openWebUi(context, ref, target.instanceId),
+                    ),
                 ],
                 if (ordered.isNotEmpty && instances.isNotEmpty)
                   const Divider(height: 24),
-                if (ordered.isNotEmpty) const _SectionHeader('活动会话'),
+                if (ordered.isNotEmpty) const _SectionHeader('会话'),
                 for (final session in ordered)
                   _SessionTile(
                     session: session,
                     target: sessionControlTarget(session, instances.values),
                     webUi: webUi,
-                    onOpenWebUi: (target) =>
-                        _openWebUi(context, ref, target.instanceId),
+                    onOpenWebUi: (session, target) => _openWebUi(
+                      context,
+                      ref,
+                      target.instanceId,
+                      directory: session.directory,
+                      sessionId: session.sessionId,
+                    ),
                   ),
               ],
             ),
@@ -132,11 +142,13 @@ class HomePage extends ConsumerWidget {
   Future<void> _openWebUi(
     BuildContext context,
     WidgetRef ref,
-    String instanceId,
-  ) async {
+    String instanceId, {
+    String? directory,
+    String? sessionId,
+  }) async {
     final error = await ref
         .read(webUiBrowserControllerProvider.notifier)
-        .open(instanceId);
+        .open(instanceId, directory: directory, sessionId: sessionId);
     if (error != null && context.mounted) {
       ScaffoldMessenger.of(
         context,
@@ -230,9 +242,15 @@ class _SectionHeader extends StatelessWidget {
 }
 
 class _InstanceTile extends StatelessWidget {
-  const _InstanceTile({required this.instance});
+  const _InstanceTile({
+    required this.instance,
+    required this.webUi,
+    required this.onOpenWebUi,
+  });
 
   final OpenCodeInstancePresence instance;
+  final WebUiBrowserState webUi;
+  final void Function(OpenCodeInstancePresence target) onOpenWebUi;
 
   @override
   Widget build(BuildContext context) {
@@ -251,12 +269,45 @@ class _InstanceTile extends StatelessWidget {
     final detail = instance.state == InstancePresenceState.offline
         ? '${instance.openCodeVersion} · ${_elapsedText(instance.lastSeenAt)}'
         : 'OpenCode ${instance.openCodeVersion}';
+    final webUiOpening =
+        webUi.status == WebUiBrowserStatus.opening &&
+        webUi.instanceId == instance.instanceId;
+    final webUiActive = webUi.activeFor(instance.instanceId);
     return ListTile(
       key: ValueKey('instance-${instance.instanceId}'),
       leading: Icon(icon),
       title: Text('${instance.machine} · ${instance.project}'),
-      subtitle: Text(detail),
-      trailing: Chip(label: Text(label), visualDensity: VisualDensity.compact),
+      subtitle: Text(
+        '$detail\n${instance.directory}',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (instance.state == InstancePresenceState.controllable)
+            IconButton(
+              key: ValueKey('webui-instance-${instance.instanceId}'),
+              tooltip: webUiActive
+                  ? '在浏览器中重新打开 OpenCode WebUI 仪表盘'
+                  : '在浏览器中打开 OpenCode WebUI 仪表盘',
+              icon: webUiOpening
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      webUiActive
+                          ? Icons.open_in_browser
+                          : Icons.language_outlined,
+                    ),
+              onPressed: webUi.status == WebUiBrowserStatus.opening
+                  ? null
+                  : () => onOpenWebUi(instance),
+            ),
+          Chip(label: Text(label), visualDensity: VisualDensity.compact),
+        ],
+      ),
     );
   }
 }
@@ -302,7 +353,8 @@ class _SessionTile extends StatelessWidget {
   final ActiveSession session;
   final OpenCodeInstancePresence? target;
   final WebUiBrowserState webUi;
-  final void Function(OpenCodeInstancePresence target) onOpenWebUi;
+  final void Function(ActiveSession session, OpenCodeInstancePresence target)
+  onOpenWebUi;
 
   @override
   Widget build(BuildContext context) {
@@ -344,9 +396,7 @@ class _SessionTile extends StatelessWidget {
                 if (target != null)
                   IconButton(
                     key: ValueKey('webui-${session.sessionId}'),
-                    tooltip: webUiActive
-                        ? '在浏览器中重新打开 OpenCode WebUI'
-                        : '在浏览器中打开 OpenCode WebUI',
+                    tooltip: webUiActive ? '在浏览器中重新打开此会话' : '在浏览器中打开此会话',
                     icon: webUiOpening
                         ? const SizedBox.square(
                             dimension: 20,
@@ -359,7 +409,7 @@ class _SessionTile extends StatelessWidget {
                           ),
                     onPressed: webUi.status == WebUiBrowserStatus.opening
                         ? null
-                        : () => onOpenWebUi(target!),
+                        : () => onOpenWebUi(session, target!),
                   ),
               ],
             ),

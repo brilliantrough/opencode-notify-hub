@@ -40,6 +40,22 @@ NotifyEvent _actionRequired({
   permissionType: 'filesystem',
 );
 
+NotifyEvent _terminal({
+  String eventId = 'evt-terminal',
+  String sessionId = 'sess-1',
+}) => NotifyEvent(
+  eventId: eventId,
+  occurredAt: DateTime.utc(2026, 1, 1, 12, 2),
+  machine: 'macbook',
+  project: 'linewrite',
+  directory: '/repo',
+  sessionId: sessionId,
+  sessionTitle: 'Fix login',
+  type: NotifyEventType.terminal,
+  outcome: TerminalOutcome.completed,
+  elapsedSeconds: 60,
+);
+
 late ProviderContainer container;
 late ActiveSessions sessions;
 
@@ -86,7 +102,9 @@ void main() {
 
     test('tracks sessions independently by session ID', () {
       sessions.upsertHeartbeat(_heartbeat());
-      sessions.upsertHeartbeat(_heartbeat(eventId: 'evt-4', sessionId: 'sess-2'));
+      sessions.upsertHeartbeat(
+        _heartbeat(eventId: 'evt-4', sessionId: 'sess-2'),
+      );
 
       expect(state.keys, containsAll(['sess-1', 'sess-2']));
     });
@@ -103,7 +121,9 @@ void main() {
 
     test('accumulates distinct pending request IDs', () {
       sessions.addPending(_actionRequired());
-      sessions.addPending(_actionRequired(eventId: 'evt-3', requestId: 'req-2'));
+      sessions.addPending(
+        _actionRequired(eventId: 'evt-3', requestId: 'req-2'),
+      );
 
       expect(state['sess-1']!.pendingRequestIds, {'req-1', 'req-2'});
     });
@@ -112,7 +132,9 @@ void main() {
   group('ActiveSessions.clearPending', () {
     test('removes only the resolved request ID', () {
       sessions.addPending(_actionRequired());
-      sessions.addPending(_actionRequired(eventId: 'evt-3', requestId: 'req-2'));
+      sessions.addPending(
+        _actionRequired(eventId: 'evt-3', requestId: 'req-2'),
+      );
 
       sessions.clearPending('sess-1', 'req-1');
 
@@ -130,17 +152,18 @@ void main() {
   group('ActiveSessions.markTerminal', () {
     test('marks the session not running and clears pending requests', () {
       sessions.addPending(_actionRequired());
-      sessions.markTerminal('sess-1');
+      sessions.markTerminal(_terminal());
 
       final session = state['sess-1']!;
       expect(session.running, isFalse);
       expect(session.pendingRequestIds, isEmpty);
     });
 
-    test('is a no-op for an unknown session', () {
-      sessions.markTerminal('nope');
+    test('creates a finished session when terminal arrives first', () {
+      sessions.markTerminal(_terminal(sessionId: 'nope'));
 
-      expect(state, isEmpty);
+      expect(state['nope']!.running, isFalse);
+      expect(state['nope']!.directory, '/repo');
     });
   });
 }

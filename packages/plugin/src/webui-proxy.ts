@@ -36,6 +36,9 @@ export class WebUiProxy {
     emit: (frame: WebUiResponseFrame) => void,
   ): Promise<void> {
     const url = new URL(request.path, this.baseUrl);
+    if (!url.searchParams.has("directory") && this.directory !== "unknown") {
+      url.searchParams.set("directory", this.directory);
+    }
     const headers = new Headers();
     for (const [name, values] of Object.entries(request.headers)) {
       const lower = name.toLowerCase();

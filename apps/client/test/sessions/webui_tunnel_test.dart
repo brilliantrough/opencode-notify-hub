@@ -61,6 +61,7 @@ void main() {
       accessToken: 'access-token',
       instanceId: 'instance-1',
       connector: (_, _) => channel,
+      initialPath: '/project/session/ses-1',
     );
     addTearDown(() async {
       await tunnel.close();
@@ -77,6 +78,7 @@ void main() {
       jsonEncode({'type': 'webui_tunnel_ready', 'tunnelId': tunnelId}),
     );
     final localUri = await start;
+    expect(localUri.path, '/project/session/ses-1');
 
     final http = HttpClient();
     addTearDown(() => http.close(force: true));
@@ -93,7 +95,6 @@ void main() {
     expect(requestFrame['method'], 'GET');
     expect(requestFrame['path'], '/api/session?x=1');
     final requestId = requestFrame['requestId'] as String;
-
     channel.incoming.add(
       jsonEncode({
         'type': 'webui_http_response_start',
@@ -101,7 +102,7 @@ void main() {
         'requestId': requestId,
         'status': 200,
         'headers': {
-          'content-type': ['application/json'],
+          'content-type': ['text/event-stream'],
         },
       }),
     );
@@ -110,7 +111,7 @@ void main() {
         'type': 'webui_http_response_chunk',
         'tunnelId': tunnelId,
         'requestId': requestId,
-        'body': base64Encode(utf8.encode('{"ok":true}')),
+        'body': base64Encode(utf8.encode('data: {"ok":true}\n\n')),
       }),
     );
     channel.incoming.add(
@@ -123,7 +124,40 @@ void main() {
 
     final response = await responseFuture;
     expect(response.statusCode, 200);
-    expect(await utf8.decoder.bind(response).join(), '{"ok":true}');
+    expect(await utf8.decoder.bind(response).join(), 'data: {"ok":true}\n\n');
+  });
+
+  test('Dart HttpServer flushes an SSE chunk before close', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final release = Completer<void>();
+    server.listen((request) async {
+      request.response.headers.contentType = ContentType(
+        'text',
+        'event-stream',
+      );
+      request.response.headers.chunkedTransferEncoding = true;
+      request.response.bufferOutput = false;
+      request.response.add(utf8.encode('data: {"ok":true}\n\n'));
+      await request.response.flush();
+      await release.future;
+      await request.response.close();
+    });
+    addTearDown(() async {
+      if (!release.isCompleted) release.complete();
+      await server.close(force: true);
+    });
+
+    final client = HttpClient();
+    addTearDown(() => client.close(force: true));
+    final response = await (await client.getUrl(
+      Uri.parse('http://127.0.0.1:${server.port}/'),
+    )).close().timeout(const Duration(seconds: 1));
+    final chunks = StreamIterator<List<int>>(response);
+
+    expect(await chunks.moveNext().timeout(const Duration(seconds: 1)), isTrue);
+    expect(utf8.decode(chunks.current), 'data: {"ok":true}\n\n');
+    release.complete();
+    await chunks.cancel();
   });
 }
 

@@ -36,12 +36,14 @@ class GatewayWebUiTunnel {
     required this.accessToken,
     required this.instanceId,
     WebUiSocketConnector? connector,
+    this.initialPath = '/',
   }) : _connector = connector ?? _defaultConnector;
 
   final Uri gatewayUri;
   final String accessToken;
   final String instanceId;
   final WebUiSocketConnector _connector;
+  String initialPath;
 
   final Map<String, _PendingResponse> _pending = {};
   final Completer<void> _done = Completer<void>();
@@ -73,7 +75,7 @@ class GatewayWebUiTunnel {
     final ready = Completer<String>();
     _ready = ready;
     _subscription = channel.stream.listen(
-      _handleFrame,
+      (raw) => unawaited(_handleFrame(raw)),
       onError: (Object error, StackTrace stackTrace) {
         if (!ready.isCompleted) ready.completeError(error, stackTrace);
         unawaited(close());
@@ -97,7 +99,13 @@ class GatewayWebUiTunnel {
     }
     _server = server;
     server.listen(_handleRequest);
-    return Uri.parse('http://127.0.0.1:${server.port}/');
+    final path = initialPath.startsWith('/') ? initialPath : '/$initialPath';
+    return Uri(
+      scheme: 'http',
+      host: '127.0.0.1',
+      port: server.port,
+      path: path,
+    );
   }
 
   Future<void> close() => _closing ??= _close();
@@ -172,7 +180,8 @@ class GatewayWebUiTunnel {
       return;
     }
     final requestId = _requestId();
-    _pending[requestId] = _PendingResponse(request.response);
+    final pending = _PendingResponse(request.response);
+    _pending[requestId] = pending;
     final headers = <String, List<String>>{};
     request.headers.forEach((name, values) {
       headers[name] = values;
@@ -188,9 +197,10 @@ class GatewayWebUiTunnel {
         if (body.isNotEmpty) 'body': base64Encode(body),
       }),
     );
+    await pending.done;
   }
 
-  void _handleFrame(Object? raw) {
+  Future<void> _handleFrame(Object? raw) async {
     if (raw is! String) return;
     final Object? value;
     try {
@@ -229,16 +239,16 @@ class GatewayWebUiTunnel {
         final body = value['body'];
         if (body is String) {
           try {
-            pending.add(base64Decode(body));
+            await pending.add(base64Decode(body));
           } on FormatException {
-            unawaited(pending.fail());
+            await pending.fail();
             _pending.remove(requestId);
           }
         }
         return;
       case 'webui_http_response_end':
         _pending.remove(requestId);
-        unawaited(pending.end());
+        await pending.end();
         return;
     }
   }
@@ -254,8 +264,12 @@ class _PendingResponse {
   _PendingResponse(this.response);
 
   final HttpResponse response;
+  final Completer<void> _done = Completer<void>();
   var _started = false;
   var _ended = false;
+  Future<void> _writes = Future<void>.value();
+
+  Future<void> get done => _done.future;
 
   void start(int status, Map<dynamic, dynamic> rawHeaders) {
     if (_started || _ended) return;
@@ -275,19 +289,34 @@ class _PendingResponse {
         if (value is String) response.headers.add(name, value);
       }
     }
+    if (response.headers.contentLength == -1) {
+      response.headers.chunkedTransferEncoding = true;
+    }
+    if (response.headers.contentType?.mimeType == 'text/event-stream') {
+      response.bufferOutput = false;
+    }
   }
 
-  void add(List<int> bytes) {
-    if (_ended) return;
+  Future<void> add(List<int> bytes) {
+    if (_ended) return Future<void>.value();
     if (!_started) start(HttpStatus.badGateway, const {});
-    response.add(bytes);
+    _writes = _writes.then((_) async {
+      response.add(bytes);
+      await response.flush();
+    });
+    return _writes;
   }
 
   Future<void> end() async {
     if (_ended) return;
     _ended = true;
     if (!_started) response.statusCode = HttpStatus.badGateway;
-    await response.close();
+    try {
+      await _writes;
+      await response.close();
+    } finally {
+      if (!_done.isCompleted) _done.complete();
+    }
   }
 
   Future<void> fail() async {

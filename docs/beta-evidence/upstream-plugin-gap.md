@@ -26,6 +26,15 @@ The answer side is blocked **upstream**, not by anything in this repo.
 | `opencode` TUI (pty) | yes | yes (`question.asked` observed) | **no** — TUI process binds no LISTEN socket; `serverUrl` (`localhost:4096`) gives `ECONNREFUSED` even with `NO_PROXY`; in-process `input.client` has no `question`/`permission`/`v2`/`global.health` surfaces (enumerated keys: `_client,global,project,pty,config,tool,instance,path,vcs,session,command,provider,find,file,app,mcp,lsp,formatter,tui,auth,event`; `session`/`global` expose only `_client`) | notifications only |
 | `opencode serve` + `opencode attach` (pty) | yes, **in the attach process**, with `serverUrl` = the **reachable** serve listener (health 200) | yes | **no** — a session driven from the attach TUI keeps its messages and pending question in the **attach process's private store**; the serve API shows no such session/messages/questions, so the plugin (querying the serve) sees `[]` | control channel registers **controllable** but answers cannot route |
 
+The standalone TUI row above was probed without an explicit `--port` flag. On
+2026-08-19, `opencode --port 1142` was observed to bind
+`127.0.0.1:1142`; `/global/health` returned OpenCode `1.18.18` and `/session`
+returned the current project's session. This makes the local HTTP/WebUI
+listener reachable to the Plugin, but does not by itself prove that pending
+lists, replies, prompts, and the temporary WebUI tunnel all round-trip through
+the same TUI store. The full control probe must be rerun for this explicit-port
+mode before treating it as a supported launch mode.
+
 ## Second verified defect: the V1 pending APIs are broken on 1.18.18
 
 Independent of the launch-mode gaps: the V1 global endpoints do not see the

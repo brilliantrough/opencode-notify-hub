@@ -53,7 +53,7 @@ import { PendingAdapter, type PendingListClient } from "./pending-adapter.js";
 import { QueuePump } from "./pump.js";
 import { PermissionReplyAdapter, type PermissionReplyClient } from "./permission-reply-adapter.js";
 import { QuestionReplyAdapter, type QuestionReplyClient } from "./question-reply-adapter.js";
-import { SessionPromptAdapter, type SessionPromptClient } from "./session-prompt-adapter.js";
+import { SessionPromptAdapter } from "./session-prompt-adapter.js";
 import { WebUiProxy } from "./webui-proxy.js";
 import { GatewaySender } from "./sender.js";
 import {
@@ -183,13 +183,10 @@ export function createSessionNotifyHooks(
   // HTTP_PROXY from the host environment (issue #14: a proxy without a
   // localhost no_proxy answers 502 for loopback, breaking the control path).
   const loopbackFetch = deps.serverFetch ?? createLoopbackDirectFetch();
-  let v2:
-    | (PendingListClient & QuestionReplyClient & PermissionReplyClient & SessionPromptClient)
-    | null = null;
+  let v2: (PendingListClient & QuestionReplyClient & PermissionReplyClient) | null = null;
   const v2Client = (): PendingListClient &
     QuestionReplyClient &
-    PermissionReplyClient &
-    SessionPromptClient => {
+    PermissionReplyClient => {
     v2 ??= createOpencodeClient({
       baseUrl: input.serverUrl.toString(),
       directory,
@@ -245,7 +242,11 @@ export function createSessionNotifyHooks(
             return decider.reply(requestId, sessionID, decision, signal);
           },
           sendPrompt: (sessionID, text, signal) => {
-            prompter ??= new SessionPromptAdapter(v2Client());
+            prompter ??= new SessionPromptAdapter({
+              baseUrl: input.serverUrl,
+              directory,
+              fetch: loopbackFetch,
+            });
             return prompter.send(sessionID, text, signal);
           },
           webUiRequest: (

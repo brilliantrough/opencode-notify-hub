@@ -114,7 +114,7 @@ class NotificationRouter {
         _activeSessions.addPending(event);
         await _recordAndAlert(event);
       case NotifyEventType.terminal:
-        _activeSessions.markTerminal(event.sessionId);
+        _activeSessions.markTerminal(event);
         await _recordAndAlert(event);
       case NotifyEventType.actionResolved:
         final requestId = event.requestId;

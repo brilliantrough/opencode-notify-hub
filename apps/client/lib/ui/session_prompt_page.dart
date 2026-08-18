@@ -44,6 +44,11 @@ class _SessionPromptPageState extends ConsumerState<SessionPromptPage> {
           sessionId: widget.session.sessionId,
           text: text,
         );
+    if (mounted &&
+        ref.read(sessionPromptStatesProvider)[widget.session.sessionId] ==
+            SessionPromptState.sent) {
+      _textController.clear();
+    }
   }
 
   @override
@@ -52,7 +57,7 @@ class _SessionPromptPageState extends ConsumerState<SessionPromptPage> {
         ref.watch(sessionPromptStatesProvider)[widget.session.sessionId] ??
         SessionPromptState.idle;
     final sending = state == SessionPromptState.sending;
-    final locked = sending || state == SessionPromptState.sent;
+    final locked = sending;
     return Scaffold(
       appBar: AppBar(title: const Text('发送到 OpenCode')),
       body: ListView(
@@ -112,7 +117,11 @@ class _PromptStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (text, icon, color) = switch (state) {
-      SessionPromptState.sent => ('已发送到 OpenCode。', Icons.send_outlined, null),
+      SessionPromptState.sent => (
+        '命令已交给 OpenCode Plugin，等待会话更新。',
+        Icons.send_outlined,
+        null,
+      ),
       SessionPromptState.rejected => (
         '目标实例不可用，内容没有发送。',
         Icons.block_outlined,

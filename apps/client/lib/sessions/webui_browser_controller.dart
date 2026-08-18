@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -69,9 +70,16 @@ class WebUiBrowserController extends Notifier<WebUiBrowserState> {
 
   /// Opens or reopens the current instance in the system browser.
   /// Returns a user-facing error when the best-effort operation fails.
-  Future<String?> open(String instanceId) async {
+  Future<String?> open(
+    String instanceId, {
+    String? directory,
+    String? sessionId,
+  }) async {
+    final initialPath = _sessionPath(directory, sessionId);
     final current = state;
-    if (current.activeFor(instanceId) && current.localUri != null) {
+    if (current.activeFor(instanceId) &&
+        current.localUri != null &&
+        current.localUri!.path == initialPath) {
       return await _launch(current.localUri!) ? null : '无法打开系统默认浏览器';
     }
     if (current.status == WebUiBrowserStatus.opening) {
@@ -81,6 +89,7 @@ class WebUiBrowserController extends Notifier<WebUiBrowserState> {
     await close();
     state = WebUiBrowserState.opening(instanceId);
     final tunnel = ref.read(webUiTunnelFactoryProvider)(instanceId);
+    tunnel.initialPath = initialPath;
     _tunnel = tunnel;
     try {
       final uri = await tunnel.start();
@@ -103,6 +112,19 @@ class WebUiBrowserController extends Notifier<WebUiBrowserState> {
       await tunnel.close();
       return '无法建立 OpenCode WebUI 临时连接';
     }
+  }
+
+  String _sessionPath(String? directory, String? sessionId) {
+    if (directory == null ||
+        directory.isEmpty ||
+        sessionId == null ||
+        sessionId.isEmpty) {
+      return '/';
+    }
+    final encodedDirectory = base64Url
+        .encode(utf8.encode(directory))
+        .replaceAll('=', '');
+    return '/$encodedDirectory/session/${Uri.encodeComponent(sessionId)}';
   }
 
   Future<void> close() async {

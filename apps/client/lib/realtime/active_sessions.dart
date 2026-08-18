@@ -121,18 +121,23 @@ class ActiveSessions extends Notifier<Map<String, ActiveSession>> {
     };
   }
 
-  /// Marks the session's run as ended: no longer running, and any still
-  /// pending requests are dropped because a finished run cannot be answered
-  /// anymore. A no-op when the session is unknown.
-  void markTerminal(String sessionId) {
-    final existing = state[sessionId];
-    if (existing == null) {
-      return;
-    }
-    state = {
-      ...state,
-      sessionId: existing.copyWith(running: false, pendingRequestIds: const {}),
-    };
+  /// Marks the session's run as ended and retains its identity for recent
+  /// Session actions. A terminal event can arrive before the first heartbeat
+  /// for short-lived runs, so it is also allowed to create the session.
+  void markTerminal(NotifyEvent event) {
+    final existing = state[event.sessionId];
+    final updated = existing == null
+        ? _fromEvent(event, running: false)
+        : existing.copyWith(
+            machine: event.machine,
+            project: event.project,
+            directory: event.directory,
+            title: event.sessionTitle,
+            lastHeartbeatAt: event.occurredAt,
+            running: false,
+            pendingRequestIds: const {},
+          );
+    state = {...state, event.sessionId: updated};
   }
 
   static ActiveSession _fromEvent(
