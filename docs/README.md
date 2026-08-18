@@ -35,6 +35,8 @@ Choose the guide that matches what you are trying to do.
 - [Multi-device agent workflow](agent-workflow.md): GitHub Issues, isolated
   branches/worktrees, pull requests, cross-machine handoff, and credential
   boundaries for agent-assisted development.
+- [Windows development handoff](windows-agent-handoff.md): reconciliation,
+  safety, build, and native acceptance rules for the Windows node.
 
 Project-wide policies live at the repository root:
 [Contributing](../CONTRIBUTING.md), [Security](../SECURITY.md),

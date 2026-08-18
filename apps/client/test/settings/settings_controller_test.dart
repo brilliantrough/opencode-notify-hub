@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:client/devices/devices_controller.dart';
+import 'package:client/notifications/alert_sound.dart';
+import 'package:client/notifications/custom_sound_store.dart';
 import 'package:client/settings/settings_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,9 +11,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class MockStartupToggle extends Mock implements StartupToggle {}
 
+class MockCustomSoundStore extends Mock implements CustomSoundStore {}
+
 Future<ProviderContainer> _createContainer({
   Map<String, Object> initialValues = const {},
   StartupToggle? startupToggle,
+  CustomSoundStore? customSoundStore,
   bool resetStore = true,
 }) async {
   // Only reset the mock store when simulating a fresh device; a "restart"
@@ -31,6 +36,8 @@ Future<ProviderContainer> _createContainer({
     overrides: [
       sharedPreferencesProvider.overrideWithValue(Future.value(prefs)),
       startupToggleProvider.overrideWithValue(toggle),
+      if (customSoundStore != null)
+        customSoundStoreProvider.overrideWithValue(customSoundStore),
     ],
   );
   addTearDown(container.dispose);
@@ -49,6 +56,9 @@ void main() {
       final state = container.read(settingsControllerProvider);
 
       expect(state.soundEnabled, isTrue);
+      expect(state.alertSoundId, softChimeAlertSound.id);
+      expect(state.alertSound, softChimeAlertSound);
+      expect(state.customSound, isNull);
       expect(state.paused, isFalse);
       expect(state.launchAtStartup, isFalse);
       expect(state.textScale, 1);
@@ -58,6 +68,7 @@ void main() {
       final container = await _createContainer(
         initialValues: {
           SettingsController.soundEnabledKey: false,
+          SettingsController.alertSoundIdKey: bundledAlertSounds[2].id,
           SettingsController.pausedKey: true,
           SettingsController.launchAtStartupKey: true,
           SettingsController.textScaleKey: 1.25,
@@ -67,6 +78,7 @@ void main() {
       final state = container.read(settingsControllerProvider);
 
       expect(state.soundEnabled, isFalse);
+      expect(state.alertSound, bundledAlertSounds[2]);
       expect(state.paused, isTrue);
       expect(state.launchAtStartup, isTrue);
       expect(state.textScale, 1.25);
@@ -86,6 +98,60 @@ void main() {
         expect(second.read(settingsControllerProvider).soundEnabled, isFalse);
       },
     );
+
+    test('setAlertSound persists the bundled selection', () async {
+      final first = await _createContainer();
+
+      await first
+          .read(settingsControllerProvider.notifier)
+          .setAlertSound(bundledAlertSounds[3].id);
+
+      expect(
+        first.read(settingsControllerProvider).alertSound,
+        bundledAlertSounds[3],
+      );
+      final second = await _createContainer(resetStore: false);
+      expect(
+        second.read(settingsControllerProvider).alertSound,
+        bundledAlertSounds[3],
+      );
+    });
+
+    test('imports, selects, and persists a custom sound', () async {
+      final store = MockCustomSoundStore();
+      const custom = CustomAlertSound(
+        displayName: 'Quiet Ping',
+        localPath: '/support/custom.wav',
+      );
+      when(() => store.importSound()).thenAnswer((_) async => custom);
+      final first = await _createContainer(customSoundStore: store);
+
+      final imported = await first
+          .read(settingsControllerProvider.notifier)
+          .importCustomSound();
+
+      expect(imported, isTrue);
+      expect(first.read(settingsControllerProvider).alertSound, custom);
+      final second = await _createContainer(resetStore: false);
+      expect(second.read(settingsControllerProvider).alertSound, custom);
+    });
+
+    test('cancelled custom import leaves the selection unchanged', () async {
+      final store = MockCustomSoundStore();
+      when(() => store.importSound()).thenAnswer((_) async => null);
+      final container = await _createContainer(customSoundStore: store);
+
+      expect(
+        await container
+            .read(settingsControllerProvider.notifier)
+            .importCustomSound(),
+        isFalse,
+      );
+      expect(
+        container.read(settingsControllerProvider).alertSound,
+        softChimeAlertSound,
+      );
+    });
 
     test('setPaused updates state and persists across a restart', () async {
       final first = await _createContainer();
@@ -290,6 +356,10 @@ void main() {
       expect(a, const SettingsState(soundEnabled: true));
       expect(a.copyWith(paused: true).paused, isTrue);
       expect(a.copyWith(paused: true).soundEnabled, isTrue);
+      expect(
+        a.copyWith(alertSoundId: bundledAlertSounds[1].id).alertSoundId,
+        bundledAlertSounds[1].id,
+      );
       expect(a.copyWith(launchAtStartup: true).launchAtStartup, isTrue);
       expect(a.copyWith(textScale: 1.2).textScale, 1.2);
       expect(a.copyWith(paused: true), isNot(a));

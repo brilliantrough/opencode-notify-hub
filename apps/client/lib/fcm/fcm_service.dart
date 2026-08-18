@@ -239,14 +239,7 @@ class FcmService {
     if (_history.contains(event.eventId)) {
       return;
     }
-    _history.add(
-      HistoryEntry(
-        eventId: event.eventId,
-        title: buildNotificationTitle(event),
-        body: buildNotificationBody(event),
-        receivedAt: DateTime.now(),
-      ),
-    );
+    _history.add(buildHistoryEntry(event, receivedAt: DateTime.now()));
   }
 
   void _onTokenRefresh(String token) {

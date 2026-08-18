@@ -14,7 +14,11 @@ import {
   verifyEmailBodySchema,
 } from "../src/schemas/auth.js";
 import { errorResponseSchema, healthStatusSchema } from "../src/schemas/common.js";
-import { commandAcceptedSchema, commandOutcomeSchema } from "../src/schemas/commands.js";
+import {
+  commandAcceptedSchema,
+  commandOutcomeSchema,
+  sendPromptBodySchema,
+} from "../src/schemas/commands.js";
 import {
   instancePresenceSchema,
   pluginControlClientMessageSchema,
@@ -89,6 +93,14 @@ const commandIdPathParameter = {
   required: true,
   description: "Client-generated command identifier.",
   schema: { type: "string", format: "uuid" },
+};
+
+const sessionIdPathParameter = {
+  name: "sessionId",
+  in: "path",
+  required: true,
+  description: "OpenCode Session identifier.",
+  schema: { type: "string", minLength: 1 },
 };
 
 const permissionRequestIdPathParameter = {
@@ -480,6 +492,28 @@ const document = {
         },
       },
     },
+    "/v1/instances/{instanceId}/sessions/{sessionId}/prompt": {
+      post: {
+        operationId: "sendSessionPrompt",
+        tags: ["sessions"],
+        security: bearerSecurity,
+        summary: "Send one free-form prompt to an online OpenCode Session.",
+        description:
+          "Routes one text prompt to the authenticated user's exact online Plugin " +
+          "instance. The 202 response acknowledges that the Gateway wrote the " +
+          "command to the Plugin control connection; it does not wait for OpenCode " +
+          "to admit or execute the prompt. Prompts are never queued or retried.",
+        parameters: [instanceIdPathParameter, sessionIdPathParameter],
+        requestBody: jsonBody("SendPromptBody"),
+        responses: {
+          "202": jsonResponse("Prompt accepted for best-effort delivery.", "CommandAccepted"),
+          "400": errorResponse("Validation failed."),
+          "401": errorResponse("Missing or invalid access token."),
+          "404": errorResponse("Unknown or non-actionable instance for this user."),
+          "409": errorResponse("The same command is already in flight."),
+        },
+      },
+    },
     "/v1/ws": {
       get: {
         operationId: "connectEvents",
@@ -498,6 +532,23 @@ const document = {
             "WebSocket upgrade accepted; frames carry WsServerMessage only.",
           ),
           "401": errorResponse("Missing or invalid access token."),
+        },
+      },
+    },
+    "/v1/webui/ws": {
+      get: {
+        operationId: "connectWebUiTunnel",
+        tags: ["sessions"],
+        security: bearerSecurity,
+        summary: "Upgrade a temporary WebUI tunnel.",
+        description:
+          "The client sends one webui_tunnel_open frame naming an online instance, " +
+          "then proxies HTTP and SSE requests through the authenticated tunnel. " +
+          "The tunnel is memory-only and ends when either WebSocket closes.",
+        responses: {
+          "101": emptyResponse("WebUI tunnel upgrade accepted."),
+          "401": errorResponse("Missing or invalid access token."),
+          "403": errorResponse("Origin is not allowed."),
         },
       },
     },
@@ -593,6 +644,7 @@ const document = {
       RegisterBody: registerBodySchema,
       RegisterDeviceBody: registerDeviceBodySchema,
       ResetPasswordBody: resetPasswordBodySchema,
+      SendPromptBody: sendPromptBodySchema,
       TokenPair: tokenPairSchema,
       VerifyEmailBody: verifyEmailBodySchema,
       WsServerMessage: wsServerMessageSchema,

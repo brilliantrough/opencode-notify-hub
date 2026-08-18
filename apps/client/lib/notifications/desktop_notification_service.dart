@@ -149,7 +149,7 @@ class WindowsDesktopNotifier implements DesktopNotifier {
 /// Alerts are presented through the injectable [DesktopNotifier]; clicking a
 /// notification brings the app window to the front (default:
 /// `windowManager.show` + `focus`). When [NotifyRequest.playSound] is true
-/// the bundled alert sound plays via [SoundPlayer].
+/// the selected alert sound plays via [SoundPlayer].
 ///
 /// Desktop platforms require no runtime notification permission, so
 /// [permissionGranted] is always true and [openPermissionSettings] is a
@@ -201,7 +201,7 @@ class DesktopNotificationService implements NotificationService {
       },
     );
     if (request.playSound) {
-      await _soundPlayer.playAlert();
+      await _soundPlayer.play(request.alertSound);
     }
   }
 

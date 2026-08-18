@@ -412,7 +412,7 @@ describe("WebSocket routing", () => {
           project: "notify",
           directory: "/work/notify",
           openCodeVersion: "1.18.18",
-          protocolVersion: 1,
+          protocolVersion: 2,
         }),
       );
 
@@ -431,7 +431,7 @@ describe("WebSocket routing", () => {
             project: "notify",
             directory: "/work/notify",
             openCodeVersion: "1.18.18",
-            protocolVersion: 1,
+            protocolVersion: 2,
             state: "controllable",
           },
         ],
@@ -461,7 +461,7 @@ describe("WebSocket routing", () => {
             project,
             directory,
             openCodeVersion: "1.18.18",
-            protocolVersion: 1,
+            protocolVersion: 2,
           }),
         );
         expect(await registered).toMatchObject({ state: "controllable" });
@@ -496,7 +496,7 @@ describe("WebSocket routing", () => {
             project,
             directory: "/work/shared",
             openCodeVersion: "1.18.18",
-            protocolVersion: 1,
+            protocolVersion: 2,
           }),
         );
         expect(await result).toMatchObject({ state: "controllable" });
@@ -522,7 +522,7 @@ describe("WebSocket routing", () => {
           project: "notify",
           directory: "/work/notify",
           openCodeVersion: "1.18.18",
-          protocolVersion: 1,
+          protocolVersion: 2,
         }),
       );
       await firstResult;
@@ -540,7 +540,7 @@ describe("WebSocket routing", () => {
           project: "notify-copy",
           directory: "/work/notify/",
           openCodeVersion: "1.18.18",
-          protocolVersion: 1,
+          protocolVersion: 2,
         }),
       );
       expect(await secondResult).toEqual({
@@ -576,8 +576,8 @@ describe("WebSocket routing", () => {
     });
 
     it.each([
-      ["1.18.17", 1],
-      ["1.18.18", 2],
+      ["1.18.17", 2],
+      ["1.18.18", 1],
     ])(
       "reports OpenCode %s / protocol %i as incompatible without breaking notification ingest",
       async (openCodeVersion, protocolVersion) => {
@@ -628,7 +628,7 @@ describe("WebSocket routing", () => {
           project: "notify",
           directory: "/work/revoked",
           openCodeVersion: "1.18.18",
-          protocolVersion: 1,
+          protocolVersion: 2,
         }),
       );
       await registered;

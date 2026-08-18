@@ -36,8 +36,10 @@ Examples use `https://notify.example.com`.
 | `POST /v1/pending-interactions/{instanceId}/questions/{requestId}/answer` | Route one ordered question answer set to the owning instance |
 | `POST /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision` | Route a `once`, `always`, or `reject` permission decision to the owning instance |
 | `GET /v1/pending-interactions/commands/{commandId}` | Query the body-free outcome of a submitted command |
+| `POST /v1/instances/{instanceId}/sessions/{sessionId}/prompt` | Route one best-effort text prompt to a uniquely owned online Session |
 | `GET /v1/ws` | Upgrade to the authenticated realtime WebSocket |
 | `GET /v1/plugin/ws` | Upgrade to the Plugin control WebSocket |
+| `GET /v1/webui/ws` | Upgrade a native client to a temporary OpenCode WebUI tunnel |
 
 Use the OpenAPI document for exact request/response schemas and status codes.
 
@@ -156,6 +158,25 @@ owning account and a uniform `404` for unknown, expired, or foreign ids. It is
 an optional diagnostic surface; the desktop client does not wait for or
 reconcile against it after a `202 accepted` submission. The cache is
 deliberately volatile and has no bearing on delivery semantics.
+
+## Session control
+
+`POST /v1/instances/{instanceId}/sessions/{sessionId}/prompt` carries a
+client-generated UUID `commandId` and up to 32,000 characters of text. It is
+routed only to the authenticated user's connected `controllable` Plugin
+instance. `202 accepted` means the command was written to that Plugin's control
+socket, not that OpenCode admitted or completed the turn. The Plugin submits the
+exact text through the V2 session prompt endpoint. There is no offline queue or
+automatic retry, and prompt text is redacted from logs and never persisted.
+
+`GET /v1/webui/ws` upgrades an authenticated native client to a temporary WebUI
+tunnel. The client exposes a random loopback HTTP port and opens it in the system
+browser; it remains the bridge while the browser is using that localhost URL.
+The first frame selects one owned online instance; subsequent correlated frames
+relay bounded HTTP request bodies and streamed HTTP/SSE responses through the
+Plugin to its loopback OpenCode server. The Gateway stores no WebUI body or
+tunnel state outside memory. Closing either WebSocket closes the tunnel; access
+token expiry closes the client side with `4401`.
 
 ## Regeneration
 

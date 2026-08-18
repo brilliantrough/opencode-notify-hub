@@ -5,6 +5,7 @@ import '../history/notification_history.dart';
 import '../realtime/active_sessions.dart';
 import '../realtime/event_deduper.dart';
 import '../realtime/notify_event.dart';
+import 'alert_sound.dart';
 import 'notification_service.dart';
 import 'notification_text.dart';
 
@@ -19,16 +20,25 @@ final notificationSettingsProvider =
 /// [paused] suppresses the popup entirely (history is still recorded);
 /// [soundEnabled] only controls whether the shown alert plays a sound.
 class NotificationSettings {
-  const NotificationSettings({this.paused = false, this.soundEnabled = true});
+  const NotificationSettings({
+    this.paused = false,
+    this.soundEnabled = true,
+    this.alertSound = softChimeAlertSound,
+  });
 
   final bool paused;
   final bool soundEnabled;
+  final AlertSound alertSound;
 
-  NotificationSettings copyWith({bool? paused, bool? soundEnabled}) =>
-      NotificationSettings(
-        paused: paused ?? this.paused,
-        soundEnabled: soundEnabled ?? this.soundEnabled,
-      );
+  NotificationSettings copyWith({
+    bool? paused,
+    bool? soundEnabled,
+    AlertSound? alertSound,
+  }) => NotificationSettings(
+    paused: paused ?? this.paused,
+    soundEnabled: soundEnabled ?? this.soundEnabled,
+    alertSound: alertSound ?? this.alertSound,
+  );
 }
 
 class NotificationSettingsController extends Notifier<NotificationSettings> {
@@ -117,14 +127,7 @@ class NotificationRouter {
   Future<void> _recordAndAlert(NotifyEvent event) async {
     final title = buildNotificationTitle(event);
     final body = buildNotificationBody(event);
-    _history.add(
-      HistoryEntry(
-        eventId: event.eventId,
-        title: title,
-        body: body,
-        receivedAt: _now(),
-      ),
-    );
+    _history.add(buildHistoryEntry(event, receivedAt: _now()));
     final settings = _readSettings();
     if (settings.paused) {
       return;
@@ -146,6 +149,7 @@ class NotificationRouter {
         title: title,
         body: body,
         playSound: settings.soundEnabled,
+        alertSound: settings.alertSound,
         onClick: onClick,
       ),
     );

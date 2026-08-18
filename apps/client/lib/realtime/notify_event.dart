@@ -105,6 +105,10 @@ class NotifyEvent {
   final int? elapsedSeconds;
   final String? summary;
 
+  /// Last path segment of [directory], with Windows and POSIX paths handled
+  /// independently so the label stays useful on every client platform.
+  String get directoryName => _pathBasename(directory);
+
   /// Parses one event envelope from its JSON map — e.g. the decoded value
   /// of an FCM `data['event']` string or a WebSocket `event` frame payload.
   ///
@@ -158,7 +162,11 @@ class NotifyEvent {
               text: item.question,
               multiple: item.multiple ?? false,
               options: [
-                for (final option in item.options ?? const <gen.NotifyEventOneOf1PayloadOneOfQuestionsInnerOptionsInner>[])
+                for (final option
+                    in item.options ??
+                        const <
+                          gen.NotifyEventOneOf1PayloadOneOfQuestionsInnerOptionsInner
+                        >[])
                   QuestionOption(
                     label: option.label,
                     description: option.description,
@@ -222,10 +230,7 @@ class NotifyEvent {
       gen.NotifyEventOneOf3PayloadOutcomeEnum.failed => TerminalOutcome.failed,
       gen.NotifyEventOneOf3PayloadOutcomeEnum.stopped =>
         TerminalOutcome.stopped,
-      _ => throw FormatException(
-        'Unknown terminal outcome',
-        v.payload.outcome,
-      ),
+      _ => throw FormatException('Unknown terminal outcome', v.payload.outcome),
     };
     return _base(
       v.eventId,
@@ -286,9 +291,19 @@ String _readableProject(String project, String directory) {
   if (!_internalProjectId.hasMatch(project)) {
     return project;
   }
-  final context = directory.contains(r'\')
+  return _pathBasename(directory);
+}
+
+String _pathBasename(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return 'unknown';
+  }
+  final context = trimmed.contains(r'\')
       ? path.Context(style: path.Style.windows)
       : path.posix;
-  final label = context.basename(context.normalize(directory));
-  return label.isEmpty || label == '.' ? 'unknown' : label;
+  final label = context.basename(context.normalize(trimmed));
+  return label.isEmpty || label == '.' || label == context.separator
+      ? 'unknown'
+      : label;
 }

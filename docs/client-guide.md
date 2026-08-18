@@ -39,14 +39,19 @@ longer used or may have been exposed.
 
 | Page | Purpose |
 | --- | --- |
-| Home | Active OpenCode sessions and action-required state |
-| History | Up to 50 rendered notifications stored on this device |
+| Home | Active OpenCode sessions, action-required state, text sending, and temporary WebUI access |
+| History | Up to 50 local notifications with machine, directory, session, and status visible in each row; select a row for complete event details |
 | Devices | Registered Linux, Windows, and Android devices; rename, enable, or remove them |
 | Keys | Create, list, and revoke plugin ingest keys |
 | Plugin | Copy the install path and required environment-variable template |
 | Settings | Alert sound, pause popups, desktop autostart, and desktop font scale |
 
 ## Notification behavior
+
+Desktop, foreground Android, and background Android notification titles use
+`machine · working-directory name · session title · status` so the originating
+machine and task are identifiable without exposing an internal project or
+session id.
 
 - `terminal`: completion, failure, or stop outcome and elapsed time.
 - `action_required/question`: question text and option labels.
@@ -58,6 +63,26 @@ longer used or may have been exposed.
 Events from child/subagent sessions are intentionally ignored. Events missed
 while a desktop client is offline are not replayed. Android background delivery
 uses FCM instead of replay.
+
+## Session control
+
+An active or recently completed Session shows two controls when its owning
+Plugin instance is online and uniquely identifiable:
+
+- **Send:** opens a native text composer. The Gateway returns as soon as it
+  writes the prompt to the Plugin connection; it does not wait for the model
+  turn. Failed or uncertain sends are never retried automatically.
+- **WebUI:** opens OpenCode's own WebUI in the system browser. The client starts
+  a loopback-only HTTP proxy and relays its HTTP/SSE traffic over a temporary
+  authenticated WebSocket through the Gateway and Plugin. The client must stay
+  running while the browser uses that localhost URL. Use the Home toolbar's
+  close action to stop the local listener and tunnel.
+
+Neither mode has an offline queue. The controls disappear when the owning
+instance is offline, incompatible, conflicting, or ambiguous. Only one browser
+tunnel is kept at a time; opening another instance closes the previous tunnel.
+Signing out, exiting the client, losing the Plugin connection, or access-token
+expiry also closes it.
 
 ## Desktop tray
 
@@ -73,7 +98,11 @@ to stop the client and close its WebSocket.
 
 ## Settings
 
-- **Alert sound:** plays the bundled sound after a popup.
+- **Alert sound:** Linux and Windows can choose and preview one of the bundled
+  sounds. A WAV, MP3, OGG, or OGA file up to 10 MiB can also be imported; the
+  client copies it into its application-support directory and keeps the choice
+  across restarts. Android continues to use its system notification-channel
+  sound.
 - **Font scale:** desktop settings provide a persistent 75%–150% text scale.
   `Ctrl++` and `Ctrl+-` adjust it by 10%; `Ctrl+0` resets it to 100%.
   This application scale replaces the desktop environment's accessibility text

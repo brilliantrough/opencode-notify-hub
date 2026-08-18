@@ -71,7 +71,7 @@ export const MAX_COMMAND_OUTCOMES = 1024;
 
 const READY_OPEN = 1;
 const SUPPORTED_OPENCODE_VERSION = "1.18.18";
-const SUPPORTED_PROTOCOL_VERSION = 1;
+const SUPPORTED_PROTOCOL_VERSION = 2;
 
 /** The `register` member of the extended Plugin control client protocol. */
 type RegisterMessage = Extract<PluginControlClientMessage, { type: "register" }>;
@@ -147,9 +147,39 @@ interface PendingDecideCommand {
   readonly timer: NodeJS.Timeout;
 }
 
+interface PendingPromptCommand {
+  readonly connection: ControlConnection;
+  readonly sessionID: string;
+  readonly commandId: string;
+  readonly timer: NodeJS.Timeout;
+}
+
+interface WebUiTunnel {
+  readonly tunnelId: string;
+  readonly userId: string;
+  readonly client: RealtimeSocket;
+  readonly connection: ControlConnection;
+  readonly pendingRequests: Set<string>;
+}
+
 type PermissionDecideResultMessage = Extract<
   PluginControlClientMessage,
   { type: "permission_decide_result" }
+>;
+
+type SessionPromptResultMessage = Extract<
+  PluginControlClientMessage,
+  { type: "session_prompt_result" }
+>;
+
+type WebUiResponseMessage = Extract<
+  PluginControlClientMessage,
+  {
+    type:
+      | "webui_http_response_start"
+      | "webui_http_response_chunk"
+      | "webui_http_response_end";
+  }
 >;
 
 /**
@@ -216,6 +246,14 @@ export type DecidePermissionOutcome =
   | { readonly ok: false; readonly error: DecidePermissionError }
   | { readonly ok: true; readonly result: CommandAccepted };
 
+export type SendSessionPromptError =
+  | { readonly code: "not_found" }
+  | { readonly code: "conflict" };
+
+export type SendSessionPromptOutcome =
+  | { readonly ok: false; readonly error: SendSessionPromptError }
+  | { readonly ok: true; readonly result: CommandAccepted };
+
 /**
  * In-memory owner-scoped projection of Plugin control connections. Owns
  * registration rules (first machine/project owner wins, incompatible and
@@ -251,6 +289,8 @@ export class InstanceRegistry {
   private readonly pendingRequests = new Map<string, PendingSnapshotRequest>();
   private readonly pendingAnswerCommands = new Map<string, PendingAnswerCommand>();
   private readonly pendingDecideCommands = new Map<string, PendingDecideCommand>();
+  private readonly pendingPromptCommands = new Map<string, PendingPromptCommand>();
+  private readonly webUiTunnels = new Map<string, WebUiTunnel>();
   private readonly commandOutcomes = new Map<string, CommandOutcomeEntry>();
   private readonly clock: Clock;
   private readonly publish: InstanceRegistryDeps["publish"];
@@ -302,6 +342,61 @@ export class InstanceRegistry {
     socket.on("close", () => this.disconnect(connection));
     socket.on("error", () => this.disconnect(connection));
     this.connections.add(connection);
+  }
+
+  /** Attach one short-lived authenticated client WebSocket to an instance. */
+  addWebUiClient(
+    userId: string,
+    socket: RealtimeSocket,
+    options: { expiresAtMs: number },
+  ): void {
+    let tunnel: WebUiTunnel | undefined;
+    const expiry = setTimeout(
+      () => socket.close(4401, "access token expired"),
+      Math.min(Math.max(0, options.expiresAtMs - this.clock.nowMs()), 2_147_483_647),
+    );
+    socket.on("message", (...args: unknown[]) => {
+      const frame = this.decodeWebUi(args[0]);
+      if (frame === null) {
+        return;
+      }
+      if (tunnel === undefined) {
+        if (frame.type !== "webui_tunnel_open" || !isUuid(frame.instanceId)) {
+          socket.close(CONTROL_CLOSE_INVALID_FRAME, "WebUI tunnel must open first");
+          return;
+        }
+        const record = this.records.get(this.recordKey(userId, frame.instanceId));
+        if (
+          record === undefined ||
+          record.state !== "controllable" ||
+          record.connection === undefined ||
+          record.connection.socket.readyState !== READY_OPEN
+        ) {
+          socket.send(JSON.stringify({ type: "webui_tunnel_error", code: "not_found" }));
+          socket.close(1008, "OpenCode instance is unavailable");
+          return;
+        }
+        tunnel = {
+          tunnelId: randomUUID(),
+          userId,
+          client: socket,
+          connection: record.connection,
+          pendingRequests: new Set(),
+        };
+        this.webUiTunnels.set(tunnel.tunnelId, tunnel);
+        socket.send(JSON.stringify({ type: "webui_tunnel_ready", tunnelId: tunnel.tunnelId }));
+        return;
+      }
+      this.receiveWebUiRequest(tunnel, frame);
+    });
+    socket.on("close", () => {
+      clearTimeout(expiry);
+      if (tunnel !== undefined) this.closeWebUiTunnel(tunnel);
+    });
+    socket.on("error", () => {
+      clearTimeout(expiry);
+      if (tunnel !== undefined) this.closeWebUiTunnel(tunnel);
+    });
   }
 
   publishSnapshot(userId: string): void {
@@ -513,6 +608,55 @@ export class InstanceRegistry {
   }
 
   /**
+   * Route one free-form prompt to an owned, online, controllable instance.
+   * The session is intentionally not required to be pending: this command
+   * starts the next turn of an existing OpenCode Session. The response only
+   * confirms that the command was written to the Plugin control socket.
+   */
+  async sendSessionPrompt(
+    userId: string,
+    instanceId: string,
+    sessionID: string,
+    commandId: string,
+    text: string,
+  ): Promise<SendSessionPromptOutcome> {
+    const record = this.records.get(this.recordKey(userId, instanceId));
+    if (
+      record === undefined ||
+      record.userId !== userId ||
+      record.state !== "controllable" ||
+      record.connection === undefined ||
+      record.connection.socket.readyState !== READY_OPEN
+    ) {
+      return { ok: false, error: { code: "not_found" } };
+    }
+    const connection = record.connection;
+    for (const pending of this.pendingPromptCommands.values()) {
+      if (pending.connection === connection && pending.commandId === commandId) {
+        return { ok: false, error: { code: "conflict" } };
+      }
+    }
+    const key = this.commandKey(connection, commandId);
+    const entry: PendingPromptCommand = {
+      connection,
+      sessionID,
+      commandId,
+      timer: setTimeout(() => {
+        this.pendingPromptCommands.delete(key);
+      }, this.answerTimeoutMs),
+    };
+    this.pendingPromptCommands.set(key, entry);
+    const command: PluginControlServerMessage = {
+      type: "session_prompt_command",
+      commandId,
+      sessionID,
+      text,
+    };
+    this.send(connection, command);
+    return { ok: true, result: { commandId, status: "accepted" } };
+  }
+
+  /**
    * Issue #13: return the body-free outcome correlation for one client-
    * generated commandId, but only when the authenticated user owns it.
    * Unknown command ids, entries owned by another account, and entries that
@@ -579,6 +723,20 @@ export class InstanceRegistry {
       // Validated decision results are not registration traffic: unknown,
       // late, or foreign results are ignored, never a connection error.
       this.handlePermissionDecideResult(connection, message);
+      return;
+    }
+    if (message.type === "session_prompt_result") {
+      // Prompt results are diagnostic only; the client already received the
+      // best-effort 202 and no prompt body is retained by the Gateway.
+      this.handleSessionPromptResult(connection, message);
+      return;
+    }
+    if (
+      message.type === "webui_http_response_start" ||
+      message.type === "webui_http_response_chunk" ||
+      message.type === "webui_http_response_end"
+    ) {
+      this.handleWebUiResponse(connection, message);
       return;
     }
     if (connection.instanceId !== undefined) {
@@ -674,6 +832,40 @@ export class InstanceRegistry {
       }
     }
     this.settleOutcome(pending.commandId, message.status);
+  }
+
+  private handleSessionPromptResult(
+    connection: ControlConnection,
+    message: SessionPromptResultMessage,
+  ): void {
+    if (connection.instanceId === undefined || message.instanceId !== connection.instanceId) {
+      return;
+    }
+    const key = this.commandKey(connection, message.commandId);
+    const pending = this.pendingPromptCommands.get(key);
+    if (pending === undefined) {
+      return;
+    }
+    this.pendingPromptCommands.delete(key);
+    clearTimeout(pending.timer);
+  }
+
+  private handleWebUiResponse(
+    connection: ControlConnection,
+    message: WebUiResponseMessage,
+  ): void {
+    const tunnel = this.webUiTunnels.get(message.tunnelId);
+    if (tunnel === undefined || tunnel.connection !== connection) {
+      return;
+    }
+    if (message.type === "webui_http_response_end") {
+      tunnel.pendingRequests.delete(message.requestId);
+    }
+    try {
+      tunnel.client.send(JSON.stringify(message));
+    } catch {
+      this.closeWebUiTunnel(tunnel);
+    }
   }
 
   private handlePermissionDecideResult(
@@ -924,6 +1116,21 @@ export class InstanceRegistry {
         this.settleOutcome(pending.commandId, "result_unknown");
       }
     }
+    for (const [key, pending] of this.pendingPromptCommands) {
+      if (pending.connection === connection) {
+        this.pendingPromptCommands.delete(key);
+        clearTimeout(pending.timer);
+      }
+    }
+    for (const tunnel of [...this.webUiTunnels.values()]) {
+      if (tunnel.connection !== connection) continue;
+      this.webUiTunnels.delete(tunnel.tunnelId);
+      try {
+        tunnel.client.close(1011, "OpenCode instance disconnected");
+      } catch {
+        // The client may already be gone.
+      }
+    }
     const instanceId = connection.instanceId;
     if (instanceId === undefined) {
       return;
@@ -998,6 +1205,57 @@ export class InstanceRegistry {
       });
     } catch {
       this.disconnect(connection);
+    }
+  }
+
+  private receiveWebUiRequest(tunnel: WebUiTunnel, frame: Record<string, unknown>): void {
+    if (frame.type === "webui_tunnel_close" && frame.tunnelId === tunnel.tunnelId) {
+      this.closeWebUiTunnel(tunnel);
+      return;
+    }
+    if (
+      frame.type !== "webui_http_request" ||
+      frame.tunnelId !== tunnel.tunnelId ||
+      !isUuid(frame.requestId) ||
+      typeof frame.method !== "string" ||
+      frame.method.length === 0 ||
+      frame.method.length > 16 ||
+      typeof frame.path !== "string" ||
+      frame.path.length === 0 ||
+      frame.path.length > 8192 ||
+      frame.headers === null ||
+      typeof frame.headers !== "object" ||
+      Array.isArray(frame.headers) ||
+      (frame.body !== undefined &&
+        (typeof frame.body !== "string" || frame.body.length > 700_000))
+    ) {
+      return;
+    }
+    if (tunnel.pendingRequests.has(frame.requestId)) {
+      return;
+    }
+    tunnel.pendingRequests.add(frame.requestId);
+    this.send(tunnel.connection, {
+      type: "webui_http_request",
+      tunnelId: tunnel.tunnelId,
+      requestId: frame.requestId,
+      method: frame.method,
+      path: frame.path,
+      headers: frame.headers as Record<string, string[]>,
+      ...(frame.body === undefined ? {} : { body: frame.body }),
+    });
+  }
+
+  private closeWebUiTunnel(tunnel: WebUiTunnel): void {
+    if (this.webUiTunnels.get(tunnel.tunnelId) !== tunnel) {
+      return;
+    }
+    this.webUiTunnels.delete(tunnel.tunnelId);
+    if (tunnel.connection.socket.readyState === READY_OPEN) {
+      this.send(tunnel.connection, {
+        type: "webui_tunnel_close",
+        tunnelId: tunnel.tunnelId,
+      });
     }
   }
 
@@ -1076,4 +1334,18 @@ export class InstanceRegistry {
       return null;
     }
   }
+
+  private decodeWebUi(raw: unknown): Record<string, unknown> | null {
+    const decoded = this.decode(raw);
+    return decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
+      ? (decoded as Record<string, unknown>)
+      : null;
+  }
+}
+
+function isUuid(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  );
 }

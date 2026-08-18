@@ -334,7 +334,7 @@ describe("Issue #14 consolidated privacy sweep (AC1 and AC2)", () => {
         project: SENTINELS.project,
         directory: SENTINELS.directory,
         openCodeVersion: "1.18.18",
-        protocolVersion: 1,
+        protocolVersion: 2,
         ...overrides,
       }),
     );

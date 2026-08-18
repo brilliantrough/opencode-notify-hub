@@ -77,19 +77,14 @@ class FakeNotificationService implements NotificationService {
   Future<void> openPermissionSettings() async {}
 }
 
-RemoteMessage messageOf(Map<String, Object?> envelope) => RemoteMessage(
-  data: {'event': jsonEncode(envelope)},
-);
+RemoteMessage messageOf(Map<String, Object?> envelope) =>
+    RemoteMessage(data: {'event': jsonEncode(envelope)});
 
 Map<String, Object?> terminalEnvelope({String eventId = 'evt-term'}) => {
   'eventId': eventId,
   'type': 'terminal',
   'occurredAt': '2026-01-01T00:00:00.000Z',
-  'source': {
-    'machine': 'devbox',
-    'project': 'api',
-    'directory': '/work/api',
-  },
+  'source': {'machine': 'devbox', 'project': 'api', 'directory': '/work/api'},
   'session': {'id': 'ses_1', 'title': 'Implement API'},
   'payload': {'outcome': 'completed', 'elapsedSeconds': 42},
 };
@@ -98,11 +93,7 @@ Map<String, Object?> heartbeatEnvelope({String eventId = 'evt-hb'}) => {
   'eventId': eventId,
   'type': 'heartbeat',
   'occurredAt': '2026-01-01T00:00:00.000Z',
-  'source': {
-    'machine': 'devbox',
-    'project': 'api',
-    'directory': '/work/api',
-  },
+  'source': {'machine': 'devbox', 'project': 'api', 'directory': '/work/api'},
   'session': {'id': 'ses_1', 'title': 'Implement API'},
   'payload': {'status': 'busy', 'elapsedSeconds': 60},
 };
@@ -180,24 +171,28 @@ void main() {
       expect(tokenUpdates, [(deviceId: 'dev-1', token: 'tok-initial')]);
     });
 
-    test('skips the initial token publish when no device is registered',
-        () async {
-      fcm.token = 'tok-initial';
-      currentDeviceId = null;
+    test(
+      'skips the initial token publish when no device is registered',
+      () async {
+        fcm.token = 'tok-initial';
+        currentDeviceId = null;
 
-      await buildService().init();
+        await buildService().init();
 
-      expect(tokenUpdates, isEmpty);
-    });
+        expect(tokenUpdates, isEmpty);
+      },
+    );
 
-    test('skips the initial token publish when no token is available',
-        () async {
-      fcm.token = null;
+    test(
+      'skips the initial token publish when no token is available',
+      () async {
+        fcm.token = null;
 
-      await buildService().init();
+        await buildService().init();
 
-      expect(tokenUpdates, isEmpty);
-    });
+        expect(tokenUpdates, isEmpty);
+      },
+    );
   });
 
   group('FcmService foreground messages', () {
@@ -210,7 +205,7 @@ void main() {
       expect(notifications.shown, hasLength(1));
       final request = notifications.shown.single;
       expect(request.eventId, 'evt-term');
-      expect(request.title, 'api · devbox · 任务已完成');
+      expect(request.title, 'devbox · api · Implement API · 任务已完成');
       expect(request.body, '用时 42 秒');
     });
 
@@ -226,25 +221,25 @@ void main() {
   });
 
   group('FcmService opened-app messages', () {
+    test('records the event in history without alerting (the system already '
+        'showed the notification)', () async {
+      await buildService().init();
+
+      fcm.openedAppController.add(messageOf(terminalEnvelope()));
+      await pumpEventQueue();
+
+      expect(history.contains('evt-term'), isTrue);
+      final entry = history.entries.single;
+      expect(entry.title, 'devbox · api · Implement API · 任务已完成');
+      expect(entry.body, '用时 42 秒');
+      expect(entry.directory, '/work/api');
+      expect(entry.sessionTitle, 'Implement API');
+      expect(notifications.shown, isEmpty, reason: 'no double alert');
+    });
+
     test(
-      'records the event in history without alerting (the system already '
-      'showed the notification)',
+      'dedupes against history: an already-recorded event is skipped',
       () async {
-        await buildService().init();
-
-        fcm.openedAppController.add(messageOf(terminalEnvelope()));
-        await pumpEventQueue();
-
-        expect(history.contains('evt-term'), isTrue);
-        final entry = history.entries.single;
-        expect(entry.title, 'api · devbox · 任务已完成');
-        expect(entry.body, '用时 42 秒');
-        expect(notifications.shown, isEmpty, reason: 'no double alert');
-      },
-    );
-
-    test('dedupes against history: an already-recorded event is skipped',
-        () async {
         history.add(
           HistoryEntry(
             eventId: 'evt-term',
@@ -263,12 +258,15 @@ void main() {
       },
     );
 
-    test('ignores heartbeats, action_resolved, and malformed payloads',
-        () async {
+    test(
+      'ignores heartbeats, action_resolved, and malformed payloads',
+      () async {
         await buildService().init();
 
         fcm.openedAppController.add(messageOf(heartbeatEnvelope()));
-        fcm.openedAppController.add(const RemoteMessage(data: {'event': '{no'}));
+        fcm.openedAppController.add(
+          const RemoteMessage(data: {'event': '{no'}),
+        );
         fcm.openedAppController.add(const RemoteMessage(data: {}));
         await pumpEventQueue();
 
@@ -277,8 +275,9 @@ void main() {
       },
     );
 
-    test('processes the initial message (cold start via notification tap)',
-        () async {
+    test(
+      'processes the initial message (cold start via notification tap)',
+      () async {
         fcm.initialMessage = messageOf(terminalEnvelope());
 
         await buildService().init();

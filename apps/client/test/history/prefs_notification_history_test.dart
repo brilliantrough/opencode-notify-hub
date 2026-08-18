@@ -46,17 +46,57 @@ void main() {
       expect(history.entries.any((e) => e.eventId == 'evt-0'), isFalse);
     });
 
-    test('survives a restart: a new instance loads the persisted entries', () async {
+    test(
+      'survives a restart: a new instance loads the persisted entries',
+      () async {
+        final first = await PrefsNotificationHistory.load();
+        await first.add(_entry('a'));
+        await first.add(_entry('b'));
+
+        final second = await PrefsNotificationHistory.load();
+
+        expect(second.entries.map((e) => e.eventId), ['b', 'a']);
+        expect(second.entries.first.title, 'title-b');
+        expect(second.entries.first.body, 'body-b');
+        expect(second.entries.first.receivedAt, DateTime.utc(2026, 1, 1));
+        expect(second.entries.first.directory, isNull);
+        expect(second.entries.first.sessionTitle, isNull);
+      },
+    );
+
+    test('structured notification context survives a restart', () async {
       final first = await PrefsNotificationHistory.load();
-      await first.add(_entry('a'));
-      await first.add(_entry('b'));
+      await first.add(
+        HistoryEntry(
+          eventId: 'structured',
+          title: 'notify · Fix login · 任务已完成',
+          body: '用时 42 秒',
+          receivedAt: DateTime.utc(2026, 1, 2, 3, 4),
+          occurredAt: DateTime.utc(2026, 1, 2, 3, 3),
+          status: '任务已完成',
+          eventType: 'terminal',
+          machine: 'devbox',
+          project: 'linewrite',
+          directory: '/work/notify',
+          directoryName: 'notify',
+          sessionId: 'ses_1',
+          sessionTitle: 'Fix login',
+          requestId: 'req_1',
+        ),
+      );
 
-      final second = await PrefsNotificationHistory.load();
+      final entry = (await PrefsNotificationHistory.load()).entries.single;
 
-      expect(second.entries.map((e) => e.eventId), ['b', 'a']);
-      expect(second.entries.first.title, 'title-b');
-      expect(second.entries.first.body, 'body-b');
-      expect(second.entries.first.receivedAt, DateTime.utc(2026, 1, 1));
+      expect(entry.occurredAt, DateTime.utc(2026, 1, 2, 3, 3));
+      expect(entry.status, '任务已完成');
+      expect(entry.eventType, 'terminal');
+      expect(entry.machine, 'devbox');
+      expect(entry.project, 'linewrite');
+      expect(entry.directory, '/work/notify');
+      expect(entry.directoryName, 'notify');
+      expect(entry.sessionId, 'ses_1');
+      expect(entry.sessionTitle, 'Fix login');
+      expect(entry.requestId, 'req_1');
     });
 
     test('the 50-entry cap survives a restart', () async {
@@ -128,21 +168,23 @@ void main() {
       SharedPreferences.setMockInitialValues({});
     });
 
-    test('starts empty and hydrates the stored entries asynchronously',
-        () async {
-      final seed = await PrefsNotificationHistory.load();
-      await seed.add(_entry('a'));
-      await seed.add(_entry('b'));
+    test(
+      'starts empty and hydrates the stored entries asynchronously',
+      () async {
+        final seed = await PrefsNotificationHistory.load();
+        await seed.add(_entry('a'));
+        await seed.add(_entry('b'));
 
-      final history = PrefsNotificationHistory.hydrating();
-      // The synchronous view is empty until the disk load completes.
-      expect(history.entries, isEmpty);
+        final history = PrefsNotificationHistory.hydrating();
+        // The synchronous view is empty until the disk load completes.
+        expect(history.entries, isEmpty);
 
-      await history.ready;
+        await history.ready;
 
-      expect(history.entries.map((e) => e.eventId), ['b', 'a']);
-      expect(history.contains('a'), isTrue);
-    });
+        expect(history.entries.map((e) => e.eventId), ['b', 'a']);
+        expect(history.contains('a'), isTrue);
+      },
+    );
 
     test('entries added before hydration completes are kept in front and '
         'persisted with the hydrated ones', () async {
@@ -160,17 +202,19 @@ void main() {
       expect(reloaded.entries.map((e) => e.eventId), ['fresh', 'stored']);
     });
 
-    test('hydration drops stored duplicates of freshly added event IDs',
-        () async {
-      final seed = await PrefsNotificationHistory.load();
-      await seed.add(_entry('same'));
+    test(
+      'hydration drops stored duplicates of freshly added event IDs',
+      () async {
+        final seed = await PrefsNotificationHistory.load();
+        await seed.add(_entry('same'));
 
-      final history = PrefsNotificationHistory.hydrating();
-      await history.add(_entry('same'));
-      await history.ready;
+        final history = PrefsNotificationHistory.hydrating();
+        await history.add(_entry('same'));
+        await history.ready;
 
-      expect(history.entries.map((e) => e.eventId), ['same']);
-    });
+        expect(history.entries.map((e) => e.eventId), ['same']);
+      },
+    );
 
     test('hydrates to an empty history when nothing was stored', () async {
       final history = PrefsNotificationHistory.hydrating();

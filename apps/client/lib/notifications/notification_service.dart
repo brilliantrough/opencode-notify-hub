@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'alert_sound.dart';
+
 /// Platform notification service. Must be overridden per platform
 /// (Android local notifications + FCM, desktop notifier, ...); the default
 /// throws so an unbound platform surfaces loudly instead of silently
@@ -25,6 +27,7 @@ class NotifyRequest {
     required this.title,
     required this.body,
     required this.playSound,
+    this.alertSound = softChimeAlertSound,
     this.onClick,
   });
 
@@ -32,6 +35,7 @@ class NotifyRequest {
   final String title;
   final String body;
   final bool playSound;
+  final AlertSound alertSound;
   final VoidCallback? onClick;
 
   @override
@@ -40,10 +44,11 @@ class NotifyRequest {
       other.eventId == eventId &&
       other.title == title &&
       other.body == body &&
-      other.playSound == playSound;
+      other.playSound == playSound &&
+      other.alertSound == alertSound;
 
   @override
-  int get hashCode => Object.hash(eventId, title, body, playSound);
+  int get hashCode => Object.hash(eventId, title, body, playSound, alertSound);
 
   @override
   String toString() => 'NotifyRequest($eventId, $title, playSound: $playSound)';

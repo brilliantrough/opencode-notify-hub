@@ -3,12 +3,16 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:notify_api/src/model/plugin_control_client_message_one_of4.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of7.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of1.dart';
 import 'package:notify_api/src/model/pending_snapshot_interactions_inner.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of2.dart';
 import 'package:built_collection/built_collection.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of6.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of3.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of5.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 import 'package:one_of/one_of.dart';
@@ -29,11 +33,14 @@ part 'plugin_control_client_message.g.dart';
 /// * [requestId]
 /// * [commandId]
 /// * [status]
+/// * [headers]
+/// * [tunnelId]
+/// * [body]
 @BuiltValue()
 abstract class PluginControlClientMessage
     implements
         Built<PluginControlClientMessage, PluginControlClientMessageBuilder> {
-  /// One Of [PluginControlClientMessageOneOf], [PluginControlClientMessageOneOf1], [PluginControlClientMessageOneOf2], [PluginControlClientMessageOneOf3]
+  /// One Of [PluginControlClientMessageOneOf], [PluginControlClientMessageOneOf1], [PluginControlClientMessageOneOf2], [PluginControlClientMessageOneOf3], [PluginControlClientMessageOneOf4], [PluginControlClientMessageOneOf5], [PluginControlClientMessageOneOf6], [PluginControlClientMessageOneOf7]
   OneOf get oneOf;
 
   PluginControlClientMessage._();
@@ -93,6 +100,10 @@ class _$PluginControlClientMessageSerializer
       FullType(PluginControlClientMessageOneOf1),
       FullType(PluginControlClientMessageOneOf2),
       FullType(PluginControlClientMessageOneOf3),
+      FullType(PluginControlClientMessageOneOf4),
+      FullType(PluginControlClientMessageOneOf5),
+      FullType(PluginControlClientMessageOneOf6),
+      FullType(PluginControlClientMessageOneOf7),
     ]);
     oneOfDataSrc = serialized;
     result.oneOf =
@@ -115,6 +126,18 @@ class PluginControlClientMessageTypeEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'permission_decide_result')
   static const PluginControlClientMessageTypeEnum permissionDecideResult =
       _$pluginControlClientMessageTypeEnum_permissionDecideResult;
+  @BuiltValueEnumConst(wireName: r'session_prompt_result')
+  static const PluginControlClientMessageTypeEnum sessionPromptResult =
+      _$pluginControlClientMessageTypeEnum_sessionPromptResult;
+  @BuiltValueEnumConst(wireName: r'webui_http_response_start')
+  static const PluginControlClientMessageTypeEnum webuiHttpResponseStart =
+      _$pluginControlClientMessageTypeEnum_webuiHttpResponseStart;
+  @BuiltValueEnumConst(wireName: r'webui_http_response_chunk')
+  static const PluginControlClientMessageTypeEnum webuiHttpResponseChunk =
+      _$pluginControlClientMessageTypeEnum_webuiHttpResponseChunk;
+  @BuiltValueEnumConst(wireName: r'webui_http_response_end')
+  static const PluginControlClientMessageTypeEnum webuiHttpResponseEnd =
+      _$pluginControlClientMessageTypeEnum_webuiHttpResponseEnd;
 
   static Serializer<PluginControlClientMessageTypeEnum> get serializer =>
       _$pluginControlClientMessageTypeEnumSerializer;
@@ -125,29 +148,4 @@ class PluginControlClientMessageTypeEnum extends EnumClass {
       _$pluginControlClientMessageTypeEnumValues;
   static PluginControlClientMessageTypeEnum valueOf(String name) =>
       _$pluginControlClientMessageTypeEnumValueOf(name);
-}
-
-class PluginControlClientMessageStatusEnum extends EnumClass {
-  @BuiltValueEnumConst(wireName: r'confirmed')
-  static const PluginControlClientMessageStatusEnum confirmed =
-      _$pluginControlClientMessageStatusEnum_confirmed;
-  @BuiltValueEnumConst(wireName: r'stale')
-  static const PluginControlClientMessageStatusEnum stale =
-      _$pluginControlClientMessageStatusEnum_stale;
-  @BuiltValueEnumConst(wireName: r'upstream_error')
-  static const PluginControlClientMessageStatusEnum upstreamError =
-      _$pluginControlClientMessageStatusEnum_upstreamError;
-  @BuiltValueEnumConst(wireName: r'result_unknown')
-  static const PluginControlClientMessageStatusEnum resultUnknown =
-      _$pluginControlClientMessageStatusEnum_resultUnknown;
-
-  static Serializer<PluginControlClientMessageStatusEnum> get serializer =>
-      _$pluginControlClientMessageStatusEnumSerializer;
-
-  const PluginControlClientMessageStatusEnum._(String name) : super(name);
-
-  static BuiltSet<PluginControlClientMessageStatusEnum> get values =>
-      _$pluginControlClientMessageStatusEnumValues;
-  static PluginControlClientMessageStatusEnum valueOf(String name) =>
-      _$pluginControlClientMessageStatusEnumValueOf(name);
 }

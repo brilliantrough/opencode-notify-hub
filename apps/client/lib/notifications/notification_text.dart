@@ -1,3 +1,4 @@
+import '../history/notification_history.dart';
 import '../realtime/notify_event.dart';
 
 /// Maximum number of questions rendered in a notification body; the rest
@@ -6,7 +7,27 @@ const _maxQuestionsInBody = 3;
 
 /// Concise user-facing title. Internal wire names and ids stay out of UI text.
 String buildNotificationTitle(NotifyEvent event) =>
-    '${event.project} · ${event.machine} · ${_statusLabel(event)}';
+    '${event.machine} · ${event.directoryName} · ${event.sessionTitle} · ${buildNotificationStatus(event)}';
+
+HistoryEntry buildHistoryEntry(
+  NotifyEvent event, {
+  required DateTime receivedAt,
+}) => HistoryEntry(
+  eventId: event.eventId,
+  title: buildNotificationTitle(event),
+  body: buildNotificationBody(event),
+  receivedAt: receivedAt,
+  occurredAt: event.occurredAt,
+  status: buildNotificationStatus(event),
+  eventType: event.type.wireName,
+  machine: event.machine,
+  project: event.project,
+  directory: event.directory,
+  directoryName: event.directoryName,
+  sessionId: event.sessionId,
+  sessionTitle: event.sessionTitle,
+  requestId: event.requestId,
+);
 
 /// Notification body per spec §11.
 ///
@@ -61,7 +82,7 @@ String _terminalBody(NotifyEvent event) {
   return summary == null ? base : '$base\n$summary';
 }
 
-String _statusLabel(NotifyEvent event) => switch (event.type) {
+String buildNotificationStatus(NotifyEvent event) => switch (event.type) {
   NotifyEventType.heartbeat => '任务进行中',
   NotifyEventType.actionResolved => '操作已处理',
   NotifyEventType.actionRequired => switch (event.actionKind) {

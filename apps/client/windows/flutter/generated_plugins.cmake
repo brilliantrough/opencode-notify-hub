@@ -4,11 +4,13 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_windows
+  file_selector_windows
   firebase_core
   flutter_secure_storage_windows
   local_notifier
   screen_retriever_windows
   tray_manager
+  url_launcher_windows
   win_toast
   window_manager
 )

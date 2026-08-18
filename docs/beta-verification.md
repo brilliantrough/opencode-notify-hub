@@ -7,6 +7,10 @@ guarantees, the known Phase 1 exclusions, and the exact verification commands
 plus what each one proves. Run it against a dedicated staging gateway and
 staging OpenCode hosts, never production credentials.
 
+This remains the historical Phase 1 checklist. Later Session prompt and browser
+WebUI features have their current behavior and tests documented in
+[Client guide](client-guide.md#session-control) and [Testing](testing.md).
+
 ## Scope
 
 The Beta lets a user answer an OpenCode pending question or permission request

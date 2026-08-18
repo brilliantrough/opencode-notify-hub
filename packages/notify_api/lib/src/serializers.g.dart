@@ -83,6 +83,15 @@ Serializers _$serializers =
           ..add(PluginControlClientMessageOneOf3.serializer)
           ..add(PluginControlClientMessageOneOf3StatusEnum.serializer)
           ..add(PluginControlClientMessageOneOf3TypeEnum.serializer)
+          ..add(PluginControlClientMessageOneOf4.serializer)
+          ..add(PluginControlClientMessageOneOf4StatusEnum.serializer)
+          ..add(PluginControlClientMessageOneOf4TypeEnum.serializer)
+          ..add(PluginControlClientMessageOneOf5.serializer)
+          ..add(PluginControlClientMessageOneOf5TypeEnum.serializer)
+          ..add(PluginControlClientMessageOneOf6.serializer)
+          ..add(PluginControlClientMessageOneOf6TypeEnum.serializer)
+          ..add(PluginControlClientMessageOneOf7.serializer)
+          ..add(PluginControlClientMessageOneOf7TypeEnum.serializer)
           ..add(PluginControlClientMessageOneOfTypeEnum.serializer)
           ..add(PluginControlServerMessage.serializer)
           ..add(PluginControlServerMessageOneOf.serializer)
@@ -93,6 +102,12 @@ Serializers _$serializers =
           ..add(PluginControlServerMessageOneOf3.serializer)
           ..add(PluginControlServerMessageOneOf3DecisionEnum.serializer)
           ..add(PluginControlServerMessageOneOf3TypeEnum.serializer)
+          ..add(PluginControlServerMessageOneOf4.serializer)
+          ..add(PluginControlServerMessageOneOf4TypeEnum.serializer)
+          ..add(PluginControlServerMessageOneOf5.serializer)
+          ..add(PluginControlServerMessageOneOf5TypeEnum.serializer)
+          ..add(PluginControlServerMessageOneOf6.serializer)
+          ..add(PluginControlServerMessageOneOf6TypeEnum.serializer)
           ..add(PluginControlServerMessageOneOfStateEnum.serializer)
           ..add(PluginControlServerMessageOneOfTypeEnum.serializer)
           ..add(RefreshBody.serializer)
@@ -100,6 +115,7 @@ Serializers _$serializers =
           ..add(RegisterDeviceBody.serializer)
           ..add(RegisterDeviceBodyPlatformEnum.serializer)
           ..add(ResetPasswordBody.serializer)
+          ..add(SendPromptBody.serializer)
           ..add(TokenPair.serializer)
           ..add(VerifyEmailBody.serializer)
           ..add(WsServerMessage.serializer)
@@ -183,6 +199,20 @@ Serializers _$serializers =
               const FullType(WsServerMessageOneOf1InstancesInner),
             ]),
             () => ListBuilder<WsServerMessageOneOf1InstancesInner>(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltMap, const [
+              const FullType(String),
+              const FullType(BuiltList, const [const FullType(String)]),
+            ]),
+            () => MapBuilder<String, BuiltList<String>>(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltMap, const [
+              const FullType(String),
+              const FullType(BuiltList, const [const FullType(String)]),
+            ]),
+            () => MapBuilder<String, BuiltList<String>>(),
           ))
         .build();
 

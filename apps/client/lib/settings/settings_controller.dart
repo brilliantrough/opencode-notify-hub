@@ -6,6 +6,8 @@ import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../devices/devices_controller.dart' show sharedPreferencesProvider;
+import '../notifications/alert_sound.dart';
+import '../notifications/custom_sound_store.dart';
 
 /// Applies (or removes) the OS login-item / autostart entry.
 ///
@@ -81,23 +83,33 @@ final settingsControllerProvider =
 class SettingsState {
   const SettingsState({
     this.soundEnabled = true,
+    this.alertSoundId = 'soft_chime',
+    this.customSound,
     this.paused = false,
     this.launchAtStartup = false,
     this.textScale = 1,
   });
 
   final bool soundEnabled;
+  final String alertSoundId;
+  final CustomAlertSound? customSound;
   final bool paused;
   final bool launchAtStartup;
   final double textScale;
 
+  AlertSound get alertSound => resolveAlertSound(alertSoundId, customSound);
+
   SettingsState copyWith({
     bool? soundEnabled,
+    String? alertSoundId,
+    CustomAlertSound? customSound,
     bool? paused,
     bool? launchAtStartup,
     double? textScale,
   }) => SettingsState(
     soundEnabled: soundEnabled ?? this.soundEnabled,
+    alertSoundId: alertSoundId ?? this.alertSoundId,
+    customSound: customSound ?? this.customSound,
     paused: paused ?? this.paused,
     launchAtStartup: launchAtStartup ?? this.launchAtStartup,
     textScale: textScale ?? this.textScale,
@@ -107,17 +119,26 @@ class SettingsState {
   bool operator ==(Object other) =>
       other is SettingsState &&
       other.soundEnabled == soundEnabled &&
+      other.alertSoundId == alertSoundId &&
+      other.customSound == customSound &&
       other.paused == paused &&
       other.launchAtStartup == launchAtStartup &&
       other.textScale == textScale;
 
   @override
-  int get hashCode =>
-      Object.hash(soundEnabled, paused, launchAtStartup, textScale);
+  int get hashCode => Object.hash(
+    soundEnabled,
+    alertSoundId,
+    customSound,
+    paused,
+    launchAtStartup,
+    textScale,
+  );
 
   @override
   String toString() =>
-      'SettingsState(soundEnabled: $soundEnabled, paused: $paused, '
+      'SettingsState(soundEnabled: $soundEnabled, '
+      'alertSoundId: $alertSoundId, paused: $paused, '
       'launchAtStartup: $launchAtStartup, textScale: $textScale)';
 }
 
@@ -131,6 +152,10 @@ class SettingsState {
 class SettingsController extends Notifier<SettingsState> {
   /// Shared-preferences key for [SettingsState.soundEnabled].
   static const String soundEnabledKey = 'settings_sound_enabled_v1';
+
+  static const String alertSoundIdKey = 'settings_alert_sound_id_v1';
+  static const String customSoundPathKey = 'settings_custom_sound_path_v1';
+  static const String customSoundNameKey = 'settings_custom_sound_name_v1';
 
   /// Shared-preferences key for [SettingsState.paused].
   static const String pausedKey = 'settings_paused_v1';
@@ -191,8 +216,21 @@ class SettingsController extends Notifier<SettingsState> {
       if (_disposed) {
         return;
       }
+      final customPath = prefs.getString(customSoundPathKey);
+      final customName = prefs.getString(customSoundNameKey);
+      final customSound = customPath == null || customName == null
+          ? null
+          : CustomAlertSound(displayName: customName, localPath: customPath);
+      var alertSoundId =
+          prefs.getString(alertSoundIdKey) ?? softChimeAlertSound.id;
+      if (!isBundledAlertSoundId(alertSoundId) &&
+          !(alertSoundId == customAlertSoundId && customSound != null)) {
+        alertSoundId = softChimeAlertSound.id;
+      }
       state = SettingsState(
         soundEnabled: prefs.getBool(soundEnabledKey) ?? true,
+        alertSoundId: alertSoundId,
+        customSound: customSound,
         paused: prefs.getBool(pausedKey) ?? false,
         launchAtStartup: launchAtStartupEnabled,
         textScale: normalizeTextScale(prefs.getDouble(textScaleKey) ?? 1),
@@ -209,6 +247,37 @@ class SettingsController extends Notifier<SettingsState> {
     await _hydrated.future;
     state = state.copyWith(soundEnabled: soundEnabled);
     await (await _prefs).setBool(soundEnabledKey, soundEnabled);
+  }
+
+  Future<void> setAlertSound(String alertSoundId) async {
+    await _hydrated.future;
+    if (!isBundledAlertSoundId(alertSoundId) &&
+        !(alertSoundId == customAlertSoundId && state.customSound != null)) {
+      throw ArgumentError.value(alertSoundId, 'alertSoundId');
+    }
+    state = state.copyWith(alertSoundId: alertSoundId);
+    await (await _prefs).setString(alertSoundIdKey, alertSoundId);
+  }
+
+  /// Imports one custom sound, replaces any previously imported file, and
+  /// selects it. Returns `false` when the native picker is cancelled.
+  Future<bool> importCustomSound() async {
+    await _hydrated.future;
+    final customSound = await ref.read(customSoundStoreProvider).importSound();
+    if (customSound == null) {
+      return false;
+    }
+    state = state.copyWith(
+      alertSoundId: customAlertSoundId,
+      customSound: customSound,
+    );
+    final prefs = await _prefs;
+    await Future.wait([
+      prefs.setString(alertSoundIdKey, customAlertSoundId),
+      prefs.setString(customSoundPathKey, customSound.localPath),
+      prefs.setString(customSoundNameKey, customSound.displayName),
+    ]);
+    return true;
   }
 
   /// Pauses or resumes alert popups and persists the choice.

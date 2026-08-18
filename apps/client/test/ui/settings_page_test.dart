@@ -2,6 +2,9 @@ import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
 import 'package:client/config/server_config.dart';
 import 'package:client/devices/devices_controller.dart';
+import 'package:client/notifications/alert_sound.dart';
+import 'package:client/notifications/custom_sound_store.dart';
+import 'package:client/notifications/sound_player.dart';
 import 'package:client/settings/settings_controller.dart';
 import 'package:client/ui/settings_page.dart';
 import 'package:client/ui/server_settings_dialog.dart';
@@ -15,10 +18,16 @@ import 'fake_auth_controller.dart';
 
 class MockStartupToggle extends Mock implements StartupToggle {}
 
+class MockCustomSoundStore extends Mock implements CustomSoundStore {}
+
+class MockSoundPlayer extends Mock implements SoundPlayer {}
+
 Future<ProviderContainer> _pumpSettingsPage(
   WidgetTester tester, {
   Map<String, Object> initialValues = const {},
   StartupToggle? startupToggle,
+  CustomSoundStore? customSoundStore,
+  SoundPlayer? soundPlayer,
   bool? autostartSupported,
   FakeAuthController? authController,
   ServerConfigStore? serverConfigStore,
@@ -32,10 +41,20 @@ Future<ProviderContainer> _pumpSettingsPage(
     ).thenThrow(StateError('OS integration unavailable in widget tests'));
     when(() => toggle.setEnabled(any())).thenAnswer((_) async {});
   }
+  final soundStore = customSoundStore ?? MockCustomSoundStore();
+  if (customSoundStore == null && soundStore is MockCustomSoundStore) {
+    when(() => soundStore.importSound()).thenAnswer((_) async => null);
+  }
+  final previewPlayer = soundPlayer ?? MockSoundPlayer();
+  if (soundPlayer == null && previewPlayer is MockSoundPlayer) {
+    when(() => previewPlayer.play(any())).thenAnswer((_) async {});
+  }
   final container = ProviderContainer(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(Future.value(prefs)),
       startupToggleProvider.overrideWithValue(toggle),
+      customSoundStoreProvider.overrideWithValue(soundStore),
+      soundPreviewPlayerProvider.overrideWithValue(previewPlayer),
       authControllerProvider.overrideWith(
         () =>
             authController ??
@@ -67,6 +86,8 @@ Finder _switchOf(Key key) =>
     find.descendant(of: find.byKey(key), matching: find.byType(Switch));
 
 void main() {
+  setUpAll(() => registerFallbackValue(softChimeAlertSound));
+
   testWidgets('shows sound / pause / autostart switches with defaults', (
     tester,
   ) async {
@@ -177,6 +198,57 @@ void main() {
     expect(prefs.getBool(SettingsController.soundEnabledKey), isFalse);
   });
 
+  testWidgets('selects and previews a bundled desktop sound', (tester) async {
+    final preview = MockSoundPlayer();
+    when(() => preview.play(any())).thenAnswer((_) async {});
+    final container = await _pumpSettingsPage(tester, soundPlayer: preview);
+    final selected = bundledAlertSounds[2];
+
+    await tester.tap(find.byKey(SettingsPage.alertSoundPickerKey));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(SettingsPage.alertSoundDialogKey), findsOneWidget);
+    expect(
+      find.byKey(SettingsPage.soundOptionKey(selected.id)),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(SettingsPage.soundPreviewKey(selected.id)));
+    await tester.pumpAndSettle();
+    verify(() => preview.play(selected)).called(1);
+
+    await tester.tap(find.byKey(SettingsPage.soundOptionKey(selected.id)));
+    await tester.pumpAndSettle();
+    expect(container.read(settingsControllerProvider).alertSound, selected);
+  });
+
+  testWidgets('imports and selects a custom desktop sound', (tester) async {
+    final store = MockCustomSoundStore();
+    const custom = CustomAlertSound(
+      displayName: 'My Chime',
+      localPath: '/support/custom.wav',
+    );
+    when(() => store.importSound()).thenAnswer((_) async => custom);
+    final container = await _pumpSettingsPage(tester, customSoundStore: store);
+
+    await tester.tap(find.byKey(SettingsPage.alertSoundPickerKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(SettingsPage.importSoundKey));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(SettingsPage.soundOptionKey(customAlertSoundId)),
+        matching: find.text('My Chime'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(SettingsPage.soundOptionKey(customAlertSoundId)),
+      findsOneWidget,
+    );
+    expect(container.read(settingsControllerProvider).alertSound, custom);
+  });
+
   testWidgets('font scale controls update and reset the persisted value', (
     tester,
   ) async {
@@ -204,6 +276,7 @@ void main() {
     expect(find.text('开机自启'), findsNothing);
     expect(find.byKey(SettingsPage.autostartSwitchKey), findsNothing);
     expect(find.byKey(SettingsPage.textScaleSliderKey), findsNothing);
+    expect(find.byKey(SettingsPage.alertSoundPickerKey), findsNothing);
   });
 
   testWidgets('开机自启 is shown on desktop', (tester) async {

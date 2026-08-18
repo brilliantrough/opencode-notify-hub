@@ -16,6 +16,7 @@ import 'package:notify_api/src/api/health_api.dart';
 import 'package:notify_api/src/api/ingest_keys_api.dart';
 import 'package:notify_api/src/api/pending_api.dart';
 import 'package:notify_api/src/api/realtime_api.dart';
+import 'package:notify_api/src/api/sessions_api.dart';
 
 class NotifyApi {
   static const String basePath = r'http://localhost';
@@ -130,5 +131,11 @@ class NotifyApi {
   /// by doing that all interceptors will not be executed
   RealtimeApi getRealtimeApi() {
     return RealtimeApi(dio, serializers);
+  }
+
+  /// Get SessionsApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  SessionsApi getSessionsApi() {
+    return SessionsApi(dio, serializers);
   }
 }

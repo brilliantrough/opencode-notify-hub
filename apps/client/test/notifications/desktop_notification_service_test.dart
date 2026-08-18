@@ -1,3 +1,4 @@
+import 'package:client/notifications/alert_sound.dart';
 import 'package:client/notifications/desktop_notification_service.dart';
 import 'package:client/notifications/notification_service.dart';
 import 'package:client/notifications/sound_player.dart';
@@ -50,15 +51,22 @@ class FakeDesktopNotifier implements DesktopNotifier {
   }
 }
 
-NotifyRequest _request({bool playSound = true}) => NotifyRequest(
+NotifyRequest _request({
+  bool playSound = true,
+  AlertSound alertSound = softChimeAlertSound,
+}) => NotifyRequest(
   eventId: 'evt-1',
   title: '构建完成',
   body: '会话 abc 已结束',
   playSound: playSound,
+  alertSound: alertSound,
 );
 
 void main() {
-  setUpAll(() => registerFallbackValue(Toast()));
+  setUpAll(() {
+    registerFallbackValue(Toast());
+    registerFallbackValue(softChimeAlertSound);
+  });
 
   group('DesktopNotificationService', () {
     late FakeDesktopNotifier notifier;
@@ -67,7 +75,7 @@ void main() {
     setUp(() {
       notifier = FakeDesktopNotifier();
       soundPlayer = MockSoundPlayer();
-      when(() => soundPlayer.playAlert()).thenAnswer((_) async {});
+      when(() => soundPlayer.play(any())).thenAnswer((_) async {});
     });
 
     DesktopNotificationService service({
@@ -99,13 +107,21 @@ void main() {
     test('show plays the alert sound when playSound is true', () async {
       await service().show(_request(playSound: true));
 
-      verify(() => soundPlayer.playAlert()).called(1);
+      verify(() => soundPlayer.play(softChimeAlertSound)).called(1);
+    });
+
+    test('show plays the selected alert sound', () async {
+      final selected = bundledAlertSounds[2];
+
+      await service().show(_request(alertSound: selected));
+
+      verify(() => soundPlayer.play(selected)).called(1);
     });
 
     test('show stays silent when playSound is false', () async {
       await service().show(_request(playSound: false));
 
-      verifyNever(() => soundPlayer.playAlert());
+      verifyNever(() => soundPlayer.play(any()));
       expect(notifier.shown, hasLength(1));
     });
 

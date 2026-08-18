@@ -15,6 +15,8 @@ import type {
   commandKindSchema,
   commandOutcomeSchema,
   commandOutcomeStatusSchema,
+  promptCommandStatusSchema,
+  sendPromptBodySchema,
 } from "./schemas/commands.js";
 import type {
   instancePresenceSchema,
@@ -102,3 +104,5 @@ export type CommandKind = FromSchema<typeof commandKindSchema>;
 export type CommandAccepted = FromSchema<typeof commandAcceptedSchema>;
 export type CommandOutcomeStatus = FromSchema<typeof commandOutcomeStatusSchema>;
 export type CommandOutcome = FromSchema<typeof commandOutcomeSchema>;
+export type SendPromptBody = FromSchema<typeof sendPromptBodySchema>;
+export type PromptCommandStatus = FromSchema<typeof promptCommandStatusSchema>;

@@ -18,6 +18,20 @@ OpenCode Notify has four runtime components and one generated client package.
                     └───────────────────┘                   └───────────────────┘
 ```
 
+The separate control path is bidirectional and carries no notification replay:
+
+```text
+system browser ◄── localhost proxy ──► Flutter client
+                                            │
+                                 prompt REST / WebUI WebSocket
+                                            ▼
+                                         Gateway
+                                            │
+                                     /v1/plugin/ws
+                                            ▼
+                                          Plugin ──► local OpenCode
+```
+
 ## Components
 
 ### `packages/plugin`
@@ -26,6 +40,10 @@ A self-contained OpenCode plugin. It observes only main-session events,
 maintains per-session state, builds schema-valid envelopes, queues them with
 bounded priority, and sends HMAC-authenticated requests. Invalid configuration
 fails closed and sends nothing.
+
+The Plugin also owns an outbound authenticated control WebSocket. Session
+prompts and temporary WebUI HTTP/SSE requests travel down that existing
+instance-specific connection; the Plugin calls only its local OpenCode server.
 
 ### `packages/contracts`
 
@@ -44,7 +62,9 @@ ingest-key verification, event fanout, health checks, and rate limits.
 A Flutter client for Linux, Windows, and Android. It stores refresh credentials
 in the OS secure store, maintains a reconnecting WebSocket while appropriate,
 routes notifications through one dedupe/history path, and uses FCM for Android
-background delivery.
+background delivery. For temporary WebUI access it hosts a loopback-only HTTP
+proxy, keeps its authenticated Gateway tunnel alive, and opens that local origin
+in the system browser.
 
 ### `packages/notify_api`
 

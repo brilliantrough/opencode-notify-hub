@@ -16,8 +16,12 @@ The plugin sends validated notification envelopes containing:
 - an assistant-only terminal summary only when
   `NOTIFY_INCLUDE_SUMMARY=true`.
 
-It does not send user prompts, tool output, or full conversation transcripts.
-See [docs/plugin-install.md](docs/plugin-install.md#privacy) for field limits.
+Notification delivery does not send user prompts, tool output, or full
+conversation transcripts. When a user explicitly sends text or opens the
+temporary WebUI, the selected prompt or proxied WebUI HTTP/SSE traffic passes
+through gateway memory to that Plugin instance. Those bodies are not persisted
+or logged. See [docs/plugin-install.md](docs/plugin-install.md#privacy) for
+notification field limits.
 
 ## Data stored by the gateway
 
@@ -38,7 +42,9 @@ systems according to their own policy.
 
 Refresh credentials are stored through the operating system's secure credential
 store. Client preferences and up to 50 rendered notification-history entries
-are stored locally. A paused notification is still recorded in local history.
+are stored locally. Each history entry can include the event time and type,
+machine, project, working directory, session title/id, request id, and rendered
+notification text. A paused notification is still recorded in local history.
 
 ## Retention and deletion
 

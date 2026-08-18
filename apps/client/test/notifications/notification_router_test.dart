@@ -1,4 +1,5 @@
 import 'package:client/history/notification_history.dart';
+import 'package:client/notifications/alert_sound.dart';
 import 'package:client/notifications/notification_router.dart';
 import 'package:client/notifications/notification_service.dart';
 import 'package:client/realtime/active_sessions.dart';
@@ -150,6 +151,7 @@ late NotificationRouter router;
 
 var paused = false;
 var soundEnabled = true;
+AlertSound alertSound = softChimeAlertSound;
 
 ActiveSessions get sessions => container.read(activeSessionsProvider.notifier);
 Map<String, ActiveSession> get sessionsState =>
@@ -166,13 +168,17 @@ void main() {
     history = InMemoryNotificationHistory();
     paused = false;
     soundEnabled = true;
+    alertSound = softChimeAlertSound;
     router = NotificationRouter(
       service: service,
       activeSessions: sessions,
       deduper: EventDeduper(),
       history: history,
-      readSettings: () =>
-          NotificationSettings(paused: paused, soundEnabled: soundEnabled),
+      readSettings: () => NotificationSettings(
+        paused: paused,
+        soundEnabled: soundEnabled,
+        alertSound: alertSound,
+      ),
     );
   });
 
@@ -201,9 +207,17 @@ void main() {
       expect(service.shown, hasLength(1));
       final request = service.shown.single;
       expect(request.eventId, 'evt-act');
-      expect(request.title, 'linewrite · macbook · 需要授权');
+      expect(request.title, 'macbook · repo · Fix login · 需要授权');
       expect(request.body, '请求权限：filesystem');
       expect(request.playSound, isTrue);
+      expect(request.alertSound, softChimeAlertSound);
+      final entry = history.entries.single;
+      expect(entry.directoryName, 'repo');
+      expect(entry.directory, '/repo');
+      expect(entry.sessionTitle, 'Fix login');
+      expect(entry.machine, 'macbook');
+      expect(entry.project, 'linewrite');
+      expect(entry.status, '需要授权');
     });
   });
 
@@ -219,7 +233,7 @@ void main() {
       expect(service.shown, hasLength(2));
       final request = service.shown.last;
       expect(request.eventId, 'evt-term');
-      expect(request.title, 'linewrite · macbook · 任务已完成');
+      expect(request.title, 'macbook · repo · Fix login · 任务已完成');
       expect(request.body, '用时 300 秒\nAll done');
       expect(request.playSound, isTrue);
     });

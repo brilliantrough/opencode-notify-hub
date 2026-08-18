@@ -62,15 +62,23 @@ import 'package:notify_api/src/model/plugin_control_client_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of1.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of2.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of3.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of4.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of5.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of6.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of7.dart';
 import 'package:notify_api/src/model/plugin_control_server_message.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of2.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of3.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of4.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of5.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of6.dart';
 import 'package:notify_api/src/model/refresh_body.dart';
 import 'package:notify_api/src/model/register_body.dart';
 import 'package:notify_api/src/model/register_device_body.dart';
 import 'package:notify_api/src/model/reset_password_body.dart';
+import 'package:notify_api/src/model/send_prompt_body.dart';
 import 'package:notify_api/src/model/token_pair.dart';
 import 'package:notify_api/src/model/verify_email_body.dart';
 import 'package:notify_api/src/model/ws_server_message.dart';
@@ -130,15 +138,23 @@ part 'serializers.g.dart';
   PluginControlClientMessageOneOf1,
   PluginControlClientMessageOneOf2,
   PluginControlClientMessageOneOf3,
+  PluginControlClientMessageOneOf4,
+  PluginControlClientMessageOneOf5,
+  PluginControlClientMessageOneOf6,
+  PluginControlClientMessageOneOf7,
   PluginControlServerMessage,
   PluginControlServerMessageOneOf,
   PluginControlServerMessageOneOf1,
   PluginControlServerMessageOneOf2,
   PluginControlServerMessageOneOf3,
+  PluginControlServerMessageOneOf4,
+  PluginControlServerMessageOneOf5,
+  PluginControlServerMessageOneOf6,
   RefreshBody,
   RegisterBody,
   RegisterDeviceBody,
   ResetPasswordBody,
+  SendPromptBody,
   TokenPair,
   VerifyEmailBody,
   WsServerMessage,

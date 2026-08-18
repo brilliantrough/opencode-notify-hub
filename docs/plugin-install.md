@@ -34,11 +34,11 @@ pnpm --filter @notify/plugin build
 ```
 
 This produces `packages/plugin/dist/session-notify.js`. The bundle is
-fully self-contained: `@notify/contracts` (including its validator) is
-inlined, the `@opencode-ai/plugin` / `@opencode-ai/sdk` imports are
-type-only and erased at build time, and the only runtime imports are
-Node builtins (`os`, `crypto`). No `node_modules` needs to sit next to
-the installed file.
+fully self-contained: `@notify/contracts` (including its validator) and the
+runtime parts of `@opencode-ai/sdk` are bundled, while
+`@opencode-ai/plugin` is type-only and erased at build time. Remaining runtime
+imports are Node builtins. No `node_modules` needs to sit next to the installed
+file.
 
 Optional sanity check (both must print `function`):
 

@@ -5,6 +5,7 @@ import type {
   PermissionCommandStatus,
   PermissionDecision,
   PluginControlClientMessage,
+  PromptCommandStatus,
   QuestionAnswers,
   QuestionCommandStatus,
 } from "@notify/contracts";
@@ -21,6 +22,35 @@ export interface PluginControl {
   start(): void;
   stop(): void | Promise<void>;
 }
+
+export interface WebUiHttpRequest {
+  tunnelId: string;
+  requestId: string;
+  method: string;
+  path: string;
+  headers: Record<string, string[]>;
+  body?: string;
+}
+
+export type WebUiResponseFrame =
+  | {
+      type: "webui_http_response_start";
+      tunnelId: string;
+      requestId: string;
+      status: number;
+      headers: Record<string, string[]>;
+    }
+  | {
+      type: "webui_http_response_chunk";
+      tunnelId: string;
+      requestId: string;
+      body: string;
+    }
+  | {
+      type: "webui_http_response_end";
+      tunnelId: string;
+      requestId: string;
+    };
 
 type SocketFactory = (url: string, authorization: string) => ControlSocket;
 
@@ -84,6 +114,22 @@ export interface ControlChannelOptions {
   ) => Promise<PermissionCommandStatus>;
   /** Bounded time to wait for the injected seam; defaults to 8 seconds. */
   decideTimeoutMs?: number;
+  /** Sends one free-form prompt to an existing Session through OpenCode V2. */
+  sendPrompt?: (
+    sessionID: string,
+    text: string,
+    signal: AbortSignal,
+  ) => Promise<PromptCommandStatus>;
+  /** Bounded time to wait for OpenCode to admit the prompt. */
+  promptTimeoutMs?: number;
+  /** Proxies one WebUI HTTP request to the local OpenCode server. */
+  webUiRequest?: (
+    request: WebUiHttpRequest,
+    signal: AbortSignal,
+    emit: (frame: WebUiResponseFrame) => void,
+  ) => Promise<void>;
+  /** Aborts any local WebUI work associated with a closed tunnel. */
+  webUiTunnelClose?: (tunnelId: string) => void;
 }
 
 const BASE_BACKOFF_MS = 500;
@@ -105,6 +151,7 @@ const QUESTION_ANSWER_TIMEOUT_MS = 8_000;
  * timeout of its own.
  */
 const PERMISSION_DECIDE_TIMEOUT_MS = 8_000;
+const SESSION_PROMPT_TIMEOUT_MS = 8_000;
 
 /**
  * Bounded wait for the OpenCode version probe to succeed before the first
@@ -127,6 +174,7 @@ export class ControlChannel implements PluginControl {
   private openCodeVersion: string | null = null;
   private registered = false;
   private collectionInFlight: Promise<PendingInteraction[]> | null = null;
+  private readonly webUiAborts = new Map<string, Set<AbortController>>();
 
   constructor(options: ControlChannelOptions) {
     this.options = options;
@@ -146,6 +194,9 @@ export class ControlChannel implements PluginControl {
   stop(): void {
     this.running = false;
     this.registered = false;
+    for (const tunnelId of [...this.webUiAborts.keys()]) {
+      this.closeWebUiTunnel(tunnelId);
+    }
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -217,7 +268,7 @@ export class ControlChannel implements PluginControl {
         project: this.options.project,
         directory: this.options.directory,
         openCodeVersion: this.openCodeVersion ?? "unknown",
-        protocolVersion: 1,
+        protocolVersion: 2,
       };
       try {
         socket.send(JSON.stringify(registration));
@@ -294,6 +345,29 @@ export class ControlChannel implements PluginControl {
         return; // malformed decision command: ignore and keep the channel alive
       }
       void this.decideCommand(socket, command);
+      return;
+    }
+    if (frame.type === "session_prompt_command") {
+      const command = parsePromptCommand(frame);
+      if (command === null) {
+        return;
+      }
+      void this.promptCommand(socket, command);
+      return;
+    }
+    if (frame.type === "webui_http_request") {
+      const request = parseWebUiRequest(frame);
+      if (request === null) {
+        return;
+      }
+      void this.webUiRequest(socket, request);
+      return;
+    }
+    if (frame.type === "webui_tunnel_close") {
+      if (!isUuid(frame.tunnelId)) {
+        return;
+      }
+      this.closeWebUiTunnel(frame.tunnelId);
     }
   }
 
@@ -432,6 +506,126 @@ export class ControlChannel implements PluginControl {
     }
   }
 
+  private async promptCommand(socket: ControlSocket, command: PromptCommand): Promise<void> {
+    const status = await this.runPrompt(command);
+    if (!this.running || this.socket !== socket) {
+      return;
+    }
+    const result: PluginControlClientMessage = {
+      type: "session_prompt_result",
+      commandId: command.commandId,
+      instanceId: this.instanceId,
+      status,
+    };
+    try {
+      socket.send(JSON.stringify(result));
+    } catch {
+      // Prompt delivery must never affect notification behavior.
+    }
+  }
+
+  private async runPrompt(command: PromptCommand): Promise<PromptCommandStatus> {
+    if (this.options.sendPrompt === undefined) {
+      return "result_unknown";
+    }
+    const abort = new AbortController();
+    let timeout: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        this.options.sendPrompt(command.sessionID, command.text, abort.signal),
+        new Promise<PromptCommandStatus>((resolve) => {
+          timeout = setTimeout(() => {
+            abort.abort();
+            resolve("result_unknown");
+          }, this.options.promptTimeoutMs ?? SESSION_PROMPT_TIMEOUT_MS);
+        }),
+      ]);
+    } catch {
+      return "result_unknown";
+    } finally {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
+  private async webUiRequest(
+    socket: ControlSocket,
+    request: WebUiHttpRequest,
+  ): Promise<void> {
+    const emit = (frame: WebUiResponseFrame): void => {
+      if (!this.running || this.socket !== socket) {
+        return;
+      }
+      try {
+        socket.send(JSON.stringify(frame));
+      } catch {
+        // A closed tunnel must not affect the control channel.
+      }
+    };
+    if (this.options.webUiRequest === undefined) {
+      emit({
+        type: "webui_http_response_start",
+        tunnelId: request.tunnelId,
+        requestId: request.requestId,
+        status: 501,
+        headers: { "content-type": ["text/plain; charset=utf-8"] },
+      });
+      emit({
+        type: "webui_http_response_chunk",
+        tunnelId: request.tunnelId,
+        requestId: request.requestId,
+        body: Buffer.from("WebUI tunnel is unavailable").toString("base64"),
+      });
+      emit({
+        type: "webui_http_response_end",
+        tunnelId: request.tunnelId,
+        requestId: request.requestId,
+      });
+      return;
+    }
+    const abort = new AbortController();
+    const active = this.webUiAborts.get(request.tunnelId) ?? new Set<AbortController>();
+    active.add(abort);
+    this.webUiAborts.set(request.tunnelId, active);
+    try {
+      await this.options.webUiRequest(request, abort.signal, emit);
+    } catch {
+      emit({
+        type: "webui_http_response_start",
+        tunnelId: request.tunnelId,
+        requestId: request.requestId,
+        status: 502,
+        headers: { "content-type": ["text/plain; charset=utf-8"] },
+      });
+      emit({
+        type: "webui_http_response_chunk",
+        tunnelId: request.tunnelId,
+        requestId: request.requestId,
+        body: Buffer.from("OpenCode WebUI request failed").toString("base64"),
+      });
+      emit({
+        type: "webui_http_response_end",
+        tunnelId: request.tunnelId,
+        requestId: request.requestId,
+      });
+    } finally {
+      active.delete(abort);
+      if (active.size === 0) {
+        this.webUiAborts.delete(request.tunnelId);
+      }
+    }
+  }
+
+  private closeWebUiTunnel(tunnelId: string): void {
+    const active = this.webUiAborts.get(tunnelId);
+    if (active !== undefined) {
+      this.webUiAborts.delete(tunnelId);
+      for (const abort of active) abort.abort();
+    }
+    this.options.webUiTunnelClose?.(tunnelId);
+  }
+
   /** Run the injected seam under a bounded timeout, failing closed to []. */
   private async collectInteractions(): Promise<PendingInteraction[]> {
     const active = this.collectionInFlight;
@@ -548,6 +742,68 @@ interface DecideCommand {
   requestId: string;
   sessionID: string;
   decision: PermissionDecision;
+}
+
+interface PromptCommand {
+  commandId: string;
+  sessionID: string;
+  text: string;
+}
+
+function parsePromptCommand(frame: Record<string, unknown>): PromptCommand | null {
+  if (!isUuid(frame.commandId)) {
+    return null;
+  }
+  if (typeof frame.sessionID !== "string" || frame.sessionID.length === 0) {
+    return null;
+  }
+  if (
+    typeof frame.text !== "string" ||
+    frame.text.trim().length === 0 ||
+    frame.text.length > 32_000
+  ) {
+    return null;
+  }
+  return { commandId: frame.commandId, sessionID: frame.sessionID, text: frame.text };
+}
+
+function parseWebUiRequest(frame: Record<string, unknown>): WebUiHttpRequest | null {
+  if (!isUuid(frame.tunnelId) || !isUuid(frame.requestId)) {
+    return null;
+  }
+  if (
+    typeof frame.method !== "string" ||
+    frame.method.length === 0 ||
+    frame.method.length > 16 ||
+    typeof frame.path !== "string" ||
+    frame.path.length === 0 ||
+    frame.path.length > 8192
+  ) {
+    return null;
+  }
+  const rawHeaders = frame.headers;
+  if (rawHeaders === null || typeof rawHeaders !== "object" || Array.isArray(rawHeaders)) {
+    return null;
+  }
+  const headers: Record<string, string[]> = {};
+  for (const [name, value] of Object.entries(rawHeaders)) {
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+      return null;
+    }
+    headers[name] = value as string[];
+  }
+  if (frame.body !== undefined &&
+      (typeof frame.body !== "string" || frame.body.length > 700_000)) {
+    return null;
+  }
+  return {
+    tunnelId: frame.tunnelId,
+    requestId: frame.requestId,
+    method: frame.method,
+    path: frame.path,
+    headers,
+    ...(frame.body === undefined ? {} : { body: frame.body }),
+  };
 }
 
 /**

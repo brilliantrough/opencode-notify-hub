@@ -1277,6 +1277,89 @@ components:
             - instanceId
             - status
           type: object
+        - additionalProperties: false
+          properties:
+            commandId:
+              format: uuid
+              type: string
+            instanceId:
+              format: uuid
+              type: string
+            status:
+              enum:
+                - confirmed
+                - upstream_error
+                - result_unknown
+              type: string
+            type:
+              const: session_prompt_result
+          required:
+            - type
+            - commandId
+            - instanceId
+            - status
+          type: object
+        - additionalProperties: false
+          properties:
+            headers:
+              additionalProperties:
+                items:
+                  type: string
+                type: array
+              type: object
+            requestId:
+              format: uuid
+              type: string
+            status:
+              maximum: 599
+              minimum: 100
+              type: integer
+            tunnelId:
+              format: uuid
+              type: string
+            type:
+              const: webui_http_response_start
+          required:
+            - type
+            - tunnelId
+            - requestId
+            - status
+            - headers
+          type: object
+        - additionalProperties: false
+          properties:
+            body:
+              maxLength: 700000
+              type: string
+            requestId:
+              format: uuid
+              type: string
+            tunnelId:
+              format: uuid
+              type: string
+            type:
+              const: webui_http_response_chunk
+          required:
+            - type
+            - tunnelId
+            - requestId
+            - body
+          type: object
+        - additionalProperties: false
+          properties:
+            requestId:
+              format: uuid
+              type: string
+            tunnelId:
+              format: uuid
+              type: string
+            type:
+              const: webui_http_response_end
+          required:
+            - type
+            - tunnelId
+            - requestId
+          type: object
     PluginControlServerMessage:
       oneOf:
         - additionalProperties: false
@@ -1363,6 +1446,72 @@ components:
             - sessionID
             - decision
           type: object
+        - additionalProperties: false
+          properties:
+            commandId:
+              format: uuid
+              type: string
+            sessionID:
+              minLength: 1
+              type: string
+            text:
+              maxLength: 32000
+              minLength: 1
+              type: string
+            type:
+              const: session_prompt_command
+          required:
+            - type
+            - commandId
+            - sessionID
+            - text
+          type: object
+        - additionalProperties: false
+          properties:
+            body:
+              maxLength: 700000
+              type: string
+            headers:
+              additionalProperties:
+                items:
+                  type: string
+                type: array
+              type: object
+            method:
+              maxLength: 16
+              minLength: 1
+              type: string
+            path:
+              maxLength: 8192
+              minLength: 1
+              type: string
+            requestId:
+              format: uuid
+              type: string
+            tunnelId:
+              format: uuid
+              type: string
+            type:
+              const: webui_http_request
+          required:
+            - type
+            - tunnelId
+            - requestId
+            - method
+            - path
+            - headers
+          type: object
+        - additionalProperties: false
+          properties:
+            tunnelId:
+              format: uuid
+              type: string
+            type:
+              const: webui_tunnel_close
+          required:
+            - type
+            - tunnelId
+          type: object
     RefreshBody:
       additionalProperties: false
       properties:
@@ -1432,6 +1581,20 @@ components:
         - email
         - code
         - password
+      type: object
+    SendPromptBody:
+      additionalProperties: false
+      properties:
+        commandId:
+          format: uuid
+          type: string
+        text:
+          maxLength: 32000
+          minLength: 1
+          type: string
+      required:
+        - commandId
+        - text
       type: object
     TokenPair:
       additionalProperties: false
@@ -2455,6 +2618,67 @@ paths:
       summary: Revoke an ingest key.
       tags:
         - ingest-keys
+  /v1/instances/{instanceId}/sessions/{sessionId}/prompt:
+    post:
+      description: Routes one text prompt to the authenticated user's exact online Plugin instance. The 202 response acknowledges that the Gateway wrote the command to the Plugin control connection; it does not wait for OpenCode to admit or execute the prompt. Prompts are never queued or retried.
+      operationId: sendSessionPrompt
+      parameters:
+        - description: OpenCode instance identifier.
+          in: path
+          name: instanceId
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: OpenCode Session identifier.
+          in: path
+          name: sessionId
+          required: true
+          schema:
+            minLength: 1
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendPromptBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandAccepted"
+          description: Prompt accepted for best-effort delivery.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Validation failed.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Missing or invalid access token.
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Unknown or non-actionable instance for this user.
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: The same command is already in flight.
+      security:
+        - bearerAuth: []
+      summary: Send one free-form prompt to an online OpenCode Session.
+      tags:
+        - sessions
   /v1/pending-interactions:
     get:
       description: Asks every owned online compatible Plugin instance for its current OpenCode questions and permissions and returns a unified snapshot. OpenCode is authoritative; the snapshot is a projection. Conflicting, incompatible, and offline instances are not queried, and provider actions never appear here.
@@ -2653,6 +2877,30 @@ paths:
       summary: Upgrade an OpenCode Plugin to its control WebSocket.
       tags:
         - realtime
+  /v1/webui/ws:
+    get:
+      description: The client sends one webui_tunnel_open frame naming an online instance, then proxies HTTP and SSE requests through the authenticated tunnel. The tunnel is memory-only and ends when either WebSocket closes.
+      operationId: connectWebUiTunnel
+      responses:
+        "101":
+          description: WebUI tunnel upgrade accepted.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Missing or invalid access token.
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Origin is not allowed.
+      security:
+        - bearerAuth: []
+      summary: Upgrade a temporary WebUI tunnel.
+      tags:
+        - sessions
   /v1/ws:
     get:
       description: The HTTP Upgrade request authenticates with the bearer access token. After the upgrade the server sends WsServerMessage frames; there is no client-to-server message protocol and incoming frames are ignored. The socket closes with code 4401 when the access token expires; reconnect with a fresh token. Events missed while disconnected are not replayed.

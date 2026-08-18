@@ -1,7 +1,9 @@
 # Remote Unblock Phase 1
 
-Status: designed and protocol-prototyped against OpenCode `1.18.18` on
-2026-08-14.
+Status: historical Phase 1 scope, designed and protocol-prototyped against
+OpenCode `1.18.18` on 2026-08-14. Follow-on work now ships the free-form Session
+prompt and temporary browser WebUI that were intentionally excluded below; see
+[Client guide](../client-guide.md#session-control) for current behavior.
 
 PRD: [GitHub issue #6](https://github.com/brilliantrough/opencode-notify-hub/issues/6)
 

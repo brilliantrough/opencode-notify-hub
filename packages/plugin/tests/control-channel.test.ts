@@ -69,7 +69,7 @@ describe("ControlChannel", () => {
         project: "notify",
         directory: "/work/notify",
         openCodeVersion: "1.18.18",
-        protocolVersion: 1,
+        protocolVersion: 2,
       },
     ]);
   });
@@ -1439,5 +1439,48 @@ describe("ControlChannel", () => {
       status: "confirmed",
     });
     expect(JSON.stringify(frames)).not.toContain("per_req_1");
+  });
+
+  it("routes a session_prompt_command through the injected prompt seam", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const sendPrompt = vi.fn(async () => "confirmed" as const);
+    const promptCommandId = "7f0d91b0-93e4-43a9-9449-0bed03e651aa";
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com",
+      credential: "key-id.key-secret",
+      machine: "devbox",
+      project: "notify",
+      directory: "/work/notify",
+      resolveOpenCodeVersion: async () => "1.18.18",
+      randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      socketFactory: () => socket,
+      sendPrompt,
+    });
+
+    channel.start();
+    await vi.advanceTimersByTimeAsync(0);
+    registeredChannel(socket);
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "session_prompt_command",
+        commandId: promptCommandId,
+        sessionID: "ses_1",
+        text: "Continue the work",
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(sendPrompt).toHaveBeenCalledWith(
+      "ses_1",
+      "Continue the work",
+      expect.any(AbortSignal),
+    );
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+      type: "session_prompt_result",
+      commandId: promptCommandId,
+      instanceId: "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
+      status: "confirmed",
+    });
   });
 });

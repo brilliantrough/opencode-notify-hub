@@ -46,6 +46,8 @@ Record before testing:
 | Offline desktop event is not replayed | [ ] | [ ] | n/a | n/a |
 | Gateway restart reconnects (`1012`) | [ ] | [ ] | [ ] | n/a |
 | Token expiry refreshes/reconnects (`4401`/Upgrade 401) | [ ] | [ ] | [ ] | n/a |
+| Selected bundled sound plays exactly once and persists | [ ] | [ ] | n/a | n/a |
+| Imported custom sound previews, plays, and persists | [ ] | [ ] | n/a | n/a |
 
 ## Windows desktop checks
 

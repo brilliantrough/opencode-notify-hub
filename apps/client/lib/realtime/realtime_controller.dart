@@ -56,6 +56,7 @@ final notificationRouterProvider = Provider<NotificationRouter>(
       return NotificationSettings(
         paused: settings.paused,
         soundEnabled: settings.soundEnabled,
+        alertSound: settings.alertSound,
       );
     },
     // Question/permission alerts deep-link into the focused request page via

@@ -224,6 +224,20 @@ describe("question answering", () => {
     });
   }
 
+  function connectWebUi(token: string): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/webui/ws`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      clients.push(ws);
+      ws.once("open", () => resolve(ws));
+      ws.once("unexpected-response", (_request, response) => {
+        reject(Object.assign(new Error("unexpected response"), { response }));
+      });
+      ws.once("error", reject);
+    });
+  }
+
   function nextMessage(ws: WebSocket, timeoutMs = 3_000): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("timed out waiting for a message")), timeoutMs);
@@ -264,7 +278,7 @@ describe("question answering", () => {
         project: "notify",
         directory: "/work/notify",
         openCodeVersion: "1.18.18",
-        protocolVersion: 1,
+        protocolVersion: 2,
         ...overrides,
       }),
     );
@@ -333,6 +347,23 @@ describe("question answering", () => {
       // tests about auth and other validation failures keep exercising the
       // condition they name rather than a missing session id.
       payload: { sessionId: "ses_1", ...body },
+    });
+  }
+
+  function sendSessionPrompt(
+    token: string,
+    instanceId: string,
+    sessionId: string,
+    body: Record<string, unknown>,
+  ) {
+    return app.inject({
+      method: "POST",
+      url: `/v1/instances/${instanceId}/sessions/${sessionId}/prompt`,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      payload: body,
     });
   }
 
@@ -454,6 +485,129 @@ describe("question answering", () => {
   });
 
   describe("happy path", () => {
+    it("routes a free-form Session prompt without waiting for OpenCode", async () => {
+      const alice = await createUser("prompt@example.com");
+      const credential = await createPluginCredential(alice.token);
+      const instance = await registerPlugin(credential);
+      const commandId = randomUUID();
+      const commandFrame = nextMessage(instance.ws);
+
+      const response = await sendSessionPrompt(
+        alice.token,
+        instance.instanceId,
+        "ses_existing",
+        { commandId, text: "Continue the implementation and run the tests" },
+      );
+
+      expect(response.statusCode).toBe(202);
+      expect(validateCommandAccepted(response.json())).toBe(true);
+      expect(response.json()).toEqual({ commandId, status: "accepted" });
+      expect(await commandFrame).toEqual({
+        type: "session_prompt_command",
+        commandId,
+        sessionID: "ses_existing",
+        text: "Continue the implementation and run the tests",
+      });
+
+      instance.ws.send(
+        JSON.stringify({
+          type: "session_prompt_result",
+          commandId,
+          instanceId: instance.instanceId,
+          status: "confirmed",
+        }),
+      );
+    });
+
+    it("rejects malformed prompts and unknown instances before routing", async () => {
+      const alice = await createUser("prompt-errors@example.com");
+      const credential = await createPluginCredential(alice.token);
+      const instance = await registerPlugin(credential);
+
+      const malformed = await sendSessionPrompt(
+        alice.token,
+        instance.instanceId,
+        "ses_existing",
+        { commandId: randomUUID(), text: "" },
+      );
+      expect(malformed.statusCode).toBe(400);
+      expect(validateErrorResponse(malformed.json())).toBe(true);
+
+      const missing = await sendSessionPrompt(
+        alice.token,
+        randomUUID(),
+        "ses_existing",
+        { commandId: randomUUID(), text: "Continue" },
+      );
+      expect(missing.statusCode).toBe(404);
+      expect(validateErrorResponse(missing.json())).toBe(true);
+      await expectSilence(instance.ws);
+    });
+
+    it("relays a temporary WebUI HTTP stream through the Plugin connection", async () => {
+      const alice = await createUser("webui-tunnel@example.com");
+      const credential = await createPluginCredential(alice.token);
+      const instance = await registerPlugin(credential);
+      const client = await connectWebUi(alice.token);
+      const readyPromise = nextMessage(client);
+      client.send(
+        JSON.stringify({
+          type: "webui_tunnel_open",
+          instanceId: instance.instanceId,
+        }),
+      );
+      const ready = await readyPromise;
+      expect(ready.type).toBe("webui_tunnel_ready");
+      const tunnelId = ready.tunnelId as string;
+      const requestId = randomUUID();
+      const pluginRequest = nextMessage(instance.ws);
+      client.send(
+        JSON.stringify({
+          type: "webui_http_request",
+          tunnelId,
+          requestId,
+          method: "GET",
+          path: "/",
+          headers: { accept: ["text/html"] },
+        }),
+      );
+      expect(await pluginRequest).toEqual({
+        type: "webui_http_request",
+        tunnelId,
+        requestId,
+        method: "GET",
+        path: "/",
+        headers: { accept: ["text/html"] },
+      });
+
+      const start = nextMessage(client);
+      instance.ws.send(
+        JSON.stringify({
+          type: "webui_http_response_start",
+          tunnelId,
+          requestId,
+          status: 200,
+          headers: { "content-type": ["text/html"] },
+        }),
+      );
+      expect(await start).toMatchObject({ type: "webui_http_response_start", status: 200 });
+
+      const chunk = nextMessage(client);
+      instance.ws.send(
+        JSON.stringify({
+          type: "webui_http_response_chunk",
+          tunnelId,
+          requestId,
+          body: Buffer.from("<html>ok</html>").toString("base64"),
+        }),
+      );
+      expect((await chunk).body).toBe(Buffer.from("<html>ok</html>").toString("base64"));
+
+      const end = nextMessage(client);
+      instance.ws.send(JSON.stringify({ type: "webui_http_response_end", tunnelId, requestId }));
+      expect(await end).toEqual({ type: "webui_http_response_end", tunnelId, requestId });
+    });
+
     it("accepts after routing a complete answer without waiting for the Plugin result", async () => {
       const alice = await createUser("answer@example.com");
       const credential = await createPluginCredential(alice.token);

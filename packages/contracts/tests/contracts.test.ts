@@ -31,6 +31,7 @@ import {
   validateDecidePermissionBody,
   validateCommandAccepted,
   validateCommandOutcome,
+  validateSendPromptBody,
 } from "../src/index.js";
 
 const EVENT_ID = "3b8f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b";
@@ -1125,6 +1126,91 @@ describe("Plugin control WebSocket messages", () => {
       }),
     ).toBe(false);
   });
+
+  const promptCommandId = "8e4c8a1e-5f2b-4a7d-9e6c-1b3d5f7a9c2e";
+
+  it("accepts the session prompt command and terminal result frames", () => {
+    expect(
+      validatePluginControlServerMessage({
+        type: "session_prompt_command",
+        commandId: promptCommandId,
+        sessionID: "ses_1",
+        text: "Continue with the implementation",
+      }),
+    ).toBe(true);
+    expect(
+      validatePluginControlClientMessage({
+        type: "session_prompt_result",
+        commandId: promptCommandId,
+        instanceId: registration.instanceId,
+        status: "confirmed",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects empty, oversized, or mixed session prompt frames", () => {
+    const command = {
+      type: "session_prompt_command",
+      commandId: promptCommandId,
+      sessionID: "ses_1",
+      text: "Continue",
+    };
+    expect(validatePluginControlServerMessage({ ...command, text: "" })).toBe(false);
+    expect(validatePluginControlServerMessage({ ...command, text: "x".repeat(32_001) })).toBe(
+      false,
+    );
+    expect(validatePluginControlServerMessage({ ...command, requestId: "req_1" })).toBe(false);
+    expect(
+      validatePluginControlClientMessage({
+        type: "session_prompt_result",
+        commandId: promptCommandId,
+        instanceId: registration.instanceId,
+        status: "stale",
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts WebUI HTTP request and streamed response frames", () => {
+    const tunnelId = registration.instanceId;
+    const requestId = answerCommandId;
+    expect(
+      validatePluginControlServerMessage({
+        type: "webui_http_request",
+        tunnelId,
+        requestId,
+        method: "GET",
+        path: "/api/session?x=1",
+        headers: { accept: ["application/json"] },
+      }),
+    ).toBe(true);
+    expect(
+      validatePluginControlClientMessage({
+        type: "webui_http_response_start",
+        tunnelId,
+        requestId,
+        status: 200,
+        headers: { "content-type": ["application/json"] },
+      }),
+    ).toBe(true);
+    expect(
+      validatePluginControlClientMessage({
+        type: "webui_http_response_chunk",
+        tunnelId,
+        requestId,
+        body: "e30=",
+      }),
+    ).toBe(true);
+    expect(
+      validatePluginControlClientMessage({
+        type: "webui_http_response_end",
+        tunnelId,
+        requestId,
+      }),
+    ).toBe(true);
+    expect(
+      validatePluginControlServerMessage({ type: "webui_tunnel_close", tunnelId }),
+    ).toBe(true);
+  });
 });
 
 describe("PendingInteraction union", () => {
@@ -1658,6 +1744,24 @@ describe("CommandAccepted", () => {
     expect(validateCommandAccepted({ commandId, status: "confirmed" })).toBe(false);
     expect(validateCommandAccepted({ commandId })).toBe(false);
     expect(validateCommandAccepted({ commandId, status: "accepted", answers: [] })).toBe(false);
+  });
+});
+
+describe("SendPrompt body", () => {
+  const commandId = "8e4c8a1e-5f2b-4a7d-9e6c-1b3d5f7a9c2e";
+
+  it("accepts one bounded non-empty prompt", () => {
+    expect(validateSendPromptBody({ commandId, text: "Continue the work" })).toBe(true);
+    expect(validateSendPromptBody({ commandId, text: "x".repeat(32_000) })).toBe(true);
+  });
+
+  it("rejects malformed or oversized prompts", () => {
+    expect(validateSendPromptBody({ commandId, text: "" })).toBe(false);
+    expect(validateSendPromptBody({ commandId, text: "x".repeat(32_001) })).toBe(false);
+    expect(validateSendPromptBody({ commandId: "cmd_1", text: "Continue" })).toBe(false);
+    expect(validateSendPromptBody({ commandId, text: "Continue", sessionId: "ses_1" })).toBe(
+      false,
+    );
   });
 });
 

@@ -34,7 +34,12 @@ import type { NotifyEvent } from "@notify/contracts";
 import { posix, win32 } from "node:path";
 
 import { loadConfig, type PluginConfig } from "./config.js";
-import { ControlChannel, type PluginControl } from "./control-channel.js";
+import {
+  ControlChannel,
+  type PluginControl,
+  type WebUiHttpRequest,
+  type WebUiResponseFrame,
+} from "./control-channel.js";
 import { createLoopbackDirectFetch } from "./direct-fetch.js";
 import {
   EnvelopeFactory,
@@ -48,6 +53,8 @@ import { PendingAdapter, type PendingListClient } from "./pending-adapter.js";
 import { QueuePump } from "./pump.js";
 import { PermissionReplyAdapter, type PermissionReplyClient } from "./permission-reply-adapter.js";
 import { QuestionReplyAdapter, type QuestionReplyClient } from "./question-reply-adapter.js";
+import { SessionPromptAdapter, type SessionPromptClient } from "./session-prompt-adapter.js";
+import { WebUiProxy } from "./webui-proxy.js";
 import { GatewaySender } from "./sender.js";
 import {
   createSdkLookup,
@@ -176,8 +183,13 @@ export function createSessionNotifyHooks(
   // HTTP_PROXY from the host environment (issue #14: a proxy without a
   // localhost no_proxy answers 502 for loopback, breaking the control path).
   const loopbackFetch = deps.serverFetch ?? createLoopbackDirectFetch();
-  let v2: (PendingListClient & QuestionReplyClient & PermissionReplyClient) | null = null;
-  const v2Client = (): PendingListClient & QuestionReplyClient & PermissionReplyClient => {
+  let v2:
+    | (PendingListClient & QuestionReplyClient & PermissionReplyClient & SessionPromptClient)
+    | null = null;
+  const v2Client = (): PendingListClient &
+    QuestionReplyClient &
+    PermissionReplyClient &
+    SessionPromptClient => {
     v2 ??= createOpencodeClient({
       baseUrl: input.serverUrl.toString(),
       directory,
@@ -188,6 +200,8 @@ export function createSessionNotifyHooks(
   let pending: PendingAdapter | null = null;
   let answerer: QuestionReplyAdapter | null = null;
   let decider: PermissionReplyAdapter | null = null;
+  let prompter: SessionPromptAdapter | null = null;
+  let webUiProxy: WebUiProxy | null = null;
   const control =
     deps.control ??
     (input.serverUrl instanceof URL
@@ -229,6 +243,22 @@ export function createSessionNotifyHooks(
           decidePermission: (requestId, sessionID, decision, signal) => {
             decider ??= new PermissionReplyAdapter({ client: v2Client() });
             return decider.reply(requestId, sessionID, decision, signal);
+          },
+          sendPrompt: (sessionID, text, signal) => {
+            prompter ??= new SessionPromptAdapter(v2Client());
+            return prompter.send(sessionID, text, signal);
+          },
+          webUiRequest: (
+            request: WebUiHttpRequest,
+            signal: AbortSignal,
+            emit: (frame: WebUiResponseFrame) => void,
+          ) => {
+            webUiProxy ??= new WebUiProxy({
+              baseUrl: input.serverUrl,
+              directory,
+              fetch: loopbackFetch,
+            });
+            return webUiProxy.request(request, signal, emit);
           },
         })
       : null);

@@ -26,6 +26,8 @@ import { NodemailerMailer } from "./modules/mail/nodemailer.mailer.js";
 import { controlWsRoutes } from "./modules/control/control-ws.routes.js";
 import { InstanceRegistry } from "./modules/control/instance-registry.js";
 import { pendingInteractionsRoutes } from "./modules/control/pending-interactions.routes.js";
+import { sessionControlRoutes } from "./modules/control/session-control.routes.js";
+import { webUiWsRoutes } from "./modules/control/webui-ws.routes.js";
 import {
   ConnectionRegistry,
   WS_CLOSE_SERVER_SHUTDOWN,
@@ -121,6 +123,7 @@ const LOG_REDACT_PATHS = [
   // user's stance on a sensitive permission request and must never reach
   // the logs.
   "body.decision",
+  "body.text",
   // Catch-alls for the same fields logged at any other depth: one wildcard
   // per nesting level (fast-redact wildcards match exactly one segment), so
   // credentials, tokens, codes, signatures, FCM tokens, event payloads,
@@ -150,6 +153,7 @@ const LOG_REDACT_PATHS = [
     "metadata",
     "providerAction",
     "summary",
+    "text",
   ].flatMap((key) => [`*.${key}`, `*.*.${key}`, `*.*.*.${key}`]),
 ];
 
@@ -318,6 +322,14 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
     );
     await app.register(controlWsRoutes({ pluginKeys: ingestKeys, registry: instances }));
     await app.register(pendingInteractionsRoutes(instances));
+    await app.register(sessionControlRoutes(instances));
+    await app.register(
+      webUiWsRoutes({
+        registry: instances,
+        accessTokens,
+        allowedOrigins: config.allowedOrigins,
+      }),
+    );
     // Production default fanout: WebSocket (registry) + Android push (FCM)
     // composed behind the ingest route's dispatcher seam. The Firebase app
     // is only initialized when the real sender is needed — an injected

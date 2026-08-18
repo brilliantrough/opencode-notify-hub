@@ -9,7 +9,9 @@ import 'package:client/pending/pending_permission.dart';
 import 'package:client/realtime/active_sessions.dart';
 import 'package:client/realtime/instance_presence.dart';
 import 'package:client/realtime/ws_client.dart';
+import 'package:client/sessions/webui_browser_controller.dart';
 import 'package:client/ui/home_page.dart';
+import 'package:client/ui/session_prompt_page.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,6 +44,32 @@ class FakePendingInteractions extends PendingInteractionsController {
 
   @override
   Future<List<PendingInteraction>> build() async => _initial;
+}
+
+class FakeWebUiBrowserController extends WebUiBrowserController {
+  var openCalls = 0;
+  var closeCalls = 0;
+  String? openedInstanceId;
+
+  @override
+  WebUiBrowserState build() => const WebUiBrowserState.idle();
+
+  @override
+  Future<String?> open(String instanceId) async {
+    openCalls++;
+    openedInstanceId = instanceId;
+    state = WebUiBrowserState.active(
+      instanceId,
+      Uri.parse('http://127.0.0.1:42000/'),
+    );
+    return null;
+  }
+
+  @override
+  Future<void> close() async {
+    closeCalls++;
+    state = const WebUiBrowserState.idle();
+  }
 }
 
 class AnswerScript {
@@ -158,6 +186,7 @@ void main() {
     Map<String, ActiveSession> sessions = const {},
     Map<String, OpenCodeInstancePresence> instances = const {},
     List<PendingInteraction> interactions = const [],
+    FakeWebUiBrowserController? webUiController,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -172,6 +201,8 @@ void main() {
           pendingInteractionsProvider.overrideWith(
             () => FakePendingInteractions(interactions),
           ),
+          if (webUiController != null)
+            webUiBrowserControllerProvider.overrideWith(() => webUiController),
         ],
         child: const MaterialApp(home: HomePage()),
       ),
@@ -183,12 +214,14 @@ void main() {
     required String id,
     String machine = 'dev-box',
     String project = 'shop-api',
+    String directory = '/work/shop-api',
     String title = 'Fix checkout bug',
     Set<String> pending = const {},
   }) => ActiveSession(
     sessionId: id,
     machine: machine,
     project: project,
+    directory: directory,
     title: title,
     lastHeartbeatAt: DateTime.now().subtract(const Duration(minutes: 5)),
     running: true,
@@ -375,6 +408,57 @@ void main() {
     expect(find.byKey(const ValueKey('pending-s2')), findsNothing);
   });
 
+  testWidgets('a uniquely controllable session opens the prompt composer', (
+    tester,
+  ) async {
+    final active = session(id: 'session-1');
+    final target = instance(
+      '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+      InstancePresenceState.controllable,
+    );
+    await pumpHome(
+      tester,
+      sessions: {active.sessionId: active},
+      instances: {target.instanceId: target},
+    );
+
+    expect(find.byKey(const ValueKey('webui-session-1')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('prompt-session-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SessionPromptPage), findsOneWidget);
+    expect(find.byKey(const ValueKey('session-prompt-input')), findsOneWidget);
+  });
+
+  testWidgets('opens WebUI in the system browser and exposes tunnel close', (
+    tester,
+  ) async {
+    final active = session(id: 'session-1');
+    final target = instance(
+      '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+      InstancePresenceState.controllable,
+    );
+    final webUi = FakeWebUiBrowserController();
+    await pumpHome(
+      tester,
+      sessions: {active.sessionId: active},
+      instances: {target.instanceId: target},
+      webUiController: webUi,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('webui-session-1')));
+    await tester.pump();
+
+    expect(webUi.openCalls, 1);
+    expect(webUi.openedInstanceId, target.instanceId);
+    expect(find.byKey(const ValueKey('webui-tunnel-close')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('webui-tunnel-close')));
+    await tester.pump();
+    expect(webUi.closeCalls, 1);
+    expect(find.byKey(const ValueKey('webui-tunnel-close')), findsNothing);
+  });
+
   testWidgets('renders every OpenCode instance presence state', (tester) async {
     await pumpHome(
       tester,
@@ -465,11 +549,7 @@ void main() {
       );
       // The gateway snapshot keeps listing the request; the accepted outcome
       // must still remove it from the workbench without waiting on a reload.
-      await pumpAnswerableHome(
-        tester,
-        loader: () => [pending],
-        script: script,
-      );
+      await pumpAnswerableHome(tester, loader: () => [pending], script: script);
       expect(find.byKey(tileKey), findsOneWidget);
 
       await tester.tap(find.byKey(tileKey));

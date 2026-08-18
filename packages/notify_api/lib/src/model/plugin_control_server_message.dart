@@ -3,11 +3,14 @@
 //
 
 // ignore_for_file: unused_element
+import 'package:notify_api/src/model/plugin_control_server_message_one_of5.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of2.dart';
 import 'package:built_collection/built_collection.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of3.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of4.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of6.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 import 'package:one_of/one_of.dart';
@@ -25,11 +28,17 @@ part 'plugin_control_server_message.g.dart';
 /// * [commandId]
 /// * [sessionID]
 /// * [decision]
+/// * [text]
+/// * [body]
+/// * [headers]
+/// * [method]
+/// * [path]
+/// * [tunnelId]
 @BuiltValue()
 abstract class PluginControlServerMessage
     implements
         Built<PluginControlServerMessage, PluginControlServerMessageBuilder> {
-  /// One Of [PluginControlServerMessageOneOf], [PluginControlServerMessageOneOf1], [PluginControlServerMessageOneOf2], [PluginControlServerMessageOneOf3]
+  /// One Of [PluginControlServerMessageOneOf], [PluginControlServerMessageOneOf1], [PluginControlServerMessageOneOf2], [PluginControlServerMessageOneOf3], [PluginControlServerMessageOneOf4], [PluginControlServerMessageOneOf5], [PluginControlServerMessageOneOf6]
   OneOf get oneOf;
 
   PluginControlServerMessage._();
@@ -89,6 +98,9 @@ class _$PluginControlServerMessageSerializer
       FullType(PluginControlServerMessageOneOf1),
       FullType(PluginControlServerMessageOneOf2),
       FullType(PluginControlServerMessageOneOf3),
+      FullType(PluginControlServerMessageOneOf4),
+      FullType(PluginControlServerMessageOneOf5),
+      FullType(PluginControlServerMessageOneOf6),
     ]);
     oneOfDataSrc = serialized;
     result.oneOf =
@@ -133,6 +145,15 @@ class PluginControlServerMessageTypeEnum extends EnumClass {
   @BuiltValueEnumConst(wireName: r'permission_decide_command')
   static const PluginControlServerMessageTypeEnum permissionDecideCommand =
       _$pluginControlServerMessageTypeEnum_permissionDecideCommand;
+  @BuiltValueEnumConst(wireName: r'session_prompt_command')
+  static const PluginControlServerMessageTypeEnum sessionPromptCommand =
+      _$pluginControlServerMessageTypeEnum_sessionPromptCommand;
+  @BuiltValueEnumConst(wireName: r'webui_http_request')
+  static const PluginControlServerMessageTypeEnum webuiHttpRequest =
+      _$pluginControlServerMessageTypeEnum_webuiHttpRequest;
+  @BuiltValueEnumConst(wireName: r'webui_tunnel_close')
+  static const PluginControlServerMessageTypeEnum webuiTunnelClose =
+      _$pluginControlServerMessageTypeEnum_webuiTunnelClose;
 
   static Serializer<PluginControlServerMessageTypeEnum> get serializer =>
       _$pluginControlServerMessageTypeEnumSerializer;

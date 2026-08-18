@@ -18,6 +18,18 @@ _$pluginControlClientMessageTypeEnum_questionAnswerResult =
 const PluginControlClientMessageTypeEnum
 _$pluginControlClientMessageTypeEnum_permissionDecideResult =
     const PluginControlClientMessageTypeEnum._('permissionDecideResult');
+const PluginControlClientMessageTypeEnum
+_$pluginControlClientMessageTypeEnum_sessionPromptResult =
+    const PluginControlClientMessageTypeEnum._('sessionPromptResult');
+const PluginControlClientMessageTypeEnum
+_$pluginControlClientMessageTypeEnum_webuiHttpResponseStart =
+    const PluginControlClientMessageTypeEnum._('webuiHttpResponseStart');
+const PluginControlClientMessageTypeEnum
+_$pluginControlClientMessageTypeEnum_webuiHttpResponseChunk =
+    const PluginControlClientMessageTypeEnum._('webuiHttpResponseChunk');
+const PluginControlClientMessageTypeEnum
+_$pluginControlClientMessageTypeEnum_webuiHttpResponseEnd =
+    const PluginControlClientMessageTypeEnum._('webuiHttpResponseEnd');
 
 PluginControlClientMessageTypeEnum _$pluginControlClientMessageTypeEnumValueOf(
   String name,
@@ -31,6 +43,14 @@ PluginControlClientMessageTypeEnum _$pluginControlClientMessageTypeEnumValueOf(
       return _$pluginControlClientMessageTypeEnum_questionAnswerResult;
     case 'permissionDecideResult':
       return _$pluginControlClientMessageTypeEnum_permissionDecideResult;
+    case 'sessionPromptResult':
+      return _$pluginControlClientMessageTypeEnum_sessionPromptResult;
+    case 'webuiHttpResponseStart':
+      return _$pluginControlClientMessageTypeEnum_webuiHttpResponseStart;
+    case 'webuiHttpResponseChunk':
+      return _$pluginControlClientMessageTypeEnum_webuiHttpResponseChunk;
+    case 'webuiHttpResponseEnd':
+      return _$pluginControlClientMessageTypeEnum_webuiHttpResponseEnd;
     default:
       throw ArgumentError(name);
   }
@@ -44,55 +64,16 @@ _$pluginControlClientMessageTypeEnumValues =
         _$pluginControlClientMessageTypeEnum_pendingSnapshotResponse,
         _$pluginControlClientMessageTypeEnum_questionAnswerResult,
         _$pluginControlClientMessageTypeEnum_permissionDecideResult,
-      ],
-    );
-
-const PluginControlClientMessageStatusEnum
-_$pluginControlClientMessageStatusEnum_confirmed =
-    const PluginControlClientMessageStatusEnum._('confirmed');
-const PluginControlClientMessageStatusEnum
-_$pluginControlClientMessageStatusEnum_stale =
-    const PluginControlClientMessageStatusEnum._('stale');
-const PluginControlClientMessageStatusEnum
-_$pluginControlClientMessageStatusEnum_upstreamError =
-    const PluginControlClientMessageStatusEnum._('upstreamError');
-const PluginControlClientMessageStatusEnum
-_$pluginControlClientMessageStatusEnum_resultUnknown =
-    const PluginControlClientMessageStatusEnum._('resultUnknown');
-
-PluginControlClientMessageStatusEnum
-_$pluginControlClientMessageStatusEnumValueOf(String name) {
-  switch (name) {
-    case 'confirmed':
-      return _$pluginControlClientMessageStatusEnum_confirmed;
-    case 'stale':
-      return _$pluginControlClientMessageStatusEnum_stale;
-    case 'upstreamError':
-      return _$pluginControlClientMessageStatusEnum_upstreamError;
-    case 'resultUnknown':
-      return _$pluginControlClientMessageStatusEnum_resultUnknown;
-    default:
-      throw ArgumentError(name);
-  }
-}
-
-final BuiltSet<PluginControlClientMessageStatusEnum>
-_$pluginControlClientMessageStatusEnumValues =
-    BuiltSet<PluginControlClientMessageStatusEnum>(
-      const <PluginControlClientMessageStatusEnum>[
-        _$pluginControlClientMessageStatusEnum_confirmed,
-        _$pluginControlClientMessageStatusEnum_stale,
-        _$pluginControlClientMessageStatusEnum_upstreamError,
-        _$pluginControlClientMessageStatusEnum_resultUnknown,
+        _$pluginControlClientMessageTypeEnum_sessionPromptResult,
+        _$pluginControlClientMessageTypeEnum_webuiHttpResponseStart,
+        _$pluginControlClientMessageTypeEnum_webuiHttpResponseChunk,
+        _$pluginControlClientMessageTypeEnum_webuiHttpResponseEnd,
       ],
     );
 
 Serializer<PluginControlClientMessageTypeEnum>
 _$pluginControlClientMessageTypeEnumSerializer =
     _$PluginControlClientMessageTypeEnumSerializer();
-Serializer<PluginControlClientMessageStatusEnum>
-_$pluginControlClientMessageStatusEnumSerializer =
-    _$PluginControlClientMessageStatusEnumSerializer();
 
 class _$PluginControlClientMessageTypeEnumSerializer
     implements PrimitiveSerializer<PluginControlClientMessageTypeEnum> {
@@ -101,12 +82,20 @@ class _$PluginControlClientMessageTypeEnumSerializer
     'pendingSnapshotResponse': 'pending_snapshot_response',
     'questionAnswerResult': 'question_answer_result',
     'permissionDecideResult': 'permission_decide_result',
+    'sessionPromptResult': 'session_prompt_result',
+    'webuiHttpResponseStart': 'webui_http_response_start',
+    'webuiHttpResponseChunk': 'webui_http_response_chunk',
+    'webuiHttpResponseEnd': 'webui_http_response_end',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'register': 'register',
     'pending_snapshot_response': 'pendingSnapshotResponse',
     'question_answer_result': 'questionAnswerResult',
     'permission_decide_result': 'permissionDecideResult',
+    'session_prompt_result': 'sessionPromptResult',
+    'webui_http_response_start': 'webuiHttpResponseStart',
+    'webui_http_response_chunk': 'webuiHttpResponseChunk',
+    'webui_http_response_end': 'webuiHttpResponseEnd',
   };
 
   @override
@@ -127,45 +116,6 @@ class _$PluginControlClientMessageTypeEnumSerializer
     Object serialized, {
     FullType specifiedType = FullType.unspecified,
   }) => PluginControlClientMessageTypeEnum.valueOf(
-    _fromWire[serialized] ?? (serialized is String ? serialized : ''),
-  );
-}
-
-class _$PluginControlClientMessageStatusEnumSerializer
-    implements PrimitiveSerializer<PluginControlClientMessageStatusEnum> {
-  static const Map<String, Object> _toWire = const <String, Object>{
-    'confirmed': 'confirmed',
-    'stale': 'stale',
-    'upstreamError': 'upstream_error',
-    'resultUnknown': 'result_unknown',
-  };
-  static const Map<Object, String> _fromWire = const <Object, String>{
-    'confirmed': 'confirmed',
-    'stale': 'stale',
-    'upstream_error': 'upstreamError',
-    'result_unknown': 'resultUnknown',
-  };
-
-  @override
-  final Iterable<Type> types = const <Type>[
-    PluginControlClientMessageStatusEnum,
-  ];
-  @override
-  final String wireName = 'PluginControlClientMessageStatusEnum';
-
-  @override
-  Object serialize(
-    Serializers serializers,
-    PluginControlClientMessageStatusEnum object, {
-    FullType specifiedType = FullType.unspecified,
-  }) => _toWire[object.name] ?? object.name;
-
-  @override
-  PluginControlClientMessageStatusEnum deserialize(
-    Serializers serializers,
-    Object serialized, {
-    FullType specifiedType = FullType.unspecified,
-  }) => PluginControlClientMessageStatusEnum.valueOf(
     _fromWire[serialized] ?? (serialized is String ? serialized : ''),
   );
 }

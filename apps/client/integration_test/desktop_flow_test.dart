@@ -10,10 +10,14 @@ import 'package:client/bootstrap.dart';
 import 'package:client/config/app_config.dart';
 import 'package:client/config/server_config.dart';
 import 'package:client/history/notification_history.dart';
+import 'package:client/notifications/alert_sound.dart';
 import 'package:client/notifications/notification_service.dart';
 import 'package:client/realtime/instance_presence.dart';
 import 'package:client/realtime/realtime_controller.dart';
+import 'package:client/settings/settings_controller.dart';
+import 'package:client/ui/history_page.dart';
 import 'package:client/ui/pending_interaction_page.dart';
+import 'package:client/ui/settings_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -374,6 +378,37 @@ void main() {
       expect(history.entries, hasLength(1));
       expect(history.entries.single.eventId, 'evt-terminal-1');
 
+      // The native desktop history page exposes compact source/session context
+      // and expands into the complete local detail table.
+      await tester.tap(find.text('历史').last);
+      await pumpUntil(
+        tester,
+        () => find
+            .byKey(HistoryPage.entryKey('evt-terminal-1'))
+            .evaluate()
+            .isNotEmpty,
+      );
+      expect(find.text('api'), findsOneWidget);
+      expect(find.text('devbox'), findsOneWidget);
+      expect(find.text('Implement API'), findsOneWidget);
+      expect(find.text('任务已完成'), findsOneWidget);
+      await tester.tap(find.byKey(HistoryPage.entryKey('evt-terminal-1')));
+      await pumpUntil(
+        tester,
+        () => find
+            .byKey(HistoryPage.detailsKey('evt-terminal-1'))
+            .evaluate()
+            .isNotEmpty,
+      );
+      expect(find.text('/work/api'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(HistoryPage.detailsKey('evt-terminal-1')),
+          matching: find.text('devbox'),
+        ),
+        findsOneWidget,
+      );
+
       // Logout disconnects the socket and clears the stored credentials.
       await container.read(authControllerProvider.notifier).logout();
       await pumpUntil(tester, () => gateway.socketClosed);
@@ -546,4 +581,39 @@ void main() {
       expect(find.byKey(const ValueKey('submit-answer')), findsNothing);
     },
   );
+
+  testWidgets('desktop settings exposes the bundled sound catalog', (
+    tester,
+  ) async {
+    final boot = await bootApp(tester);
+    await boot.container.read(settingsControllerProvider.notifier).hydrated;
+
+    await tester.tap(find.text('设置').last);
+    await pumpUntil(
+      tester,
+      () => find.byKey(SettingsPage.alertSoundPickerKey).evaluate().isNotEmpty,
+    );
+    expect(
+      find.text(
+        boot.container.read(settingsControllerProvider).alertSound.displayName,
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(SettingsPage.alertSoundPickerKey));
+    await pumpUntil(
+      tester,
+      () => find.byKey(SettingsPage.alertSoundDialogKey).evaluate().isNotEmpty,
+    );
+
+    for (final sound in bundledAlertSounds) {
+      expect(find.byKey(SettingsPage.soundOptionKey(sound.id)), findsOneWidget);
+      expect(
+        find.byKey(SettingsPage.soundPreviewKey(sound.id)),
+        findsOneWidget,
+      );
+    }
+    expect(find.byKey(SettingsPage.importSoundKey), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

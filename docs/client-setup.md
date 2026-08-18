@@ -67,7 +67,11 @@ flutter build windows --release
 
 Distribute the complete `build\windows\x64\runner\Release\` directory. Test the
 tray, desktop notification permission, sound, autostart, and WebSocket reconnect
-on every supported Windows version before publishing it.
+on every supported Windows version before publishing it. A portable ZIP must
+include every generated DLL and the `data` directory, plus application-local
+Visual C++ runtime DLLs when the target machines cannot be assumed to have the
+redistributable installed. WebUI access opens the system browser and has no
+WebView2 Runtime dependency.
 
 ## Android
 

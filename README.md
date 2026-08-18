@@ -22,6 +22,10 @@ OpenCode Notify gateway
     └── FCM ───────► background / lock-screen Android
 ```
 
+For remote control, the Plugin also keeps an authenticated control WebSocket to
+the Gateway. The client uses it for best-effort Session prompts and for a
+temporary HTTP/SSE tunnel that opens OpenCode WebUI in the system browser.
+
 The plugin reports bounded event envelopes, not complete conversations. The
 gateway authenticates users and ingest keys, routes live events, and does not
 persist notification event payloads. See [Privacy](PRIVACY.md) for the exact
@@ -33,6 +37,8 @@ data boundaries.
 - Linux tray client with notification history and autostart; the Windows target
   shares the desktop implementation and is pending full E2E verification.
 - Android foreground WebSocket delivery and background FCM delivery.
+- Best-effort text prompts to online Sessions and temporary browser access to
+  OpenCode's own WebUI through a client-held tunnel.
 - Per-user ingest keys with one-time secret display and revocation.
 - HMAC-signed event ingestion, short-lived access tokens, and refresh rotation.
 - Self-hosted Docker gateway with PostgreSQL, SMTP, health checks, and backups.

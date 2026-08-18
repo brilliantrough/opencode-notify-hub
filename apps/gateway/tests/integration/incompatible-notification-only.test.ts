@@ -210,7 +210,7 @@ describe("incompatible-version notification-only behavior (AC4)", () => {
         project: "notify",
         directory: "/work/notify",
         openCodeVersion: "1.18.17",
-        protocolVersion: 1,
+        protocolVersion: 2,
       }),
     );
     const result = (await resultPromise) as { type: string; instanceId: string; state: string };

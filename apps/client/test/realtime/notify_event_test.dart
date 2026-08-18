@@ -8,78 +8,70 @@ import 'package:flutter_test/flutter_test.dart';
 const eventId = '3b8f9c2e-1a4d-4e5f-9a6b-7c8d9e0f1a2b';
 
 Map<String, Object?> baseEnvelope() => {
-      'eventId': eventId,
-      'type': 'terminal',
-      'occurredAt': '2026-01-01T00:00:00.000Z',
-      'source': {
-        'machine': 'devbox',
-        'project': 'api',
-        'directory': '/work/api',
-      },
-      'session': {'id': 'ses_1', 'title': 'Implement API'},
-    };
+  'eventId': eventId,
+  'type': 'terminal',
+  'occurredAt': '2026-01-01T00:00:00.000Z',
+  'source': {'machine': 'devbox', 'project': 'api', 'directory': '/work/api'},
+  'session': {'id': 'ses_1', 'title': 'Implement API'},
+};
 
 Map<String, Object?> heartbeatEvent() => {
-      ...baseEnvelope(),
-      'type': 'heartbeat',
-      'payload': {'status': 'busy', 'elapsedSeconds': 60},
-    };
+  ...baseEnvelope(),
+  'type': 'heartbeat',
+  'payload': {'status': 'busy', 'elapsedSeconds': 60},
+};
 
 Map<String, Object?> questionEvent(List<Map<String, Object?>> questions) => {
-      ...baseEnvelope(),
-      'type': 'action_required',
-      'payload': {
-        'requestId': 'req_1',
-        'kind': 'question',
-        'questions': questions,
-      },
-    };
+  ...baseEnvelope(),
+  'type': 'action_required',
+  'payload': {'requestId': 'req_1', 'kind': 'question', 'questions': questions},
+};
 
 Map<String, Object?> permissionEvent() => {
-      ...baseEnvelope(),
-      'type': 'action_required',
-      'payload': {
-        'requestId': 'per_1',
-        'kind': 'permission',
-        'permission': {'permission': 'bash', 'summary': 'Run rm -rf build/'},
-      },
-    };
+  ...baseEnvelope(),
+  'type': 'action_required',
+  'payload': {
+    'requestId': 'per_1',
+    'kind': 'permission',
+    'permission': {'permission': 'bash', 'summary': 'Run rm -rf build/'},
+  },
+};
 
 Map<String, Object?> providerActionEvent() => {
-      ...baseEnvelope(),
-      'type': 'action_required',
-      'payload': {
-        'requestId': 'pro_1',
-        'kind': 'provider_action',
-        'providerAction': {
-          'provider': 'anthropic',
-          'title': 'Sign-in required',
-          'message': 'Your Anthropic session has expired.',
-          'label': 'Reconnect',
-          'link': 'https://provider.example/reconnect',
-        },
-      },
-    };
+  ...baseEnvelope(),
+  'type': 'action_required',
+  'payload': {
+    'requestId': 'pro_1',
+    'kind': 'provider_action',
+    'providerAction': {
+      'provider': 'anthropic',
+      'title': 'Sign-in required',
+      'message': 'Your Anthropic session has expired.',
+      'label': 'Reconnect',
+      'link': 'https://provider.example/reconnect',
+    },
+  },
+};
 
 Map<String, Object?> resolvedEvent(String kind) => {
-      ...baseEnvelope(),
-      'type': 'action_resolved',
-      'payload': {'requestId': 'req_1', 'kind': kind},
-    };
+  ...baseEnvelope(),
+  'type': 'action_resolved',
+  'payload': {'requestId': 'req_1', 'kind': kind},
+};
 
 Map<String, Object?> terminalEvent({
   String outcome = 'completed',
   int elapsedSeconds = 42,
   String? summary,
 }) => {
-      ...baseEnvelope(),
-      'type': 'terminal',
-      'payload': {
-        'outcome': outcome,
-        'elapsedSeconds': elapsedSeconds,
-        'summary': ?summary,
-      },
-    };
+  ...baseEnvelope(),
+  'type': 'terminal',
+  'payload': {
+    'outcome': outcome,
+    'elapsedSeconds': elapsedSeconds,
+    'summary': ?summary,
+  },
+};
 
 void main() {
   group('NotifyEvent.parse variants', () {
@@ -88,13 +80,11 @@ void main() {
 
       expect(event.eventId, eventId);
       expect(event.type, NotifyEventType.terminal);
-      expect(
-        event.occurredAt,
-        DateTime.parse('2026-01-01T00:00:00.000Z'),
-      );
+      expect(event.occurredAt, DateTime.parse('2026-01-01T00:00:00.000Z'));
       expect(event.machine, 'devbox');
       expect(event.project, 'api');
       expect(event.directory, '/work/api');
+      expect(event.directoryName, 'api');
       expect(event.sessionId, 'ses_1');
       expect(event.sessionTitle, 'Implement API');
       expect(event.outcome, TerminalOutcome.completed);
@@ -119,7 +109,34 @@ void main() {
       final event = NotifyEvent.parse(envelope);
 
       expect(event.project, 'opencode-notify');
+      expect(event.directoryName, 'opencode-notify');
       expect(event.sessionTitle, '未命名会话');
+    });
+
+    test('uses a safe directory label for empty and root paths', () {
+      final empty = NotifyEvent(
+        eventId: 'empty',
+        occurredAt: DateTime(2026),
+        machine: 'devbox',
+        project: 'project',
+        directory: '',
+        sessionId: 'session',
+        sessionTitle: 'Session',
+        type: NotifyEventType.terminal,
+      );
+      final root = NotifyEvent(
+        eventId: 'root',
+        occurredAt: DateTime(2026),
+        machine: 'devbox',
+        project: 'project',
+        directory: '/',
+        sessionId: 'session',
+        sessionTitle: 'Session',
+        type: NotifyEventType.terminal,
+      );
+
+      expect(empty.directoryName, 'unknown');
+      expect(root.directoryName, 'unknown');
     });
 
     test('parses a heartbeat event', () {

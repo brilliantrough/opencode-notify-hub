@@ -1,19 +1,35 @@
-import 'package:audioplayers/audioplayers.dart';
+import 'dart:async';
 
-/// Plays the bundled notification alert sound.
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'alert_sound.dart';
+
+final soundPreviewPlayerProvider = Provider<SoundPlayer>((ref) {
+  final player = SoundPlayer();
+  ref.onDispose(() => unawaited(player.dispose()));
+  return player;
+});
+
+/// Plays bundled and locally imported notification sounds.
 ///
 /// The underlying [AudioPlayer] is injectable so tests can verify playback
 /// without touching the audio platform channel.
 class SoundPlayer {
   SoundPlayer({AudioPlayer? player}) : _player = player ?? AudioPlayer();
 
-  /// Path (within `assets/`) of the bundled alert sound.
-  static const String alertAsset = 'sounds/soft_chime.wav';
-
   final AudioPlayer _player;
 
-  /// Plays the alert sound once.
-  Future<void> playAlert() => _player.play(AssetSource(alertAsset));
+  Future<void> play(AlertSound sound) => switch (sound) {
+    BundledAlertSound() => _player.play(
+      AssetSource(sound.assetPath),
+      volume: sound.volume,
+    ),
+    CustomAlertSound() => _player.play(
+      DeviceFileSource(sound.localPath),
+      volume: 1,
+    ),
+  };
 
   /// Releases the underlying player.
   Future<void> dispose() => _player.dispose();

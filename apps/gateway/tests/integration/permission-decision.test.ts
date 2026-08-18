@@ -264,7 +264,7 @@ describe("permission decisions", () => {
         project: "notify",
         directory: "/work/notify",
         openCodeVersion: "1.18.18",
-        protocolVersion: 1,
+        protocolVersion: 2,
         ...overrides,
       }),
     );

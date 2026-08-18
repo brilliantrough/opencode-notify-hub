@@ -22,6 +22,7 @@ class ActiveSession {
     required this.sessionId,
     required this.machine,
     required this.project,
+    this.directory = '',
     required this.title,
     required this.lastHeartbeatAt,
     required this.running,
@@ -31,6 +32,7 @@ class ActiveSession {
   final String sessionId;
   final String machine;
   final String project;
+  final String directory;
   final String title;
   final DateTime lastHeartbeatAt;
   final bool running;
@@ -39,6 +41,7 @@ class ActiveSession {
   ActiveSession copyWith({
     String? machine,
     String? project,
+    String? directory,
     String? title,
     DateTime? lastHeartbeatAt,
     bool? running,
@@ -47,6 +50,7 @@ class ActiveSession {
     sessionId: sessionId,
     machine: machine ?? this.machine,
     project: project ?? this.project,
+    directory: directory ?? this.directory,
     title: title ?? this.title,
     lastHeartbeatAt: lastHeartbeatAt ?? this.lastHeartbeatAt,
     running: running ?? this.running,
@@ -73,6 +77,7 @@ class ActiveSessions extends Notifier<Map<String, ActiveSession>> {
         : existing.copyWith(
             machine: event.machine,
             project: event.project,
+            directory: event.directory,
             title: event.sessionTitle,
             lastHeartbeatAt: event.occurredAt,
             running: true,
@@ -93,6 +98,7 @@ class ActiveSessions extends Notifier<Map<String, ActiveSession>> {
         : existing.copyWith(
             machine: event.machine,
             project: event.project,
+            directory: event.directory,
             title: event.sessionTitle,
             running: true,
             pendingRequestIds: pending,
@@ -125,10 +131,7 @@ class ActiveSessions extends Notifier<Map<String, ActiveSession>> {
     }
     state = {
       ...state,
-      sessionId: existing.copyWith(
-        running: false,
-        pendingRequestIds: const {},
-      ),
+      sessionId: existing.copyWith(running: false, pendingRequestIds: const {}),
     };
   }
 
@@ -140,6 +143,7 @@ class ActiveSessions extends Notifier<Map<String, ActiveSession>> {
     sessionId: event.sessionId,
     machine: event.machine,
     project: event.project,
+    directory: event.directory,
     title: event.sessionTitle,
     // The event that introduces the session is the best available "last
     // activity" timestamp until the first heartbeat arrives.

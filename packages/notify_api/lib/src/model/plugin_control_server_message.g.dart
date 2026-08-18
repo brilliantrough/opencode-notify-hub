@@ -52,6 +52,15 @@ _$pluginControlServerMessageTypeEnum_questionAnswerCommand =
 const PluginControlServerMessageTypeEnum
 _$pluginControlServerMessageTypeEnum_permissionDecideCommand =
     const PluginControlServerMessageTypeEnum._('permissionDecideCommand');
+const PluginControlServerMessageTypeEnum
+_$pluginControlServerMessageTypeEnum_sessionPromptCommand =
+    const PluginControlServerMessageTypeEnum._('sessionPromptCommand');
+const PluginControlServerMessageTypeEnum
+_$pluginControlServerMessageTypeEnum_webuiHttpRequest =
+    const PluginControlServerMessageTypeEnum._('webuiHttpRequest');
+const PluginControlServerMessageTypeEnum
+_$pluginControlServerMessageTypeEnum_webuiTunnelClose =
+    const PluginControlServerMessageTypeEnum._('webuiTunnelClose');
 
 PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
   String name,
@@ -65,6 +74,12 @@ PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
       return _$pluginControlServerMessageTypeEnum_questionAnswerCommand;
     case 'permissionDecideCommand':
       return _$pluginControlServerMessageTypeEnum_permissionDecideCommand;
+    case 'sessionPromptCommand':
+      return _$pluginControlServerMessageTypeEnum_sessionPromptCommand;
+    case 'webuiHttpRequest':
+      return _$pluginControlServerMessageTypeEnum_webuiHttpRequest;
+    case 'webuiTunnelClose':
+      return _$pluginControlServerMessageTypeEnum_webuiTunnelClose;
     default:
       throw ArgumentError(name);
   }
@@ -78,6 +93,9 @@ _$pluginControlServerMessageTypeEnumValues =
         _$pluginControlServerMessageTypeEnum_pendingSnapshotRequest,
         _$pluginControlServerMessageTypeEnum_questionAnswerCommand,
         _$pluginControlServerMessageTypeEnum_permissionDecideCommand,
+        _$pluginControlServerMessageTypeEnum_sessionPromptCommand,
+        _$pluginControlServerMessageTypeEnum_webuiHttpRequest,
+        _$pluginControlServerMessageTypeEnum_webuiTunnelClose,
       ],
     );
 
@@ -169,12 +187,18 @@ class _$PluginControlServerMessageTypeEnumSerializer
     'pendingSnapshotRequest': 'pending_snapshot_request',
     'questionAnswerCommand': 'question_answer_command',
     'permissionDecideCommand': 'permission_decide_command',
+    'sessionPromptCommand': 'session_prompt_command',
+    'webuiHttpRequest': 'webui_http_request',
+    'webuiTunnelClose': 'webui_tunnel_close',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'registration': 'registration',
     'pending_snapshot_request': 'pendingSnapshotRequest',
     'question_answer_command': 'questionAnswerCommand',
     'permission_decide_command': 'permissionDecideCommand',
+    'session_prompt_command': 'sessionPromptCommand',
+    'webui_http_request': 'webuiHttpRequest',
+    'webui_tunnel_close': 'webuiTunnelClose',
   };
 
   @override

@@ -47,3 +47,20 @@ export const commandOutcomeSchema = {
     updatedAt: { type: "string", format: "date-time" },
   },
 } as const satisfies JSONSchema;
+
+/** Body for one best-effort free-form prompt sent to an online Session. */
+export const sendPromptBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["commandId", "text"],
+  properties: {
+    commandId: { type: "string", format: "uuid" },
+    text: { type: "string", minLength: 1, maxLength: 32_000 },
+  },
+} as const satisfies JSONSchema;
+
+/** Terminal status reported by the Plugin after OpenCode admits the prompt. */
+export const promptCommandStatusSchema = {
+  type: "string",
+  enum: ["confirmed", "upstream_error", "result_unknown"],
+} as const satisfies JSONSchema;

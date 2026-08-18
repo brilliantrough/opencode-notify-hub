@@ -107,9 +107,10 @@ Copy `deploy/nginx/notify.example.com.conf` and replace:
 - certificate/key paths;
 - `127.0.0.1:8080` if the gateway is reached differently.
 
-The `/v1/ws` location must preserve Upgrade/Connection headers and use a long
-read timeout. The proxy must overwrite forwarding headers; the gateway trusts
-them for client-IP rate limiting.
+The `/v1/ws`, `/v1/plugin/ws`, and `/v1/webui/ws` locations must preserve
+Upgrade/Connection headers and use a long read timeout. The proxy must
+overwrite forwarding headers; the gateway trusts them for client-IP rate
+limiting.
 
 Validate and reload Nginx:
 

@@ -11,11 +11,7 @@ Map<String, Object?> baseEnvelope(String type) => {
   'eventId': 'evt-$type',
   'type': type,
   'occurredAt': '2026-01-01T00:00:00.000Z',
-  'source': {
-    'machine': 'devbox',
-    'project': 'api',
-    'directory': '/work/api',
-  },
+  'source': {'machine': 'devbox', 'project': 'api', 'directory': '/work/api'},
   'session': {'id': 'ses_1', 'title': 'Implement API'},
 };
 
@@ -105,9 +101,12 @@ void main() {
       expect(history.entries, hasLength(1));
       final entry = history.entries.single;
       expect(entry.eventId, 'evt-action_required');
-      expect(entry.title, 'api · devbox · 需要授权');
+      expect(entry.title, 'devbox · api · Implement API · 需要授权');
       expect(entry.body, '请求权限：bash\nRun rm -rf build/');
       expect(entry.receivedAt, DateTime.utc(2026, 1, 2));
+      expect(entry.directoryName, 'api');
+      expect(entry.sessionTitle, 'Implement API');
+      expect(entry.machine, 'devbox');
     });
 
     test('records a terminal event', () async {
@@ -118,7 +117,10 @@ void main() {
       );
 
       expect(history.entries, hasLength(1));
-      expect(history.entries.single.title, 'api · devbox · 任务已完成');
+      expect(
+        history.entries.single.title,
+        'devbox · api · Implement API · 任务已完成',
+      );
       expect(history.entries.single.body, '用时 42 秒');
     });
 
@@ -144,30 +146,28 @@ void main() {
       expect(history.entries, isEmpty);
     });
 
-    test('dedupes against history: an already-recorded event is skipped',
-        () async {
-      await processBackgroundMessageData(
-        dataOf(actionRequiredEnvelope()),
-        history,
-      );
-      await processBackgroundMessageData(
-        dataOf(actionRequiredEnvelope()),
-        history,
-      );
+    test(
+      'dedupes against history: an already-recorded event is skipped',
+      () async {
+        await processBackgroundMessageData(
+          dataOf(actionRequiredEnvelope()),
+          history,
+        );
+        await processBackgroundMessageData(
+          dataOf(actionRequiredEnvelope()),
+          history,
+        );
 
-      expect(history.entries, hasLength(1));
-    });
+        expect(history.entries, hasLength(1));
+      },
+    );
 
-    test('dedupe is per event ID: distinct events are both recorded',
-        () async {
+    test('dedupe is per event ID: distinct events are both recorded', () async {
       await processBackgroundMessageData(
         dataOf(actionRequiredEnvelope()),
         history,
       );
-      await processBackgroundMessageData(
-        dataOf(terminalEnvelope()),
-        history,
-      );
+      await processBackgroundMessageData(dataOf(terminalEnvelope()), history);
 
       expect(history.entries.map((e) => e.eventId), [
         'evt-terminal',
@@ -191,28 +191,41 @@ void main() {
       expect(reloaded.entries, hasLength(1));
     });
 
-    test('concurrent calls for the same event record exactly one entry',
-        () async {
-      await Future.wait([
-        processBackgroundMessageData(dataOf(actionRequiredEnvelope()), history),
-        processBackgroundMessageData(dataOf(actionRequiredEnvelope()), history),
-      ]);
+    test(
+      'concurrent calls for the same event record exactly one entry',
+      () async {
+        await Future.wait([
+          processBackgroundMessageData(
+            dataOf(actionRequiredEnvelope()),
+            history,
+          ),
+          processBackgroundMessageData(
+            dataOf(actionRequiredEnvelope()),
+            history,
+          ),
+        ]);
 
-      expect(history.entries, hasLength(1));
-    });
+        expect(history.entries, hasLength(1));
+      },
+    );
 
-    test('concurrent calls for distinct events both record, serialized',
-        () async {
-      await Future.wait([
-        processBackgroundMessageData(dataOf(actionRequiredEnvelope()), history),
-        processBackgroundMessageData(dataOf(terminalEnvelope()), history),
-      ]);
+    test(
+      'concurrent calls for distinct events both record, serialized',
+      () async {
+        await Future.wait([
+          processBackgroundMessageData(
+            dataOf(actionRequiredEnvelope()),
+            history,
+          ),
+          processBackgroundMessageData(dataOf(terminalEnvelope()), history),
+        ]);
 
-      expect(history.entries.map((e) => e.eventId), [
-        'evt-terminal',
-        'evt-action_required',
-      ]);
-    });
+        expect(history.entries.map((e) => e.eventId), [
+          'evt-terminal',
+          'evt-action_required',
+        ]);
+      },
+    );
   });
 
   group('ActionQueue', () {

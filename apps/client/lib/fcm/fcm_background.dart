@@ -109,11 +109,6 @@ Future<void> _processBackgroundMessageData(
     return;
   }
   await history.add(
-    HistoryEntry(
-      eventId: event.eventId,
-      title: buildNotificationTitle(event),
-      body: buildNotificationBody(event),
-      receivedAt: (now ?? DateTime.now)(),
-    ),
+    buildHistoryEntry(event, receivedAt: (now ?? DateTime.now)()),
   );
 }

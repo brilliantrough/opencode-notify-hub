@@ -9,7 +9,10 @@ import '../realtime/active_sessions.dart';
 import '../realtime/instance_presence.dart';
 import '../realtime/realtime_controller.dart';
 import '../realtime/ws_client.dart';
+import '../sessions/webui_browser_controller.dart';
 import 'pending_interaction_page.dart';
+import 'session_prompt_page.dart';
+import '../sessions/session_target.dart';
 
 /// Live socket status for the dashboard chip. Drives (and therefore starts)
 /// the [realtimeControllerProvider] while authenticated; `disconnected`
@@ -34,6 +37,7 @@ class HomePage extends ConsumerWidget {
     final pending = ref.watch(pendingInteractionsProvider);
     final interactions = pending.value ?? const <PendingInteraction>[];
     final offline = ref.watch(offlineLastKnownProvider);
+    final webUi = ref.watch(webUiBrowserControllerProvider);
     final ordered = sessions.values.toList()
       ..sort((a, b) => b.lastHeartbeatAt.compareTo(a.lastHeartbeatAt));
     return Scaffold(
@@ -48,6 +52,15 @@ class HomePage extends ConsumerWidget {
               ref.read(pendingInteractionsProvider.notifier).refresh(),
             ),
           ),
+          if (webUi.status != WebUiBrowserStatus.idle)
+            IconButton(
+              key: const ValueKey('webui-tunnel-close'),
+              tooltip: '关闭 OpenCode WebUI 临时连接',
+              icon: const Icon(Icons.link_off_outlined),
+              onPressed: () => unawaited(
+                ref.read(webUiBrowserControllerProvider.notifier).close(),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: WsStatusChip(status: status),
@@ -103,10 +116,32 @@ class HomePage extends ConsumerWidget {
                 if (ordered.isNotEmpty && instances.isNotEmpty)
                   const Divider(height: 24),
                 if (ordered.isNotEmpty) const _SectionHeader('活动会话'),
-                for (final session in ordered) _SessionTile(session: session),
+                for (final session in ordered)
+                  _SessionTile(
+                    session: session,
+                    target: sessionControlTarget(session, instances.values),
+                    webUi: webUi,
+                    onOpenWebUi: (target) =>
+                        _openWebUi(context, ref, target.instanceId),
+                  ),
               ],
             ),
     );
+  }
+
+  Future<void> _openWebUi(
+    BuildContext context,
+    WidgetRef ref,
+    String instanceId,
+  ) async {
+    final error = await ref
+        .read(webUiBrowserControllerProvider.notifier)
+        .open(instanceId);
+    if (error != null && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
+    }
   }
 }
 
@@ -257,23 +292,76 @@ class WsStatusChip extends StatelessWidget {
 }
 
 class _SessionTile extends StatelessWidget {
-  const _SessionTile({required this.session});
+  const _SessionTile({
+    required this.session,
+    required this.target,
+    required this.webUi,
+    required this.onOpenWebUi,
+  });
 
   final ActiveSession session;
+  final OpenCodeInstancePresence? target;
+  final WebUiBrowserState webUi;
+  final void Function(OpenCodeInstancePresence target) onOpenWebUi;
 
   @override
   Widget build(BuildContext context) {
     final pending = session.pendingRequestIds;
+    final targetId = target?.instanceId;
+    final webUiOpening =
+        webUi.status == WebUiBrowserStatus.opening &&
+        webUi.instanceId == targetId;
+    final webUiActive = targetId != null && webUi.activeFor(targetId);
     return ListTile(
       key: ValueKey('session-${session.sessionId}'),
       title: Text('${session.machine} · ${session.project}'),
       subtitle: Text('${session.title} · ${_elapsedText()}'),
-      trailing: pending.isEmpty
+      trailing: target == null && pending.isEmpty
           ? null
-          : Badge(
-              key: ValueKey('pending-${session.sessionId}'),
-              label: Text('${pending.length}'),
-              child: const Icon(Icons.notification_important_outlined),
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (pending.isNotEmpty)
+                  Badge(
+                    key: ValueKey('pending-${session.sessionId}'),
+                    label: Text('${pending.length}'),
+                    child: const Icon(Icons.notification_important_outlined),
+                  ),
+                if (target != null)
+                  IconButton(
+                    key: ValueKey('prompt-${session.sessionId}'),
+                    tooltip: '发送到 OpenCode',
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => SessionPromptPage(
+                          session: session,
+                          target: target!,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (target != null)
+                  IconButton(
+                    key: ValueKey('webui-${session.sessionId}'),
+                    tooltip: webUiActive
+                        ? '在浏览器中重新打开 OpenCode WebUI'
+                        : '在浏览器中打开 OpenCode WebUI',
+                    icon: webUiOpening
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            webUiActive
+                                ? Icons.open_in_browser
+                                : Icons.language_outlined,
+                          ),
+                    onPressed: webUi.status == WebUiBrowserStatus.opening
+                        ? null
+                        : () => onOpenWebUi(target!),
+                  ),
+              ],
             ),
     );
   }

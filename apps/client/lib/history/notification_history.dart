@@ -4,14 +4,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// One recorded notification in the device-local history.
 ///
-/// History stores only the rendered notification (event ID, title, body) and
-/// the local receive time — never the raw gateway payload.
+/// History stores the rendered notification plus bounded routing context used
+/// by the local history table. It never stores the complete raw gateway event.
 class HistoryEntry {
   const HistoryEntry({
     required this.eventId,
     required this.title,
     required this.body,
     required this.receivedAt,
+    this.occurredAt,
+    this.status,
+    this.eventType,
+    this.machine,
+    this.project,
+    this.directory,
+    this.directoryName,
+    this.sessionId,
+    this.sessionTitle,
+    this.requestId,
   });
 
   factory HistoryEntry.fromJson(Map<String, dynamic> json) => HistoryEntry(
@@ -19,19 +29,58 @@ class HistoryEntry {
     title: json['title'] as String,
     body: json['body'] as String,
     receivedAt: DateTime.parse(json['receivedAt'] as String),
+    occurredAt: _optionalDateTime(json['occurredAt']),
+    status: _optionalString(json['status']),
+    eventType: _optionalString(json['eventType']),
+    machine: _optionalString(json['machine']),
+    project: _optionalString(json['project']),
+    directory: _optionalString(json['directory']),
+    directoryName: _optionalString(json['directoryName']),
+    sessionId: _optionalString(json['sessionId']),
+    sessionTitle: _optionalString(json['sessionTitle']),
+    requestId: _optionalString(json['requestId']),
   );
 
   final String eventId;
   final String title;
   final String body;
   final DateTime receivedAt;
+  final DateTime? occurredAt;
+  final String? status;
+  final String? eventType;
+  final String? machine;
+  final String? project;
+  final String? directory;
+  final String? directoryName;
+  final String? sessionId;
+  final String? sessionTitle;
+  final String? requestId;
 
   Map<String, dynamic> toJson() => {
     'eventId': eventId,
     'title': title,
     'body': body,
     'receivedAt': receivedAt.toIso8601String(),
+    if (occurredAt != null) 'occurredAt': occurredAt!.toIso8601String(),
+    if (status != null) 'status': status,
+    if (eventType != null) 'eventType': eventType,
+    if (machine != null) 'machine': machine,
+    if (project != null) 'project': project,
+    if (directory != null) 'directory': directory,
+    if (directoryName != null) 'directoryName': directoryName,
+    if (sessionId != null) 'sessionId': sessionId,
+    if (sessionTitle != null) 'sessionTitle': sessionTitle,
+    if (requestId != null) 'requestId': requestId,
   };
+}
+
+String? _optionalString(Object? value) => value is String ? value : null;
+
+DateTime? _optionalDateTime(Object? value) {
+  if (value is! String) {
+    return null;
+  }
+  return DateTime.tryParse(value);
 }
 
 /// Append-only store of shown (or pause-suppressed) notifications.
@@ -90,8 +139,7 @@ class PrefsNotificationHistory implements NotificationHistory {
     this.capacity = defaultCapacity,
   }) : _persistReady = true;
 
-  PrefsNotificationHistory._hydrating({required this.capacity})
-    : _entries = [];
+  PrefsNotificationHistory._hydrating({required this.capacity}) : _entries = [];
 
   /// Creates a history that starts empty and hydrates from disk in the
   /// background, so synchronous provider graphs can use the persistent
@@ -102,9 +150,7 @@ class PrefsNotificationHistory implements NotificationHistory {
   /// [add] awaits hydration before persisting, so nothing is lost. When the
   /// store is unreadable (e.g. no plugin binding in tests) the history keeps
   /// working in-memory only.
-  factory PrefsNotificationHistory.hydrating({
-    int capacity = defaultCapacity,
-  }) {
+  factory PrefsNotificationHistory.hydrating({int capacity = defaultCapacity}) {
     if (capacity <= 0) {
       throw ArgumentError.value(capacity, 'capacity', 'must be positive');
     }
@@ -150,7 +196,9 @@ class PrefsNotificationHistory implements NotificationHistory {
 
   /// Loads the persisted history, returning an empty history when nothing was
   /// stored or the stored value is not a valid JSON entry list.
-  static Future<PrefsNotificationHistory> load({int capacity = defaultCapacity}) async {
+  static Future<PrefsNotificationHistory> load({
+    int capacity = defaultCapacity,
+  }) async {
     if (capacity <= 0) {
       throw ArgumentError.value(capacity, 'capacity', 'must be positive');
     }

@@ -123,15 +123,20 @@ function compactEvent(event: NotifyEvent, caps: CompactionCaps): NotifyEvent {
   };
 }
 
-const INTERNAL_PROJECT_ID = /^(?:[0-9a-f]{32,64}|prj_[A-Za-z0-9_-]+)$/i;
-
-function displayProject(event: NotifyEvent): string {
-  if (!INTERNAL_PROJECT_ID.test(event.source.project)) {
-    return event.source.project;
-  }
+function displayDirectory(event: NotifyEvent): string {
   const path = event.source.directory.includes("\\") ? win32 : posix;
   const label = path.basename(path.normalize(event.source.directory));
-  return label.length > 0 && label !== "." ? label : "unknown";
+  return label.length > 0 && label !== "." && label !== path.sep ? label : "unknown";
+}
+
+function displayMachine(event: NotifyEvent): string {
+  const machine = event.source.machine.trim();
+  return machine.length > 0 ? machine : "unknown";
+}
+
+function displaySession(event: NotifyEvent): string {
+  const title = event.session.title.trim();
+  return title.length > 0 && title !== event.session.id ? title : "未命名会话";
 }
 
 function statusLabel(event: NotifyEvent): string {
@@ -176,7 +181,7 @@ function describeEvent(
   caps: CompactionCaps,
 ): { title: string; body: string } {
   const title = truncate(
-    `${displayProject(event)} · ${event.source.machine} · ${statusLabel(event)}`,
+    `${displayMachine(event)} · ${displayDirectory(event)} · ${displaySession(event)} · ${statusLabel(event)}`,
     caps.title,
   );
   if (event.type === "terminal") {

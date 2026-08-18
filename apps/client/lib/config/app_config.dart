@@ -12,6 +12,13 @@ class AppConfig {
   /// so an invalid server selection fails fast instead of producing an
   /// undialable WebSocket URI.
   String get gatewayWsBase {
+    return _webSocketEndpoint('/v1/ws');
+  }
+
+  /// Temporary OpenCode WebUI tunnel endpoint.
+  String get gatewayWebUiWsBase => _webSocketEndpoint('/v1/webui/ws');
+
+  String _webSocketEndpoint(String path) {
     var base = gatewayHttpBase;
     if (base.endsWith('/')) {
       base = base.substring(0, base.length - 1);
@@ -27,6 +34,6 @@ class AppConfig {
         'must start with http:// or https://',
       );
     }
-    return '$base/v1/ws';
+    return '$base$path';
   }
 }
