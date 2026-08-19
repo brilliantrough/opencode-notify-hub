@@ -25,11 +25,15 @@ NotifyEvent _action({
       : null,
 );
 
-PendingQuestion question(String requestId) => PendingQuestion(
+PendingQuestion question(
+  String requestId, {
+  String machine = 'macbook',
+  String directory = '/repo',
+}) => PendingQuestion(
   instanceId: 'inst-1',
-  machine: 'macbook',
+  machine: machine,
   project: 'linewrite',
-  directory: '/repo',
+  directory: directory,
   sessionId: 'sess-1',
   sessionTitle: 'Fix login',
   requestId: requestId,
@@ -158,6 +162,27 @@ void main() {
       expect(
         target(NotificationIntentKind.permission).matches(question('req-1')),
         isFalse,
+      );
+    });
+
+    test('normalizes Windows drive case, separators, and trailing slash', () {
+      final windowsTarget = NotificationTarget(
+        machine: 'WINDOWS-DEV',
+        project: 'linewrite',
+        directory: r'D:\dev\my project\',
+        requestId: 'req-1',
+        kind: NotificationIntentKind.question,
+      );
+
+      expect(
+        windowsTarget.matches(
+          question(
+            'req-1',
+            machine: 'windows-dev',
+            directory: 'd:/dev/my project',
+          ),
+        ),
+        isTrue,
       );
     });
   });

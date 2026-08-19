@@ -132,6 +132,33 @@ void main() {
       },
     );
 
+    test('rolls back close prevention when tray setup fails', () async {
+      final windowCalls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(trayChannel, (call) async {
+            if (call.method == 'setIcon') {
+              throw PlatformException(code: 'tray-unavailable');
+            }
+            return true;
+          });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowChannel, (call) async {
+            windowCalls.add(call.method);
+            return true;
+          });
+      final controller = TrayController(
+        readPaused: () => false,
+        writePaused: (_) async {},
+        isDesktop: () => true,
+        isLinux: () => false,
+      );
+
+      await expectLater(controller.init(), throwsA(isA<PlatformException>()));
+
+      expect(windowCalls, ['setPreventClose', 'setPreventClose']);
+      controller.dispose();
+    });
+
     test('opening the tray window restores, shows, and focuses it', () async {
       final windowCalls = <String>[];
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

@@ -148,6 +148,32 @@ void main() {
     },
   );
 
+  test('preserves a Windows directory in the encoded Session route', () async {
+    final auth = _FakeAuthController();
+    final tunnel = _FakeTunnel(Uri.parse('http://127.0.0.1:42005/'));
+    final container = ProviderContainer(
+      overrides: [
+        authControllerProvider.overrideWith(() => auth),
+        webUiTunnelFactoryProvider.overrideWithValue((_) => tunnel),
+        webUiBrowserLauncherProvider.overrideWithValue((_) async => true),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container
+        .read(webUiBrowserControllerProvider.notifier)
+        .open(
+          'instance-1',
+          directory: r'D:\dev\my project\',
+          sessionId: 'ses with spaces',
+        );
+
+    expect(
+      tunnel.startedPath,
+      '/RDpcZGV2XG15IHByb2plY3Rc/session/ses%20with%20spaces',
+    );
+  });
+
   test('returns to idle when the remote tunnel closes', () async {
     final auth = _FakeAuthController();
     final tunnel = _FakeTunnel(Uri.parse('http://127.0.0.1:42002/'));

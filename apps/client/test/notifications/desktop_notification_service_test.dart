@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:client/notifications/alert_sound.dart';
 import 'package:client/notifications/desktop_notification_service.dart';
 import 'package:client/notifications/notification_service.dart';
 import 'package:client/notifications/sound_player.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:path/path.dart' as path;
 import 'package:win_toast/win_toast.dart';
 
 class MockSoundPlayer extends Mock implements SoundPlayer {}
@@ -27,10 +31,12 @@ class ShownNotification {
 class FakeDesktopNotifier implements DesktopNotifier {
   final List<ShownNotification> shown = [];
   int initCalls = 0;
+  Future<void> Function()? onInit;
 
   @override
   Future<void> init() async {
     initCalls++;
+    await onInit?.call();
   }
 
   @override
@@ -63,6 +69,8 @@ NotifyRequest _request({
 );
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   setUpAll(() {
     registerFallbackValue(Toast());
     registerFallbackValue(softChimeAlertSound);
@@ -136,6 +144,31 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(broughtToFront, 1);
+    });
+
+    test('Windows notification clicks show and focus the window', () async {
+      if (!Platform.isWindows) return;
+      const channel = MethodChannel('window_manager');
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            if (call.method == 'isMinimized') return false;
+            return true;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+
+      await DesktopNotificationService(
+        notifier: notifier,
+        soundPlayer: soundPlayer,
+      ).show(_request(playSound: false));
+      notifier.shown.single.onClick!();
+      await pumpEventQueue();
+
+      expect(calls, ['isMinimized', 'show', 'focus']);
     });
 
     test('clicking composes bring-to-front then the request onClick', () async {
@@ -236,6 +269,28 @@ void main() {
       ).called(1);
     });
 
+    test('resolves the toast icon from the portable bundle', () async {
+      final notifier = WindowsDesktopNotifier(toast: toast);
+
+      await notifier.init();
+
+      verify(
+        () => toast.initialize(
+          aumId: 'dev.opencodenotify.client',
+          displayName: 'OpenCode Notify',
+          iconPath: path.join(
+            path.dirname(Platform.resolvedExecutable),
+            'data',
+            'flutter_assets',
+            'assets',
+            'tray',
+            'icon.png',
+          ),
+          clsid: any(named: 'clsid'),
+        ),
+      ).called(1);
+    });
+
     test('falls back when COM activation is unavailable', () async {
       when(
         () => toast.initialize(
@@ -300,9 +355,49 @@ void main() {
       },
     );
 
-    test('discards the callback when showing the toast fails', () async {
+    test('falls back when showing the primary toast fails', () async {
       var clicks = 0;
-      final notifier = WindowsDesktopNotifier(toast: toast);
+      final fallback = FakeDesktopNotifier();
+      final notifier = WindowsDesktopNotifier(toast: toast, fallback: fallback);
+      await notifier.init();
+      when(
+        () => toast.showToast(
+          toast: any(named: 'toast'),
+          tag: any(named: 'tag'),
+          group: any(named: 'group'),
+        ),
+      ).thenAnswer((_) async => throw StateError('show failed'));
+
+      await notifier.show(
+        identifier: 'evt-failed',
+        title: 'Fallback',
+        body: 'Still shown',
+        onClick: () => clicks++,
+      );
+
+      expect(fallback.initCalls, 1);
+      expect(fallback.shown.single.identifier, 'evt-failed');
+      fallback.shown.single.onClick!();
+      activated(ActivatedEvent(argument: 'evt-failed', userInput: const {}));
+      expect(clicks, 1);
+
+      await notifier.show(
+        identifier: 'evt-next',
+        title: 'Fallback again',
+        body: 'Still shown',
+      );
+      expect(fallback.initCalls, 1);
+      expect(fallback.shown, hasLength(2));
+    });
+
+    test('retries fallback initialization after a transient failure', () async {
+      final fallback = FakeDesktopNotifier();
+      var attempts = 0;
+      fallback.onInit = () async {
+        attempts++;
+        if (attempts == 1) throw StateError('fallback unavailable');
+      };
+      final notifier = WindowsDesktopNotifier(toast: toast, fallback: fallback);
       await notifier.init();
       when(
         () => toast.showToast(
@@ -314,16 +409,20 @@ void main() {
 
       await expectLater(
         notifier.show(
-          identifier: 'evt-failed',
-          title: 'Failed',
-          body: 'Not shown',
-          onClick: () => clicks++,
+          identifier: 'evt-retry-1',
+          title: 'Retry',
+          body: 'First attempt',
         ),
         throwsStateError,
       );
+      await notifier.show(
+        identifier: 'evt-retry-2',
+        title: 'Retry',
+        body: 'Second attempt',
+      );
 
-      activated(ActivatedEvent(argument: 'evt-failed', userInput: const {}));
-      expect(clicks, 0);
+      expect(fallback.initCalls, 2);
+      expect(fallback.shown.single.identifier, 'evt-retry-2');
     });
   });
 }

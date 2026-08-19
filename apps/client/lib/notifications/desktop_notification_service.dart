@@ -66,6 +66,7 @@ class WindowsDesktopNotifier implements DesktopNotifier {
   final DesktopNotifier _fallback;
   final LinkedHashMap<String, void Function()> _callbacks = LinkedHashMap();
   bool _useFallback = false;
+  Future<void>? _fallbackInitialization;
 
   @override
   Future<void> init() async {
@@ -77,8 +78,7 @@ class WindowsDesktopNotifier implements DesktopNotifier {
       clsid: _packagedActivatorClsid,
     );
     if (!initialized) {
-      _useFallback = true;
-      await _fallback.init();
+      await _enableFallback();
     }
   }
 
@@ -90,6 +90,7 @@ class WindowsDesktopNotifier implements DesktopNotifier {
     void Function()? onClick,
   }) async {
     if (_useFallback) {
+      await _enableFallback();
       return _fallback.show(
         identifier: identifier,
         title: title,
@@ -124,8 +125,31 @@ class WindowsDesktopNotifier implements DesktopNotifier {
         tag: identifier,
         group: _group,
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
       _callbacks.remove(identifier);
+      try {
+        await _enableFallback();
+        await _fallback.show(
+          identifier: identifier,
+          title: title,
+          body: body,
+          onClick: onClick,
+        );
+      } catch (_) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+    }
+  }
+
+  Future<void> _enableFallback() async {
+    final initialization = _fallbackInitialization ??= _fallback.init();
+    try {
+      await initialization;
+      _useFallback = true;
+    } catch (_) {
+      if (identical(_fallbackInitialization, initialization)) {
+        _fallbackInitialization = null;
+      }
       rethrow;
     }
   }

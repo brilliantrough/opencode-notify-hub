@@ -118,11 +118,22 @@ class TrayController with TrayListener, WindowListener {
     await windowManager.setPreventClose(true);
     windowManager.addListener(this);
     trayManager.addListener(this);
-    await trayManager.setIcon(trayIconAsset());
-    await refreshMenu();
-    // tray_manager 0.5.3 does not implement setToolTip on Linux.
-    if (!_isLinux()) {
-      await trayManager.setToolTip('opencode-notify');
+    try {
+      await trayManager.setIcon(trayIconAsset());
+      await refreshMenu();
+      // tray_manager 0.5.3 does not implement setToolTip on Linux.
+      if (!_isLinux()) {
+        await trayManager.setToolTip('opencode-notify');
+      }
+    } catch (error, stackTrace) {
+      windowManager.removeListener(this);
+      trayManager.removeListener(this);
+      try {
+        await windowManager.setPreventClose(false);
+      } catch (_) {
+        // Preserve the tray setup error if cleanup is unavailable.
+      }
+      Error.throwWithStackTrace(error, stackTrace);
     }
   }
 
