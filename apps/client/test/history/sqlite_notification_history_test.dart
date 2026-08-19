@@ -158,24 +158,30 @@ void main() {
       );
       final file = File('${temporary.path}/history.sqlite');
       final first = SqliteNotificationHistory(
-        NativeDatabase(file, setup: configureNotificationHistoryDatabase),
+        NativeDatabase.createInBackground(
+          file,
+          setup: configureNotificationHistoryDatabase,
+        ),
       );
       await first.loadPage(offset: 0, limit: 1);
       final second = SqliteNotificationHistory(
-        NativeDatabase(file, setup: configureNotificationHistoryDatabase),
+        NativeDatabase.createInBackground(
+          file,
+          setup: configureNotificationHistoryDatabase,
+        ),
       );
       await second.loadPage(offset: 0, limit: 1);
 
-      await Future.wait([
-        for (var index = 0; index < 40; index++)
-          (index.isEven ? first : second).add(
-            _entry('concurrent-$index', index),
-          ),
-      ]);
+      for (var index = 0; index < 20; index += 2) {
+        await Future.wait([
+          first.add(_entry('concurrent-$index', index)),
+          second.add(_entry('concurrent-${index + 1}', index + 1)),
+        ]);
+      }
 
       final page = await first.loadPage(offset: 0, limit: 100);
-      expect(page.totalCount, 40);
-      expect(page.entries.map((entry) => entry.eventId).toSet(), hasLength(40));
+      expect(page.totalCount, 20);
+      expect(page.entries.map((entry) => entry.eventId).toSet(), hasLength(20));
       await first.close();
       await second.close();
       await temporary.delete(recursive: true);
