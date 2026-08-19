@@ -1,6 +1,6 @@
 # Windows Development Handoff
 
-Updated: 2026-08-19
+Updated: 2026-08-20
 
 This tracked document is the entry point for the Windows development agent.
 Linux and Windows are sequential continuations of one shared branch, not
@@ -137,22 +137,22 @@ separate Windows port:
   the client keeps each local HTTP handler alive until its response ends.
 - OpenCode instances are grouped by machine with online/total counts. Offline
   records can be forgotten individually or per machine and reappear after a
-  Plugin reconnect; this requires the matching unreleased Gateway route.
+  Plugin reconnect; production now contains the matching Gateway route.
 - Notification History is device-local SQLite, retains the newest 10,000 rows,
   updates live, and supports 20/30/50/100-row pages. The application does not
   automatically migrate the previous JSON value; use the external converter
   under `apps/client/tool/` when legacy rows must be retained.
 
 Production `https://notify.pezayo.com` runs gateway image
-`opencode-notify-gateway:20260818-machine-webui`, deployed from the current Linux
-working tree on 2026-08-18. It exposes Remote Unblock, session prompt, and WebUI
-tunnel routes. The previous `6357a0c` image remains tagged
-`opencode-notify-gateway:rollback-6357a0c` on the production host. Complete the
-Windows-specific interactive question, permission, prompt, and browser WebUI
-acceptance checks against production after installing a protocol-v2 Plugin.
-That image predates `DELETE /v1/instances/{instanceId}`; offline-instance
-deletion will return `404` until Linux builds and deploys a Gateway containing
-the unreleased route.
+`opencode-notify-gateway:a9a43ac`, built from canonical commit
+`a9a43acaea749bad7610f0f6baeae9ef21151300` and deployed on 2026-08-19. It
+exposes Remote Unblock, session prompt, WebUI tunnel, and
+`DELETE /v1/instances/{instanceId}` routes. The previous
+`opencode-notify-gateway:20260818-machine-webui` image and pre-deploy Compose file
+remain on the production host for rollback. Complete the Windows-specific
+interactive question, permission, prompt, browser WebUI, and offline-instance
+deletion acceptance checks against production after installing a protocol-v2
+Plugin.
 
 ## Platform Ownership Boundary
 
@@ -169,14 +169,17 @@ the unreleased route.
 
 ## Linux Versus Windows Status
 
-Linux `main` now contains the Windows parity merge plus the shared remote
-control fixes from `1793ffc`; the merged main SHA is recorded after the merge.
-Linux has verified the shared code with TypeScript and Flutter analysis/tests,
-generated-client tests, release builds, X11 integration, real OpenCode smoke,
-runtime server selection, Prompt/WebUI tunnels, notification/history machine
-context, and the sound catalog. No known feature requires an independent
-Windows implementation after the pull; Windows work is native validation and
-focused repair of observed Windows failures.
+The Linux shared feature baseline through
+`a9a43acaea749bad7610f0f6baeae9ef21151300` contains the Windows parity merge
+plus the shared remote control, history, instance cleanup, and group-lifecycle
+fixes. Use the newer final alignment SHA recorded in the synchronized Linux
+memory, which also includes this handoff update. Linux has verified the shared
+code with TypeScript and Flutter analysis/tests, generated-client tests, release
+builds, X11 integration, real OpenCode smoke, runtime server selection,
+Prompt/WebUI tunnels, notification/history machine context, and the sound
+catalog. No known feature requires an independent Windows implementation after
+the pull; Windows work is native validation and focused repair of observed
+Windows failures.
 
 The following remain Windows-specific verification work because Linux tests
 cannot prove native behavior:
@@ -282,6 +285,40 @@ Record Windows-owned results only in local
 `docs/project_memory/linux-current-state.md`. Update the Windows rows in
 `docs/e2e-verification.md` when evidence is complete.
 
+## Current Windows Alignment Request
+
+This pass is a client source-alignment task, not a full Windows acceptance or
+release-certification task. Start from the exact final Linux `main` alignment
+SHA in `docs/project_memory/linux-current-state.md` and carry the shared
+Dart/UI/generated-client changes into the Windows checkout. The shared client
+logic is already implemented and verified on Linux, so do not redesign it or
+spend time recreating Linux integration evidence.
+
+- Preserve the Windows ownership boundary. Do not edit Gateway, Plugin,
+  Contracts, generated protocol authority, or shared semantics to work around a
+  Windows environment problem.
+- If the pull already contains the needed client changes, make no speculative
+  refactors. Only fix a Windows compile error or an observed Windows-native
+  incompatibility.
+- Do not run `integration_test/live_acceptance_test.dart` or the full interactive
+  acceptance list for this alignment pass. Skip Windows tests that require an
+  unreliable native environment unless they are needed to diagnose a compile or
+  packaging failure. The maintainer will perform the runtime checks manually.
+- Required local work is dependency resolution and one Release build. Use the
+  mirror variables below, then run `flutter pub get` and:
+
+  ```powershell
+  Set-Location apps\client
+  flutter build windows --release
+  ```
+
+- Confirm the complete output directory exists at
+  `apps\client\build\windows\x64\runner\Release\`, including `client.exe`,
+  `data\`, and native DLL/native-asset files. Report that directory to the
+  maintainer for manual execution. Do not provide only `client.exe`.
+- After the build, inspect `git status --short`; do not commit registry URL
+  churn, generated plugin registrants, line endings, or environment-only files.
+
 ## Next Windows Alignment Branch
 
 After the maintainer pushes the merged Linux `main`, do not continue the old
@@ -292,13 +329,13 @@ remote `main` SHA:
 git fetch origin
 git switch main
 git pull --ff-only origin main
-git switch -c windows/client-parity-20260819
+git switch -c windows/client-parity-20260820
 ```
 
 Read this handoff, `CONTEXT.md`, and both platform memory files before editing.
-The next Windows pass is native validation and focused Windows repair against
-the complete Linux baseline. Do not modify Plugin, Gateway, Contracts, or
-shared protocol behavior on that branch.
+The next Windows pass is source alignment and one Release build against the
+complete Linux baseline. Do not modify Plugin, Gateway, Contracts, or shared
+protocol behavior on that branch.
 
 ## Returning Windows Work
 
