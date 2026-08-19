@@ -302,3 +302,26 @@ the Linux agent should run to inspect it.
 Commit only intended files on the Windows branch. Do not push or merge back to
 `main` until the maintainer explicitly requests it and the complete Windows
 verification evidence is recorded.
+
+## Windows Release Handoff
+
+For a release task, follow the canonical [Release Process](releasing.md). The
+release build is different from an ordinary Windows parity branch:
+
+- Build only from the exact `main` SHA and version supplied by the Linux Release
+  coordinator.
+- Fast-forward local `main` with `git pull --ff-only`; do not build a release
+  from a Windows feature branch, a dirty worktree, or an unpushed commit.
+- Run all Windows automated gates and the applicable manual acceptance checks
+  before packaging.
+- Package the complete
+  `apps\client\build\windows\x64\runner\Release\` directory plus `LICENSE`
+  into `opencode-notify-client-windows-x64-<version>.zip`.
+- Transfer that ZIP to the Linux Release coordinator together with its SHA-256,
+  exact source SHA, test results, manual results, remaining risks, and key
+  executable/DLL checksums.
+- Do not transfer only `client.exe`; the Flutter data directory and native DLLs
+  are required runtime files.
+- Do not commit the ZIP, create or push the release tag, or upload the GitHub
+  Release. Linux verifies all final assets, generates `SHA256SUMS.txt`, creates
+  the annotated tag, and performs the single GitHub Release upload.
