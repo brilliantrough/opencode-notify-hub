@@ -1,6 +1,13 @@
+import 'dart:async';
+
 import 'package:client/realtime/instance_presence.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:notify_api/notify_api.dart';
+
+class MockInstancesApi extends Mock implements InstancesApi {}
 
 Map<String, Object?> presenceJson({String state = 'controllable'}) => {
   'instanceId': '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
@@ -60,4 +67,63 @@ void main() {
       InstancePresenceState.offline,
     );
   });
+
+  test('forgets an offline instance through the generated API', () async {
+    final api = MockInstancesApi();
+    when(
+      () => api.deleteOfflineInstance(instanceId: any(named: 'instanceId')),
+    ).thenAnswer((_) async => Response(requestOptions: RequestOptions()));
+    final container = ProviderContainer(
+      overrides: [instancesApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    final offline = OpenCodeInstancePresence.parse(
+      presenceJson(state: 'offline'),
+    );
+    container.read(instancePresencesProvider.notifier).replaceAll([offline]);
+
+    await container
+        .read(instancePresencesProvider.notifier)
+        .forgetOffline(offline.instanceId);
+
+    expect(container.read(instancePresencesProvider), isEmpty);
+    verify(
+      () => api.deleteOfflineInstance(instanceId: offline.instanceId),
+    ).called(1);
+  });
+
+  test(
+    'does not remove an instance that reconnected during deletion',
+    () async {
+      final api = MockInstancesApi();
+      final response = Response<void>(requestOptions: RequestOptions());
+      final gate = Completer<Response<void>>();
+      when(
+        () => api.deleteOfflineInstance(instanceId: any(named: 'instanceId')),
+      ).thenAnswer((_) => gate.future);
+      final container = ProviderContainer(
+        overrides: [instancesApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      final offline = OpenCodeInstancePresence.parse(
+        presenceJson(state: 'offline'),
+      );
+      final online = OpenCodeInstancePresence.parse(
+        presenceJson(state: 'controllable'),
+      );
+      container.read(instancePresencesProvider.notifier).replaceAll([offline]);
+
+      final deletion = container
+          .read(instancePresencesProvider.notifier)
+          .forgetOffline(offline.instanceId);
+      container.read(instancePresencesProvider.notifier).replaceAll([online]);
+      gate.complete(response);
+      await deletion;
+
+      expect(
+        container.read(instancePresencesProvider)[offline.instanceId]?.state,
+        InstancePresenceState.controllable,
+      );
+    },
+  );
 }

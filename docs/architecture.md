@@ -61,10 +61,11 @@ ingest-key verification, event fanout, health checks, and rate limits.
 
 A Flutter client for Linux, Windows, and Android. It stores refresh credentials
 in the OS secure store, maintains a reconnecting WebSocket while appropriate,
-routes notifications through one dedupe/history path, and uses FCM for Android
-background delivery. For temporary WebUI access it hosts a loopback-only HTTP
-proxy, keeps its authenticated Gateway tunnel alive, and opens that local origin
-in the system browser.
+routes notifications through one dedupe/history path, stores up to 10,000
+rendered history entries in a device-local SQLite database, and uses FCM for
+Android background delivery. For temporary WebUI access it hosts a loopback-only
+HTTP proxy, keeps its authenticated Gateway tunnel alive, and opens that local
+origin in the system browser.
 
 ### `packages/notify_api`
 

@@ -51,6 +51,86 @@ void main() {
     expect(find.text('暂无通知历史'), findsOneWidget);
   });
 
+  testWidgets('updates the first page when a new notification arrives', (
+    tester,
+  ) async {
+    final history = InMemoryNotificationHistory();
+    await history.add(entry('old', 'old entry', DateTime.utc(2026, 2, 1, 10)));
+    await pumpHistory(tester, history);
+
+    await history.add(entry('new', 'new entry', DateTime.utc(2026, 2, 1, 11)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('new entry'), findsOneWidget);
+    expect(find.textContaining('共 2 条'), findsOneWidget);
+  });
+
+  testWidgets(
+    'paginates and reports new notifications while viewing old rows',
+    (tester) async {
+      final history = InMemoryNotificationHistory();
+      final base = DateTime.utc(2026, 2, 1);
+      for (var index = 0; index < 55; index++) {
+        await history.add(
+          entry(
+            'event-$index',
+            'entry $index',
+            base.add(Duration(minutes: index)),
+          ),
+        );
+      }
+      await pumpHistory(tester, history);
+
+      expect(find.text('第 1 / 2 页 · 共 55 条'), findsOneWidget);
+      expect(find.text('entry 54'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('history-next-page')));
+      await tester.pumpAndSettle();
+      expect(find.text('第 2 / 2 页 · 共 55 条'), findsOneWidget);
+      expect(find.text('entry 4'), findsOneWidget);
+
+      await history.add(
+        entry('event-new', 'newest entry', base.add(const Duration(days: 1))),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('1 条新通知，点击查看'), findsOneWidget);
+      expect(find.text('newest entry'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('history-new-entries')));
+      await tester.pumpAndSettle();
+      expect(find.text('第 1 / 2 页 · 共 56 条'), findsOneWidget);
+      expect(find.text('newest entry'), findsOneWidget);
+    },
+  );
+
+  testWidgets('supports the configured page sizes', (tester) async {
+    final history = InMemoryNotificationHistory();
+    for (var index = 0; index < 35; index++) {
+      await history.add(
+        entry(
+          'page-$index',
+          'entry $index',
+          DateTime.utc(2026, 1, 1, 0, index),
+        ),
+      );
+    }
+    await pumpHistory(tester, history);
+
+    await tester.tap(find.byKey(const ValueKey('history-page-size')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('20').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('第 1 / 2 页 · 共 35 条'), findsOneWidget);
+    expect(
+      tester
+          .widget<DropdownButton<int>>(
+            find.byKey(const ValueKey('history-page-size')),
+          )
+          .value,
+      20,
+    );
+  });
+
   testWidgets('shows a compact table newest first', (tester) async {
     final history = InMemoryNotificationHistory();
     final base = DateTime.utc(2026, 2, 1, 10);

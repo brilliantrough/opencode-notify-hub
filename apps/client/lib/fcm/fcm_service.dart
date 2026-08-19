@@ -236,10 +236,23 @@ class FcmService {
         event.type == NotifyEventType.actionResolved) {
       return;
     }
-    if (_history.contains(event.eventId)) {
-      return;
-    }
-    _history.add(buildHistoryEntry(event, receivedAt: DateTime.now()));
+    unawaited(() async {
+      try {
+        if (await _history.contains(event.eventId)) {
+          return;
+        }
+        await _history.add(
+          buildHistoryEntry(event, receivedAt: DateTime.now()),
+        );
+      } catch (error, stackTrace) {
+        log(
+          'failed to record opened FCM event ${event.eventId}',
+          name: 'FcmService',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }());
   }
 
   void _onTokenRefresh(String token) {

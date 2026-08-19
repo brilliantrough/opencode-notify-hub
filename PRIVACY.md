@@ -41,10 +41,12 @@ systems according to their own policy.
 ## Data stored by the client
 
 Refresh credentials are stored through the operating system's secure credential
-store. Client preferences and up to 50 rendered notification-history entries
-are stored locally. Each history entry can include the event time and type,
-machine, project, working directory, session title/id, request id, and rendered
-notification text. A paused notification is still recorded in local history.
+store. Client preferences and up to 10,000 rendered notification-history entries
+are stored locally; history uses a device-local SQLite database and is never
+uploaded for synchronization. Each history entry can include the event time and
+type, machine, project, working directory, session title/id, request id, and
+rendered notification text. A paused notification is still recorded in local
+history.
 
 ## Retention and deletion
 

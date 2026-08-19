@@ -438,6 +438,109 @@ describe("WebSocket routing", () => {
       });
     });
 
+    it("forgets an offline instance and publishes an empty snapshot until it reconnects", async () => {
+      const alice = await createUser("forget-offline@example.com");
+      const credential = await createIngestCredential(alice.token);
+      const desktop = await connect(`Bearer ${alice.token}`);
+      const instanceId = randomUUID();
+      const plugin = await connectPlugin(credential);
+      const registered = nextMessage(plugin);
+      const online = nextMessage(desktop);
+      plugin.send(
+        JSON.stringify({
+          type: "register",
+          instanceId,
+          machine: "devbox",
+          project: "notify",
+          directory: "/work/notify",
+          openCodeVersion: "1.18.18",
+          protocolVersion: 2,
+        }),
+      );
+      await registered;
+      await online;
+
+      const offline = nextMessage(desktop);
+      plugin.close();
+      expect(await offline).toMatchObject({
+        instances: [{ instanceId, state: "offline" }],
+      });
+
+      const forgottenSnapshot = nextMessage(desktop);
+      const forgotten = await app.inject({
+        method: "DELETE",
+        url: `/v1/instances/${instanceId}`,
+        headers: { authorization: `Bearer ${alice.token}` },
+      });
+      expect(forgotten.statusCode).toBe(204);
+      expect(await forgottenSnapshot).toEqual({
+        type: "instance_presence",
+        instances: [],
+      });
+
+      const reconnected = await connectPlugin(credential);
+      const reRegistered = nextMessage(reconnected);
+      const reappeared = nextMessage(desktop);
+      reconnected.send(
+        JSON.stringify({
+          type: "register",
+          instanceId,
+          machine: "devbox",
+          project: "notify",
+          directory: "/work/notify",
+          openCodeVersion: "1.18.18",
+          protocolVersion: 2,
+        }),
+      );
+      expect(await reRegistered).toMatchObject({ instanceId, state: "controllable" });
+      expect(await reappeared).toMatchObject({
+        instances: [{ instanceId, state: "controllable" }],
+      });
+    });
+
+    it("rejects active, unknown, and foreign instance deletion", async () => {
+      const alice = await createUser("forget-guards@example.com");
+      const bob = await createUser("forget-foreign@example.com");
+      const credential = await createIngestCredential(alice.token);
+      const plugin = await connectPlugin(credential);
+      const instanceId = randomUUID();
+      const registered = nextMessage(plugin);
+      plugin.send(
+        JSON.stringify({
+          type: "register",
+          instanceId,
+          machine: "devbox",
+          project: "notify",
+          directory: "/work/notify",
+          openCodeVersion: "1.18.18",
+          protocolVersion: 2,
+        }),
+      );
+      await registered;
+
+      const active = await app.inject({
+        method: "DELETE",
+        url: `/v1/instances/${instanceId}`,
+        headers: { authorization: `Bearer ${alice.token}` },
+      });
+      expect(active.statusCode).toBe(409);
+      expect(active.json()).toMatchObject({ error: { code: "CONFLICT" } });
+
+      for (const [name, token, id] of [
+        ["foreign", bob.token, instanceId],
+        ["unknown", alice.token, randomUUID()],
+        ["invalid", alice.token, "not-a-uuid"],
+      ] as const) {
+        const response = await app.inject({
+          method: "DELETE",
+          url: `/v1/instances/${id}`,
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(response.statusCode, name).toBe(404);
+        expect(response.json(), name).toMatchObject({ error: { code: "NOT_FOUND" } });
+      }
+    });
+
     it("isolates owners while allowing two projects on one machine", async () => {
       const alice = await createUser("presence-owner@example.com");
       const bob = await createUser("presence-other@example.com");

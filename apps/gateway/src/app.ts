@@ -25,6 +25,7 @@ import type { Mailer } from "./modules/mail/mailer.js";
 import { NodemailerMailer } from "./modules/mail/nodemailer.mailer.js";
 import { controlWsRoutes } from "./modules/control/control-ws.routes.js";
 import { InstanceRegistry } from "./modules/control/instance-registry.js";
+import { instanceRoutes } from "./modules/control/instances.routes.js";
 import { pendingInteractionsRoutes } from "./modules/control/pending-interactions.routes.js";
 import { sessionControlRoutes } from "./modules/control/session-control.routes.js";
 import { webUiWsRoutes } from "./modules/control/webui-ws.routes.js";
@@ -321,6 +322,7 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
       }),
     );
     await app.register(controlWsRoutes({ pluginKeys: ingestKeys, registry: instances }));
+    await app.register(instanceRoutes(instances));
     await app.register(pendingInteractionsRoutes(instances));
     await app.register(sessionControlRoutes(instances));
     await app.register(

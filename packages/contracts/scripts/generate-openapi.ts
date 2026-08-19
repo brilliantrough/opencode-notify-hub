@@ -492,6 +492,25 @@ const document = {
         },
       },
     },
+    "/v1/instances/{instanceId}": {
+      delete: {
+        operationId: "deleteOfflineInstance",
+        tags: ["instances"],
+        security: bearerSecurity,
+        summary: "Forget one offline OpenCode instance.",
+        description:
+          "Removes one offline instance from the authenticated user's in-memory " +
+          "presence projection. An active instance cannot be removed. A later " +
+          "Plugin reconnect or OpenCode restart registers the instance again.",
+        parameters: [instanceIdPathParameter],
+        responses: {
+          "204": emptyResponse("Offline instance forgotten."),
+          "401": errorResponse("Missing or invalid access token."),
+          "404": errorResponse("Unknown instance for this user."),
+          "409": errorResponse("The instance is active and cannot be forgotten."),
+        },
+      },
+    },
     "/v1/instances/{instanceId}/sessions/{sessionId}/prompt": {
       post: {
         operationId: "sendSessionPrompt",

@@ -1,4 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:notify_api/notify_api.dart';
+
+import '../auth/auth_controller.dart';
 
 enum InstancePresenceState { controllable, conflicting, incompatible, offline }
 
@@ -69,6 +72,10 @@ final instancePresencesProvider =
       InstancePresences.new,
     );
 
+final instancesApiProvider = Provider<InstancesApi>(
+  (ref) => ref.watch(apiClientProvider).notifyApi.getInstancesApi(),
+);
+
 class InstancePresences
     extends Notifier<Map<String, OpenCodeInstancePresence>> {
   @override
@@ -76,5 +83,14 @@ class InstancePresences
 
   void replaceAll(List<OpenCodeInstancePresence> instances) {
     state = {for (final instance in instances) instance.instanceId: instance};
+  }
+
+  Future<void> forgetOffline(String instanceId) async {
+    await ref
+        .read(instancesApiProvider)
+        .deleteOfflineInstance(instanceId: instanceId);
+    if (state[instanceId]?.state == InstancePresenceState.offline) {
+      state = Map.of(state)..remove(instanceId);
+    }
   }
 }

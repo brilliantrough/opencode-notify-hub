@@ -5,6 +5,7 @@ lib/src/api/devices_api.dart
 lib/src/api/events_api.dart
 lib/src/api/health_api.dart
 lib/src/api/ingest_keys_api.dart
+lib/src/api/instances_api.dart
 lib/src/api/pending_api.dart
 lib/src/api/realtime_api.dart
 lib/src/api/sessions_api.dart

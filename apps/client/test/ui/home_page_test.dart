@@ -32,9 +32,16 @@ class FakeInstancePresences extends InstancePresences {
   FakeInstancePresences(this._initial);
 
   final Map<String, OpenCodeInstancePresence> _initial;
+  final List<String> forgotten = [];
 
   @override
   Map<String, OpenCodeInstancePresence> build() => _initial;
+
+  @override
+  Future<void> forgetOffline(String instanceId) async {
+    forgotten.add(instanceId);
+    state = Map.of(state)..remove(instanceId);
+  }
 }
 
 class FakePendingInteractions extends PendingInteractionsController {
@@ -195,6 +202,7 @@ void main() {
     Map<String, OpenCodeInstancePresence> instances = const {},
     List<PendingInteraction> interactions = const [],
     FakeWebUiBrowserController? webUiController,
+    FakeInstancePresences? instanceController,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -204,7 +212,7 @@ void main() {
             () => FakeActiveSessions(sessions),
           ),
           instancePresencesProvider.overrideWith(
-            () => FakeInstancePresences(instances),
+            () => instanceController ?? FakeInstancePresences(instances),
           ),
           pendingInteractionsProvider.overrideWith(
             () => FakePendingInteractions(interactions),
@@ -236,19 +244,23 @@ void main() {
     pendingRequestIds: pending,
   );
 
-  OpenCodeInstancePresence instance(String id, InstancePresenceState state) =>
-      OpenCodeInstancePresence(
-        instanceId: id,
-        machine: 'dev-box',
-        project: 'shop-api',
-        directory: '/work/shop-api',
-        openCodeVersion: state == InstancePresenceState.incompatible
-            ? '1.18.17'
-            : '1.18.18',
-        protocolVersion: 1,
-        state: state,
-        lastSeenAt: DateTime.now().subtract(const Duration(minutes: 2)),
-      );
+  OpenCodeInstancePresence instance(
+    String id,
+    InstancePresenceState state, {
+    String machine = 'dev-box',
+    String project = 'shop-api',
+  }) => OpenCodeInstancePresence(
+    instanceId: id,
+    machine: machine,
+    project: project,
+    directory: '/work/shop-api',
+    openCodeVersion: state == InstancePresenceState.incompatible
+        ? '1.18.17'
+        : '1.18.18',
+    protocolVersion: 1,
+    state: state,
+    lastSeenAt: DateTime.now().subtract(const Duration(minutes: 2)),
+  );
 
   PendingQuestion pendingQuestion(String id, DateTime occurredAt) =>
       PendingQuestion(
@@ -507,6 +519,91 @@ void main() {
     expect(find.text('离线'), findsOneWidget);
     expect(find.byKey(const ValueKey('instance-one')), findsOneWidget);
   });
+
+  testWidgets('groups instances by machine and shows online totals', (
+    tester,
+  ) async {
+    await pumpHome(
+      tester,
+      instances: {
+        'one': instance(
+          'one',
+          InstancePresenceState.controllable,
+          machine: 'Workstation',
+          project: 'api',
+        ),
+        'two': instance(
+          'two',
+          InstancePresenceState.offline,
+          machine: 'workstation',
+          project: 'web',
+        ),
+        'three': instance(
+          'three',
+          InstancePresenceState.controllable,
+          machine: 'Laptop',
+          project: 'docs',
+        ),
+      },
+    );
+
+    expect(find.byKey(const ValueKey('machine-workstation')), findsOneWidget);
+    expect(find.byKey(const ValueKey('machine-laptop')), findsOneWidget);
+    expect(find.text('1 在线 / 2 个实例'), findsOneWidget);
+    expect(find.text('1 在线 / 1 个实例'), findsOneWidget);
+    expect(find.text('api'), findsOneWidget);
+    expect(find.text('web'), findsOneWidget);
+    expect(find.text('docs'), findsOneWidget);
+  });
+
+  testWidgets('deletes an offline instance but not an active one', (
+    tester,
+  ) async {
+    final offline = instance('offline', InstancePresenceState.offline);
+    final active = instance('active', InstancePresenceState.controllable);
+    final controller = FakeInstancePresences({
+      offline.instanceId: offline,
+      active.instanceId: active,
+    });
+    await pumpHome(tester, instanceController: controller);
+
+    expect(find.byKey(const ValueKey('delete-instance-active')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('delete-instance-offline')));
+    await tester.pumpAndSettle();
+
+    expect(controller.forgotten, ['offline']);
+    expect(find.byKey(const ValueKey('instance-offline')), findsNothing);
+    expect(find.byKey(const ValueKey('instance-active')), findsOneWidget);
+  });
+
+  testWidgets(
+    'clears every offline instance in one machine after confirmation',
+    (tester) async {
+      final first = instance('offline-1', InstancePresenceState.offline);
+      final second = instance('offline-2', InstancePresenceState.offline);
+      final active = instance('active', InstancePresenceState.controllable);
+      final controller = FakeInstancePresences({
+        first.instanceId: first,
+        second.instanceId: second,
+        active.instanceId: active,
+      });
+      await pumpHome(tester, instanceController: controller);
+
+      await tester.tap(find.byKey(const ValueKey('clear-offline-dev-box')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('清除 dev-box 的离线实例？'), findsOneWidget);
+      expect(find.textContaining('2 个离线实例'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(FilledButton, '清除'));
+      await tester.pumpAndSettle();
+
+      expect(controller.forgotten, unorderedEquals(['offline-1', 'offline-2']));
+      expect(find.byKey(const ValueKey('instance-offline-1')), findsNothing);
+      expect(find.byKey(const ValueKey('instance-offline-2')), findsNothing);
+      expect(find.byKey(const ValueKey('instance-active')), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'offline requests render in the read-only section between pending and '

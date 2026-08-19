@@ -39,8 +39,8 @@ longer used or may have been exposed.
 
 | Page | Purpose |
 | --- | --- |
-| Home | Active OpenCode sessions, action-required state, text sending, and temporary WebUI access |
-| History | Up to 50 local notifications with machine, directory, session, and status visible in each row; select a row for complete event details |
+| Home | OpenCode instances grouped by machine, active sessions, action-required state, text sending, and temporary WebUI access; offline instances can be forgotten and reappear when they reconnect |
+| History | Up to 10,000 local notifications with live updates and 20/30/50/100-row pages; select a row for complete event details |
 | Devices | Registered Linux, Windows, and Android devices; rename, enable, or remove them |
 | Keys | Create, list, and revoke plugin ingest keys |
 | Plugin | Copy the install path and required environment-variable template |
@@ -118,6 +118,12 @@ device must remain enabled in the Devices page for FCM delivery.
 Desktop builds are portable bundles. Stop the tray process, replace the entire
 bundle, and restart it; do not replace only the executable because Flutter
 assets and native libraries must stay synchronized.
+
+History now uses a local SQLite database. The application deliberately does not
+import the previous `notification_history_v1` JSON value during startup. To keep
+those legacy entries, close the client and run the optional
+[one-time converter](../apps/client/tool/README.md) before starting the updated
+build.
 
 For Android, updates must use the same release signing key and a higher
 `versionCode`. Installing an APK signed by a different key requires uninstalling

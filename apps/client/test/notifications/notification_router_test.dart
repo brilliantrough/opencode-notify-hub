@@ -7,7 +7,6 @@ import 'package:client/realtime/event_deduper.dart';
 import 'package:client/realtime/notify_event.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class FakeNotificationService implements NotificationService {
   final List<NotifyRequest> shown = [];
@@ -161,7 +160,6 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    SharedPreferences.setMockInitialValues(const {});
     container = ProviderContainer();
     addTearDown(container.dispose);
     service = FakeNotificationService();
@@ -272,41 +270,40 @@ void main() {
     });
   });
 
-  group('NotificationRouter cross-restart dedupe', () {
-    test('an event already in persisted history is fully ignored after a '
-        'simulated restart (fresh in-memory deduper)', () async {
-      // Before the "restart": the event was recorded to persisted history.
-      final before = await PrefsNotificationHistory.load();
-      await before.add(
-        HistoryEntry(
-          eventId: 'evt-act',
-          title: 'macbook · linewrite · action_required',
-          body: 'Permission: filesystem',
-          receivedAt: DateTime.utc(2026, 1, 1, 12, 1),
-        ),
-      );
+  group('NotificationRouter history dedupe', () {
+    test(
+      'an event already in history is ignored with a fresh deduper',
+      () async {
+        final recorded = InMemoryNotificationHistory();
+        await recorded.add(
+          HistoryEntry(
+            eventId: 'evt-act',
+            title: 'macbook · linewrite · action_required',
+            body: 'Permission: filesystem',
+            receivedAt: DateTime.utc(2026, 1, 1, 12, 1),
+          ),
+        );
 
-      // After the "restart": fresh EventDeduper, history reloaded from disk.
-      final reloaded = await PrefsNotificationHistory.load();
-      final restartedRouter = NotificationRouter(
-        service: service,
-        activeSessions: sessions,
-        deduper: EventDeduper(),
-        history: reloaded,
-        readSettings: () => const NotificationSettings(),
-      );
+        final restartedRouter = NotificationRouter(
+          service: service,
+          activeSessions: sessions,
+          deduper: EventDeduper(),
+          history: recorded,
+          readSettings: () => const NotificationSettings(),
+        );
 
-      await restartedRouter.handle(_actionRequired());
+        await restartedRouter.handle(_actionRequired());
 
-      // No second popup, no second history entry, no session bookkeeping.
-      expect(service.shown, isEmpty);
-      expect(reloaded.entries, hasLength(1));
-      expect(sessionsState['sess-1'], isNull);
-    });
+        // No second popup, no second history entry, no session bookkeeping.
+        expect(service.shown, isEmpty);
+        expect(recorded.entries, hasLength(1));
+        expect(sessionsState['sess-1'], isNull);
+      },
+    );
 
-    test('a new event after a restart still alerts normally', () async {
-      final before = await PrefsNotificationHistory.load();
-      await before.add(
+    test('a new event with a fresh deduper still alerts normally', () async {
+      final recorded = InMemoryNotificationHistory();
+      await recorded.add(
         HistoryEntry(
           eventId: 'evt-old',
           title: 'old',
@@ -314,19 +311,18 @@ void main() {
           receivedAt: DateTime.utc(2026, 1, 1),
         ),
       );
-      final reloaded = await PrefsNotificationHistory.load();
       final restartedRouter = NotificationRouter(
         service: service,
         activeSessions: sessions,
         deduper: EventDeduper(),
-        history: reloaded,
+        history: recorded,
         readSettings: () => const NotificationSettings(),
       );
 
       await restartedRouter.handle(_actionRequired());
 
       expect(service.shown, hasLength(1));
-      expect(reloaded.entries.map((e) => e.eventId), ['evt-act', 'evt-old']);
+      expect(recorded.entries.map((e) => e.eventId), ['evt-act', 'evt-old']);
     });
   });
 

@@ -49,6 +49,8 @@ class FakeWsClient implements WsClient {
 
   void emitPresence(List<OpenCodeInstancePresence> instances) =>
       _instancePresences.add(instances);
+
+  void emitStatus(WsStatus status) => _status.add(status);
 }
 
 class FakeNotificationService implements NotificationService {
@@ -160,6 +162,26 @@ void main() {
     });
   });
 
+  test('clears stale presence when a new socket becomes connected', () async {
+    final stale = OpenCodeInstancePresence(
+      instanceId: '6f0d91b0-93e4-43a9-9449-0bed03e651aa',
+      machine: 'devbox',
+      project: 'notify',
+      directory: '/work/notify',
+      openCodeVersion: '1.18.18',
+      protocolVersion: 1,
+      state: InstancePresenceState.offline,
+      lastSeenAt: DateTime.utc(2026, 8, 14, 9),
+    );
+    container.read(instancePresencesProvider.notifier).replaceAll([stale]);
+
+    controller.start();
+    client.emitStatus(WsStatus.connected);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(container.read(instancePresencesProvider), isEmpty);
+  });
+
   test('start is idempotent: one connect and one subscription', () async {
     controller.start();
     controller.start();
@@ -233,6 +255,9 @@ void main() {
             wsBuilds++;
             return client;
           }),
+          notificationHistoryProvider.overrideWithValue(
+            InMemoryNotificationHistory(),
+          ),
           notificationServiceProvider.overrideWithValue(service),
         ],
       );

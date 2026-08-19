@@ -254,6 +254,8 @@ export type SendSessionPromptOutcome =
   | { readonly ok: false; readonly error: SendSessionPromptError }
   | { readonly ok: true; readonly result: CommandAccepted };
 
+export type ForgetInstanceOutcome = "deleted" | "not_found" | "not_offline";
+
 /**
  * In-memory owner-scoped projection of Plugin control connections. Owns
  * registration rules (first machine/project owner wins, incompatible and
@@ -407,6 +409,25 @@ export class InstanceRegistry {
     if (instances.length > 0) {
       this.publish(userId, { type: "instance_presence", instances });
     }
+  }
+
+  /** Forget one owner-scoped offline record and publish the resulting snapshot. */
+  forgetOffline(userId: string, instanceId: string): ForgetInstanceOutcome {
+    const key = this.recordKey(userId, instanceId);
+    const record = this.records.get(key);
+    if (record === undefined) {
+      return "not_found";
+    }
+    if (record.state !== "offline" || record.connection !== undefined) {
+      return "not_offline";
+    }
+    this.records.delete(key);
+    const instances = [...this.records.values()]
+      .filter((candidate) => candidate.userId === userId)
+      .sort((left, right) => left.sequence - right.sequence)
+      .map((candidate) => this.toPresence(candidate));
+    this.publish(userId, { type: "instance_presence", instances });
+    return "deleted";
   }
 
   /**

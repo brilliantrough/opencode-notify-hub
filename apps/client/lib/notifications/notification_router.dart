@@ -1,3 +1,5 @@
+import 'dart:developer' show log;
+
 import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -103,9 +105,20 @@ class NotificationRouter {
   final void Function(NotifyEvent event)? _onActionRequiredClick;
 
   Future<void> handle(NotifyEvent event) async {
-    if (_deduper.isDuplicate(event.eventId) ||
-        _history.contains(event.eventId)) {
+    if (_deduper.isDuplicate(event.eventId)) {
       return;
+    }
+    try {
+      if (await _history.contains(event.eventId)) {
+        return;
+      }
+    } catch (error, stackTrace) {
+      log(
+        'failed to check notification history for ${event.eventId}',
+        name: 'NotificationRouter',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
     switch (event.type) {
       case NotifyEventType.heartbeat:
@@ -127,7 +140,16 @@ class NotificationRouter {
   Future<void> _recordAndAlert(NotifyEvent event) async {
     final title = buildNotificationTitle(event);
     final body = buildNotificationBody(event);
-    _history.add(buildHistoryEntry(event, receivedAt: _now()));
+    try {
+      await _history.add(buildHistoryEntry(event, receivedAt: _now()));
+    } catch (error, stackTrace) {
+      log(
+        'failed to record notification history for ${event.eventId}',
+        name: 'NotificationRouter',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
     final settings = _readSettings();
     if (settings.paused) {
       return;

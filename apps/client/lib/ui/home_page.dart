@@ -40,6 +40,7 @@ class HomePage extends ConsumerWidget {
     final webUi = ref.watch(webUiBrowserControllerProvider);
     final ordered = sessions.values.toList()
       ..sort((a, b) => b.lastHeartbeatAt.compareTo(a.lastHeartbeatAt));
+    final instanceGroups = _groupInstances(instances.values);
     return Scaffold(
       appBar: AppBar(
         title: const Text('首页'),
@@ -110,12 +111,16 @@ class HomePage extends ConsumerWidget {
                   const Divider(height: 24),
                 if (instances.isNotEmpty) ...[
                   const _SectionHeader('OpenCode 实例'),
-                  for (final instance in instances.values)
-                    _InstanceTile(
-                      instance: instance,
+                  for (final group in instanceGroups)
+                    _MachineInstanceGroup(
+                      group: group,
                       webUi: webUi,
                       onOpenWebUi: (target) =>
                           _openWebUi(context, ref, target.instanceId),
+                      onDelete: (instance) =>
+                          _forgetInstance(context, ref, instance),
+                      onClearOffline: () =>
+                          _clearOfflineGroup(context, ref, group),
                     ),
                 ],
                 if (ordered.isNotEmpty && instances.isNotEmpty)
@@ -155,7 +160,118 @@ class HomePage extends ConsumerWidget {
       ).showSnackBar(SnackBar(content: Text(error)));
     }
   }
+
+  Future<void> _forgetInstance(
+    BuildContext context,
+    WidgetRef ref,
+    OpenCodeInstancePresence instance,
+  ) async {
+    try {
+      await ref
+          .read(instancePresencesProvider.notifier)
+          .forgetOffline(instance.instanceId);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('删除离线实例失败，请刷新后重试')));
+      }
+    }
+  }
+
+  Future<void> _clearOfflineGroup(
+    BuildContext context,
+    WidgetRef ref,
+    _InstanceMachineGroup group,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('清除 ${group.machine} 的离线实例？'),
+        content: Text('将从首页移除 ${group.offline.length} 个离线实例。它们重新连接后会再次出现。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    var failures = 0;
+    for (final instance in group.offline) {
+      try {
+        await ref
+            .read(instancePresencesProvider.notifier)
+            .forgetOffline(instance.instanceId);
+      } catch (_) {
+        failures += 1;
+      }
+    }
+    if (failures > 0 && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$failures 个实例未能删除，请刷新后重试')));
+    }
+  }
 }
+
+class _InstanceMachineGroup {
+  const _InstanceMachineGroup({required this.machine, required this.instances});
+
+  final String machine;
+  final List<OpenCodeInstancePresence> instances;
+
+  int get activeCount => instances
+      .where((instance) => instance.state != InstancePresenceState.offline)
+      .length;
+
+  List<OpenCodeInstancePresence> get offline => instances
+      .where((instance) => instance.state == InstancePresenceState.offline)
+      .toList(growable: false);
+}
+
+List<_InstanceMachineGroup> _groupInstances(
+  Iterable<OpenCodeInstancePresence> instances,
+) {
+  final grouped = <String, List<OpenCodeInstancePresence>>{};
+  for (final instance in instances) {
+    final key = instance.machine.trim().toLowerCase();
+    grouped.putIfAbsent(key, () => []).add(instance);
+  }
+  final groups = [
+    for (final entries in grouped.values)
+      _InstanceMachineGroup(machine: entries.first.machine, instances: entries),
+  ];
+  for (final group in groups) {
+    group.instances.sort((left, right) {
+      final byState = _presenceOrder(
+        left.state,
+      ).compareTo(_presenceOrder(right.state));
+      if (byState != 0) return byState;
+      final bySeen = right.lastSeenAt.compareTo(left.lastSeenAt);
+      if (bySeen != 0) return bySeen;
+      return left.project.toLowerCase().compareTo(right.project.toLowerCase());
+    });
+  }
+  groups.sort((left, right) {
+    final byActive = right.activeCount.compareTo(left.activeCount);
+    if (byActive != 0) return byActive;
+    return left.machine.toLowerCase().compareTo(right.machine.toLowerCase());
+  });
+  return groups;
+}
+
+int _presenceOrder(InstancePresenceState state) => switch (state) {
+  InstancePresenceState.controllable => 0,
+  InstancePresenceState.conflicting => 1,
+  InstancePresenceState.incompatible => 2,
+  InstancePresenceState.offline => 3,
+};
 
 class _PendingTile extends StatelessWidget {
   const _PendingTile({required this.interaction});
@@ -241,19 +357,106 @@ class _SectionHeader extends StatelessWidget {
   );
 }
 
-class _InstanceTile extends StatelessWidget {
+class _MachineInstanceGroup extends StatefulWidget {
+  const _MachineInstanceGroup({
+    required this.group,
+    required this.webUi,
+    required this.onOpenWebUi,
+    required this.onDelete,
+    required this.onClearOffline,
+  });
+
+  final _InstanceMachineGroup group;
+  final WebUiBrowserState webUi;
+  final void Function(OpenCodeInstancePresence target) onOpenWebUi;
+  final Future<void> Function(OpenCodeInstancePresence target) onDelete;
+  final Future<void> Function() onClearOffline;
+
+  @override
+  State<_MachineInstanceGroup> createState() => _MachineInstanceGroupState();
+}
+
+class _MachineInstanceGroupState extends State<_MachineInstanceGroup> {
+  bool _clearing = false;
+  bool _expanded = true;
+  final ExpansibleController _expansion = ExpansibleController();
+
+  @override
+  Widget build(BuildContext context) {
+    final group = widget.group;
+    return ExpansionTile(
+      key: ValueKey('machine-${group.machine.toLowerCase()}'),
+      controller: _expansion,
+      initiallyExpanded: true,
+      onExpansionChanged: (expanded) => setState(() => _expanded = expanded),
+      title: Text(group.machine),
+      subtitle: Text('${group.activeCount} 在线 / ${group.instances.length} 个实例'),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (group.offline.isNotEmpty)
+            IconButton(
+              key: ValueKey('clear-offline-${group.machine.toLowerCase()}'),
+              tooltip: '清除此机器的离线实例',
+              icon: _clearing
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.delete_sweep_outlined),
+              onPressed: _clearing
+                  ? null
+                  : () async {
+                      setState(() => _clearing = true);
+                      await widget.onClearOffline();
+                      if (mounted) setState(() => _clearing = false);
+                    },
+            ),
+          IconButton(
+            tooltip: _expanded ? '折叠机器实例' : '展开机器实例',
+            icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more),
+            onPressed: () =>
+                _expanded ? _expansion.collapse() : _expansion.expand(),
+          ),
+        ],
+      ),
+      children: [
+        for (final instance in group.instances)
+          _InstanceTile(
+            instance: instance,
+            webUi: widget.webUi,
+            onOpenWebUi: widget.onOpenWebUi,
+            onDelete: widget.onDelete,
+          ),
+      ],
+    );
+  }
+}
+
+class _InstanceTile extends StatefulWidget {
   const _InstanceTile({
     required this.instance,
     required this.webUi,
     required this.onOpenWebUi,
+    required this.onDelete,
   });
 
   final OpenCodeInstancePresence instance;
   final WebUiBrowserState webUi;
   final void Function(OpenCodeInstancePresence target) onOpenWebUi;
+  final Future<void> Function(OpenCodeInstancePresence target) onDelete;
+
+  @override
+  State<_InstanceTile> createState() => _InstanceTileState();
+}
+
+class _InstanceTileState extends State<_InstanceTile> {
+  bool _deleting = false;
 
   @override
   Widget build(BuildContext context) {
+    final instance = widget.instance;
+    final webUi = widget.webUi;
     final (label, icon) = switch (instance.state) {
       InstancePresenceState.controllable => (
         '可远程操作',
@@ -276,7 +479,7 @@ class _InstanceTile extends StatelessWidget {
     return ListTile(
       key: ValueKey('instance-${instance.instanceId}'),
       leading: Icon(icon),
-      title: Text('${instance.machine} · ${instance.project}'),
+      title: Text(instance.project),
       subtitle: Text(
         '$detail\n${instance.directory}',
         maxLines: 2,
@@ -303,7 +506,25 @@ class _InstanceTile extends StatelessWidget {
                     ),
               onPressed: webUi.status == WebUiBrowserStatus.opening
                   ? null
-                  : () => onOpenWebUi(instance),
+                  : () => widget.onOpenWebUi(instance),
+            ),
+          if (instance.state == InstancePresenceState.offline)
+            IconButton(
+              key: ValueKey('delete-instance-${instance.instanceId}'),
+              tooltip: '删除离线实例',
+              icon: _deleting
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.delete_outline),
+              onPressed: _deleting
+                  ? null
+                  : () async {
+                      setState(() => _deleting = true);
+                      await widget.onDelete(instance);
+                      if (mounted) setState(() => _deleting = false);
+                    },
             ),
           Chip(label: Text(label), visualDensity: VisualDensity.compact),
         ],

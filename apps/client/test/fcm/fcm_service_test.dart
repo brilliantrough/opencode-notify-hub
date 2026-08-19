@@ -228,7 +228,7 @@ void main() {
       fcm.openedAppController.add(messageOf(terminalEnvelope()));
       await pumpEventQueue();
 
-      expect(history.contains('evt-term'), isTrue);
+      expect(await history.contains('evt-term'), isTrue);
       final entry = history.entries.single;
       expect(entry.title, 'devbox · api · Implement API · 任务已完成');
       expect(entry.body, '用时 42 秒');
@@ -240,7 +240,7 @@ void main() {
     test(
       'dedupes against history: an already-recorded event is skipped',
       () async {
-        history.add(
+        await history.add(
           HistoryEntry(
             eventId: 'evt-term',
             title: 't',
@@ -282,7 +282,7 @@ void main() {
 
         await buildService().init();
 
-        expect(history.contains('evt-term'), isTrue);
+        expect(await history.contains('evt-term'), isTrue);
         expect(notifications.shown, isEmpty);
       },
     );

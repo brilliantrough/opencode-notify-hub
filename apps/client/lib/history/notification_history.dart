@@ -1,11 +1,6 @@
-import 'dart:convert';
+import 'dart:async';
 
-import 'package:shared_preferences/shared_preferences.dart';
-
-/// One recorded notification in the device-local history.
-///
-/// History stores the rendered notification plus bounded routing context used
-/// by the local history table. It never stores the complete raw gateway event.
+/// One rendered notification and its bounded local routing context.
 class HistoryEntry {
   const HistoryEntry({
     required this.eventId,
@@ -77,178 +72,82 @@ class HistoryEntry {
 String? _optionalString(Object? value) => value is String ? value : null;
 
 DateTime? _optionalDateTime(Object? value) {
-  if (value is! String) {
-    return null;
-  }
+  if (value is! String) return null;
   return DateTime.tryParse(value);
 }
 
-/// Append-only store of shown (or pause-suppressed) notifications.
-abstract class NotificationHistory {
-  /// Newest-first view of the recorded entries.
-  List<HistoryEntry> get entries;
+class HistoryBatch {
+  const HistoryBatch({required this.entries, required this.totalCount});
 
-  /// Whether an entry with [eventId] has been recorded. Synchronous over the
-  /// currently loaded view — a still-hydrating persistent history may briefly
-  /// report `false` for entries not yet loaded from disk.
-  bool contains(String eventId);
-
-  /// Records [entry].
-  void add(HistoryEntry entry);
+  final List<HistoryEntry> entries;
+  final int totalCount;
 }
 
-/// Bounded in-memory [NotificationHistory] keeping the newest [capacity]
-/// entries.
+/// Device-local append-only notification history.
+abstract interface class NotificationHistory {
+  /// Emits after this adapter inserts a new unique event.
+  Stream<void> get changes;
+
+  Future<bool> contains(String eventId);
+
+  Future<void> add(HistoryEntry entry);
+
+  Future<HistoryBatch> loadPage({required int offset, required int limit});
+
+  Future<void> close();
+}
+
+/// Test adapter with the same retention and paging semantics as SQLite.
 class InMemoryNotificationHistory implements NotificationHistory {
-  InMemoryNotificationHistory({this.capacity = 50}) {
+  InMemoryNotificationHistory({this.capacity = 10000}) {
     if (capacity <= 0) {
       throw ArgumentError.value(capacity, 'capacity', 'must be positive');
     }
   }
 
-  /// Maximum number of entries kept before the oldest is dropped.
   final int capacity;
-
   final List<HistoryEntry> _entries = [];
+  final StreamController<void> _changes = StreamController.broadcast(
+    sync: true,
+  );
 
-  @override
   List<HistoryEntry> get entries => List.unmodifiable(_entries);
 
   @override
-  bool contains(String eventId) => _entries.any((e) => e.eventId == eventId);
+  Stream<void> get changes => _changes.stream;
 
   @override
-  void add(HistoryEntry entry) {
+  Future<bool> contains(String eventId) async =>
+      _entries.any((entry) => entry.eventId == eventId);
+
+  @override
+  Future<void> add(HistoryEntry entry) async {
+    if (_entries.any((candidate) => candidate.eventId == entry.eventId)) {
+      return;
+    }
     _entries.insert(0, entry);
     if (_entries.length > capacity) {
-      _entries.removeLast();
+      _entries.removeRange(capacity, _entries.length);
     }
-  }
-}
-
-/// [NotificationHistory] persisted to `shared_preferences` so recorded
-/// notifications survive app restarts.
-///
-/// Entries are stored as a JSON list under [storageKey], newest first, capped
-/// at [capacity]. A missing or corrupt stored value loads as an empty history
-/// and is overwritten by the next [add].
-class PrefsNotificationHistory implements NotificationHistory {
-  PrefsNotificationHistory._(
-    this._prefs,
-    this._entries, {
-    this.capacity = defaultCapacity,
-  }) : _persistReady = true;
-
-  PrefsNotificationHistory._hydrating({required this.capacity}) : _entries = [];
-
-  /// Creates a history that starts empty and hydrates from disk in the
-  /// background, so synchronous provider graphs can use the persistent
-  /// history without an async bootstrap.
-  ///
-  /// Entries added before hydration completes are newer than anything stored:
-  /// they stay in front and stored duplicates of their event IDs are dropped.
-  /// [add] awaits hydration before persisting, so nothing is lost. When the
-  /// store is unreadable (e.g. no plugin binding in tests) the history keeps
-  /// working in-memory only.
-  factory PrefsNotificationHistory.hydrating({int capacity = defaultCapacity}) {
-    if (capacity <= 0) {
-      throw ArgumentError.value(capacity, 'capacity', 'must be positive');
-    }
-    final history = PrefsNotificationHistory._hydrating(capacity: capacity);
-    history._hydration = history._hydrate();
-    return history;
+    _changes.add(null);
   }
 
-  /// Shared-preferences key holding the JSON-encoded entry list.
-  static const String storageKey = 'notification_history_v1';
-
-  /// Default maximum number of entries kept before the oldest is dropped.
-  static const int defaultCapacity = 50;
-
-  /// Maximum number of entries kept before the oldest is dropped.
-  final int capacity;
-
-  late final SharedPreferences _prefs;
-  final List<HistoryEntry> _entries;
-
-  bool _persistReady = false;
-  Future<void>? _hydration;
-
-  /// Completes when the initial disk load has finished (or failed). Always
-  /// completes immediately for histories created via [load].
-  Future<void> get ready => _hydration ?? Future.value();
-
-  Future<void> _hydrate() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final stored = _readEntries(prefs);
-      _prefs = prefs;
-      final seen = _entries.map((e) => e.eventId).toSet();
-      _entries.addAll(stored.where((e) => !seen.contains(e.eventId)));
-      while (_entries.length > capacity) {
-        _entries.removeLast();
-      }
-      _persistReady = true;
-    } catch (_) {
-      // Unreadable store (no plugin binding, ...): in-memory only.
-    }
-  }
-
-  /// Loads the persisted history, returning an empty history when nothing was
-  /// stored or the stored value is not a valid JSON entry list.
-  static Future<PrefsNotificationHistory> load({
-    int capacity = defaultCapacity,
+  @override
+  Future<HistoryBatch> loadPage({
+    required int offset,
+    required int limit,
   }) async {
-    if (capacity <= 0) {
-      throw ArgumentError.value(capacity, 'capacity', 'must be positive');
+    if (offset < 0 || limit <= 0) {
+      throw ArgumentError('offset must be non-negative and limit positive');
     }
-    final prefs = await SharedPreferences.getInstance();
-    return PrefsNotificationHistory._(
-      prefs,
-      _readEntries(prefs),
-      capacity: capacity,
+    final start = offset.clamp(0, _entries.length);
+    final end = (start + limit).clamp(start, _entries.length);
+    return HistoryBatch(
+      entries: List.unmodifiable(_entries.sublist(start, end)),
+      totalCount: _entries.length,
     );
   }
 
-  static List<HistoryEntry> _readEntries(SharedPreferences prefs) {
-    try {
-      final raw = prefs.getString(storageKey);
-      if (raw == null) return [];
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return [];
-      return [
-        for (final item in decoded)
-          if (item is Map<String, dynamic>) HistoryEntry.fromJson(item),
-      ];
-    } catch (_) {
-      // Corrupt or partially malformed payload: start from an empty history.
-      return [];
-    }
-  }
-
   @override
-  List<HistoryEntry> get entries => List.unmodifiable(_entries);
-
-  /// Whether an entry with [eventId] has been recorded.
-  @override
-  bool contains(String eventId) => _entries.any((e) => e.eventId == eventId);
-
-  /// Records [entry] newest-first, truncates to [capacity], and persists the
-  /// result (once the store is ready — see [hydrating]).
-  @override
-  Future<void> add(HistoryEntry entry) async {
-    _entries.insert(0, entry);
-    if (_entries.length > capacity) {
-      _entries.removeLast();
-    }
-    await _hydration;
-    if (_persistReady) {
-      await _persist();
-    }
-  }
-
-  Future<void> _persist() {
-    final json = jsonEncode([for (final entry in _entries) entry.toJson()]);
-    return _prefs.setString(storageKey, json);
-  }
+  Future<void> close() => _changes.close();
 }

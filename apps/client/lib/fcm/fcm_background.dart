@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' show log;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../firebase_options.dart';
 import '../history/notification_history.dart';
+import '../history/sqlite_notification_history.dart';
 import '../notifications/notification_text.dart';
 import '../realtime/notify_event.dart';
 
@@ -23,8 +25,19 @@ import '../realtime/notify_event.dart';
 @pragma('vm:entry-point')
 Future<void> fcmBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  final history = await PrefsNotificationHistory.load();
-  await processBackgroundMessageData(message.data, history);
+  final history = SqliteNotificationHistory.openDefault();
+  try {
+    await processBackgroundMessageData(message.data, history);
+  } catch (error, stackTrace) {
+    log(
+      'failed to record background FCM history',
+      name: 'FcmBackground',
+      error: error,
+      stackTrace: stackTrace,
+    );
+  } finally {
+    await history.close();
+  }
 }
 
 /// Maps an FCM data payload to a [NotifyEvent].
@@ -69,7 +82,7 @@ class ActionQueue {
 /// Serializes [processBackgroundMessageData] calls within an isolate: the
 /// history check-then-record is only race-free when messages don't
 /// interleave, and FCM may invoke the background handler for a second
-/// message while the first is still awaiting its prefs write.
+/// message while the first is still awaiting its SQLite write.
 final _backgroundQueue = ActionQueue();
 
 /// Records one background FCM data payload in the persisted [history].
@@ -86,7 +99,7 @@ final _backgroundQueue = ActionQueue();
 ///   notification title/body.
 Future<void> processBackgroundMessageData(
   Map<String, dynamic> data,
-  PrefsNotificationHistory history, {
+  NotificationHistory history, {
   DateTime Function()? now,
 }) => _backgroundQueue.run(
   () => _processBackgroundMessageData(data, history, now: now),
@@ -94,7 +107,7 @@ Future<void> processBackgroundMessageData(
 
 Future<void> _processBackgroundMessageData(
   Map<String, dynamic> data,
-  PrefsNotificationHistory history, {
+  NotificationHistory history, {
   DateTime Function()? now,
 }) async {
   final event = parseFcmEventData(data);
@@ -105,7 +118,7 @@ Future<void> _processBackgroundMessageData(
       event.type == NotifyEventType.actionResolved) {
     return;
   }
-  if (history.contains(event.eventId)) {
+  if (await history.contains(event.eventId)) {
     return;
   }
   await history.add(

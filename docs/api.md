@@ -36,6 +36,7 @@ Examples use `https://notify.example.com`.
 | `POST /v1/pending-interactions/{instanceId}/questions/{requestId}/answer` | Route one ordered question answer set to the owning instance |
 | `POST /v1/pending-interactions/{instanceId}/permissions/{requestId}/decision` | Route a `once`, `always`, or `reject` permission decision to the owning instance |
 | `GET /v1/pending-interactions/commands/{commandId}` | Query the body-free outcome of a submitted command |
+| `DELETE /v1/instances/{instanceId}` | Forget one user-owned offline instance; active instances return `409` |
 | `POST /v1/instances/{instanceId}/sessions/{sessionId}/prompt` | Route one best-effort text prompt to a uniquely owned online Session |
 | `GET /v1/ws` | Upgrade to the authenticated realtime WebSocket |
 | `GET /v1/plugin/ws` | Upgrade to the Plugin control WebSocket |
@@ -160,6 +161,12 @@ reconcile against it after a `202 accepted` submission. The cache is
 deliberately volatile and has no bearing on delivery semantics.
 
 ## Session control
+
+`DELETE /v1/instances/{instanceId}` removes one offline instance from the
+authenticated user's volatile Gateway presence projection. Unknown and foreign
+ids return `404`; an instance that has reconnected returns `409`. Deletion does
+not revoke its Plugin key or block future registration, so a later reconnect or
+OpenCode restart makes it appear again.
 
 `POST /v1/instances/{instanceId}/sessions/{sessionId}/prompt` carries a
 client-generated UUID `commandId` and up to 32,000 characters of text. It is

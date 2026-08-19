@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_state.dart';
 import '../config/server_config.dart';
-import '../history/notification_history.dart';
+import '../history/history_controller.dart';
 import '../notifications/notification_navigation.dart';
 import '../notifications/notification_router.dart';
 import '../notifications/notification_service.dart';
@@ -16,6 +16,8 @@ import 'event_deduper.dart';
 import 'instance_presence.dart';
 import 'notify_event.dart';
 import 'ws_client.dart';
+
+export '../history/history_controller.dart' show notificationHistoryProvider;
 
 final eventDeduperProvider = Provider<EventDeduper>((ref) => EventDeduper());
 
@@ -34,14 +36,6 @@ class AppForegroundController extends Notifier<bool> {
   /// Called by the bootstrap lifecycle observer on foreground transitions.
   void setForeground(bool foreground) => state = foreground;
 }
-
-/// The production history: persisted to shared_preferences so the router's
-/// cross-restart dedupe (`history.contains`) sees events recorded by earlier
-/// runs. Starts empty and hydrates in the background — see
-/// [PrefsNotificationHistory.hydrating]. Overridden in tests.
-final notificationHistoryProvider = Provider<NotificationHistory>(
-  (ref) => PrefsNotificationHistory.hydrating(),
-);
 
 final notificationRouterProvider = Provider<NotificationRouter>(
   (ref) => NotificationRouter(
@@ -125,6 +119,7 @@ class RealtimeController {
 
   StreamSubscription<NotifyEvent>? _eventSubscription;
   StreamSubscription<List<OpenCodeInstancePresence>>? _presenceSubscription;
+  StreamSubscription<WsStatus>? _statusSubscription;
 
   bool get _started => _eventSubscription != null;
 
@@ -138,6 +133,11 @@ class RealtimeController {
     _presenceSubscription = _client.instancePresences.listen(
       _onInstancePresences,
     );
+    _statusSubscription = _client.status.listen((status) {
+      if (status == WsStatus.connected) {
+        _onInstancePresences(const []);
+      }
+    });
     _client.connect();
   }
 
@@ -169,11 +169,16 @@ class RealtimeController {
     }
     final eventSubscription = _eventSubscription!;
     final presenceSubscription = _presenceSubscription;
+    final statusSubscription = _statusSubscription;
     _eventSubscription = null;
     _presenceSubscription = null;
+    _statusSubscription = null;
     unawaited(eventSubscription.cancel());
     if (presenceSubscription != null) {
       unawaited(presenceSubscription.cancel());
+    }
+    if (statusSubscription != null) {
+      unawaited(statusSubscription.cancel());
     }
     _client.disconnect();
   }

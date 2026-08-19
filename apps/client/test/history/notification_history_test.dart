@@ -11,7 +11,10 @@ HistoryEntry _entry(String eventId) => HistoryEntry(
 void main() {
   group('InMemoryNotificationHistory', () {
     test('capacity 0 throws ArgumentError', () {
-      expect(() => InMemoryNotificationHistory(capacity: 0), throwsArgumentError);
+      expect(
+        () => InMemoryNotificationHistory(capacity: 0),
+        throwsArgumentError,
+      );
     });
 
     test('entries are newest-first', () {
@@ -24,8 +27,8 @@ void main() {
       expect(history.entries.map((e) => e.eventId), ['c', 'b', 'a']);
     });
 
-    test('51 entries keep the newest 50 and drop the oldest', () {
-      final history = InMemoryNotificationHistory();
+    test('51 entries with capacity 50 drop the oldest', () {
+      final history = InMemoryNotificationHistory(capacity: 50);
 
       for (var i = 0; i < 51; i++) {
         history.add(_entry('evt-$i'));
@@ -55,10 +58,7 @@ void main() {
       final history = InMemoryNotificationHistory();
       history.add(_entry('a'));
 
-      expect(
-        () => history.entries.add(_entry('b')),
-        throwsUnsupportedError,
-      );
+      expect(() => history.entries.add(_entry('b')), throwsUnsupportedError);
     });
   });
 }

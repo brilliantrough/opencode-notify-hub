@@ -15,6 +15,7 @@ export 'package:notify_api/src/api/devices_api.dart';
 export 'package:notify_api/src/api/events_api.dart';
 export 'package:notify_api/src/api/health_api.dart';
 export 'package:notify_api/src/api/ingest_keys_api.dart';
+export 'package:notify_api/src/api/instances_api.dart';
 export 'package:notify_api/src/api/pending_api.dart';
 export 'package:notify_api/src/api/realtime_api.dart';
 export 'package:notify_api/src/api/sessions_api.dart';

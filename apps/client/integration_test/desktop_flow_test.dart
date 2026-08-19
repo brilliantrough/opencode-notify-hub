@@ -375,8 +375,9 @@ void main() {
       expect(notifications.shown, hasLength(1));
       expect(notifications.shown.single.eventId, 'evt-terminal-1');
       final history = container.read(notificationHistoryProvider);
-      expect(history.entries, hasLength(1));
-      expect(history.entries.single.eventId, 'evt-terminal-1');
+      final historyPage = await history.loadPage(offset: 0, limit: 10);
+      expect(historyPage.entries, hasLength(1));
+      expect(historyPage.entries.single.eventId, 'evt-terminal-1');
 
       // The native desktop history page exposes compact source/session context
       // and expands into the complete local detail table.

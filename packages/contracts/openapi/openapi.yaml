@@ -2618,6 +2618,44 @@ paths:
       summary: Revoke an ingest key.
       tags:
         - ingest-keys
+  /v1/instances/{instanceId}:
+    delete:
+      description: Removes one offline instance from the authenticated user's in-memory presence projection. An active instance cannot be removed. A later Plugin reconnect or OpenCode restart registers the instance again.
+      operationId: deleteOfflineInstance
+      parameters:
+        - description: OpenCode instance identifier.
+          in: path
+          name: instanceId
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "204":
+          description: Offline instance forgotten.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Missing or invalid access token.
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Unknown instance for this user.
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: The instance is active and cannot be forgotten.
+      security:
+        - bearerAuth: []
+      summary: Forget one offline OpenCode instance.
+      tags:
+        - instances
   /v1/instances/{instanceId}/sessions/{sessionId}/prompt:
     post:
       description: Routes one text prompt to the authenticated user's exact online Plugin instance. The 202 response acknowledges that the Gateway wrote the command to the Plugin control connection; it does not wait for OpenCode to admit or execute the prompt. Prompts are never queued or retried.

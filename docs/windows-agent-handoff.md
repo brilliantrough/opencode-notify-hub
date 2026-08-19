@@ -135,6 +135,13 @@ separate Windows port:
 - WebUI Session links carry the encoded directory and Session ID. The Plugin
   adds the directory query to OpenCode API requests, streams SSE directly, and
   the client keeps each local HTTP handler alive until its response ends.
+- OpenCode instances are grouped by machine with online/total counts. Offline
+  records can be forgotten individually or per machine and reappear after a
+  Plugin reconnect; this requires the matching unreleased Gateway route.
+- Notification History is device-local SQLite, retains the newest 10,000 rows,
+  updates live, and supports 20/30/50/100-row pages. The application does not
+  automatically migrate the previous JSON value; use the external converter
+  under `apps/client/tool/` when legacy rows must be retained.
 
 Production `https://notify.pezayo.com` runs gateway image
 `opencode-notify-gateway:20260818-machine-webui`, deployed from the current Linux
@@ -143,6 +150,9 @@ tunnel routes. The previous `6357a0c` image remains tagged
 `opencode-notify-gateway:rollback-6357a0c` on the production host. Complete the
 Windows-specific interactive question, permission, prompt, and browser WebUI
 acceptance checks against production after installing a protocol-v2 Plugin.
+That image predates `DELETE /v1/instances/{instanceId}`; offline-instance
+deletion will return `404` until Linux builds and deploys a Gateway containing
+the unreleased route.
 
 ## Platform Ownership Boundary
 
@@ -225,6 +235,10 @@ Distribute and test the entire
 registry URL changes, line-ending churn, generated plugin registrants, or other
 environment-only drift without understanding each hunk.
 
+The SQLite package is delivered as a Dart native asset. Confirm the complete
+Windows Release directory contains the generated native asset, then cold-launch
+the packaged executable and open History before accepting the build.
+
 ## Manual Windows Acceptance Tasks
 
 1. Cold launch: the window appears promptly with title `OpenCode Notify`.
@@ -257,6 +271,11 @@ environment-only drift without understanding each hunk.
     invalidate the URL. Confirm no WebView2 installation is requested.
 12. Context: confirm Windows notifications and History rows visibly include the
     machine name, while expanded History retains the complete detail table.
+13. History/instances: confirm History updates while it is visible, every page
+    size works, old pages show the new-entry banner, restart preserves rows, and
+    machine grouping plus individual/bulk offline-instance removal works against
+    a Gateway containing the new route. Run the external converter against a
+    copied legacy `shared_preferences.json` and verify the source stays intact.
 
 Record Windows-owned results only in local
 `docs/project_memory/windows-current-state.md`; read Linux-owned status from

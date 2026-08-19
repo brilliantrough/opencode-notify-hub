@@ -5,7 +5,6 @@ import 'package:client/fcm/fcm_background.dart';
 import 'package:client/history/notification_history.dart';
 import 'package:client/realtime/notify_event.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 Map<String, Object?> baseEnvelope(String type) => {
   'eventId': 'evt-$type',
@@ -84,11 +83,10 @@ void main() {
   });
 
   group('processBackgroundMessageData', () {
-    late PrefsNotificationHistory history;
+    late InMemoryNotificationHistory history;
 
-    setUp(() async {
-      SharedPreferences.setMockInitialValues({});
-      history = await PrefsNotificationHistory.load();
+    setUp(() {
+      history = InMemoryNotificationHistory();
     });
 
     test('records an action_required event with rendered title/body', () async {
@@ -175,20 +173,18 @@ void main() {
       ]);
     });
 
-    test('dedupe survives reloads (history is persisted)', () async {
+    test('dedupes against an event recorded by an earlier handler', () async {
       await processBackgroundMessageData(
         dataOf(actionRequiredEnvelope()),
         history,
       );
 
-      // Simulate a fresh background isolate reading the persisted history.
-      final reloaded = await PrefsNotificationHistory.load();
       await processBackgroundMessageData(
         dataOf(actionRequiredEnvelope()),
-        reloaded,
+        history,
       );
 
-      expect(reloaded.entries, hasLength(1));
+      expect(history.entries, hasLength(1));
     });
 
     test(
