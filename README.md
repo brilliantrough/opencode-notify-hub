@@ -5,10 +5,10 @@ OpenCode Notify sends completion and action-required events from an OpenCode
 plugin to authenticated Linux, Windows, and Android clients through a
 self-hosted gateway.
 
-> **Release status:** pre-release. The source, build instructions, and
-> self-hosting path are available, but signed desktop/mobile binaries are not
-> published yet. Android background notifications also require your own
-> Firebase configuration.
+> **Release status:** unsigned beta. Linux and Windows desktop bundles and the
+> OpenCode Plugin are distributed through GitHub Releases. Windows may show a
+> SmartScreen warning. Android binaries are not published and Android
+> background notifications require project-specific Firebase configuration.
 
 ## How it works
 
@@ -49,7 +49,7 @@ data boundaries.
 | Component | Supported | Notes |
 | --- | --- | --- |
 | OpenCode plugin | OpenCode 1.18.x on Node.js/Bun hosts | Built as one self-contained ESM file |
-| Desktop client | Linux; Windows target included | Linux is tested on KDE/X11; Windows must be built and E2E-tested on Windows before release |
+| Desktop client | Linux and Windows x64 beta | Linux is tested on KDE/X11; Windows is tested on Windows 11, with remaining production-control and lifecycle limitations documented in the release notes |
 | Mobile client | Android | Real Firebase config and release signing are required for distribution |
 | Gateway | Linux containers, Node.js 22+ | PostgreSQL 16+, HTTPS/WSS reverse proxy, SMTP, Firebase service account |
 | Apple/Web clients | Not supported | No iOS, macOS, or web target is currently shipped |
