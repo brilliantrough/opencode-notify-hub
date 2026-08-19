@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -113,6 +114,9 @@ class HomePage extends ConsumerWidget {
                   const _SectionHeader('OpenCode 实例'),
                   for (final group in instanceGroups)
                     _MachineInstanceGroup(
+                      key: ValueKey(
+                        'machine-group-${group.machine.trim().toLowerCase()}',
+                      ),
                       group: group,
                       webUi: webUi,
                       onOpenWebUi: (target) =>
@@ -170,11 +174,11 @@ class HomePage extends ConsumerWidget {
       await ref
           .read(instancePresencesProvider.notifier)
           .forgetOffline(instance.instanceId);
-    } catch (_) {
+    } catch (error) {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('删除离线实例失败，请刷新后重试')));
+        ).showSnackBar(SnackBar(content: Text(_instanceRemovalError(error))));
       }
     }
   }
@@ -203,21 +207,50 @@ class HomePage extends ConsumerWidget {
     );
     if (confirmed != true || !context.mounted) return;
     var failures = 0;
+    Object? firstError;
     for (final instance in group.offline) {
       try {
         await ref
             .read(instancePresencesProvider.notifier)
             .forgetOffline(instance.instanceId);
-      } catch (_) {
+      } catch (error) {
         failures += 1;
+        firstError ??= error;
+        if (_gatewayErrorMessage(error) == 'Route not found') break;
       }
     }
     if (failures > 0 && context.mounted) {
+      final message = _gatewayErrorMessage(firstError!) == 'Route not found'
+          ? _instanceRemovalError(firstError)
+          : '$failures 个实例未能删除，请刷新后重试';
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('$failures 个实例未能删除，请刷新后重试')));
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
+}
+
+String _instanceRemovalError(Object error) {
+  if (error is DioException) {
+    if (error.response?.statusCode == 404) {
+      return _gatewayErrorMessage(error) == 'Route not found'
+          ? '当前服务器尚未部署离线实例清理接口'
+          : '该实例已不存在，请刷新后重试';
+    }
+    if (error.response?.statusCode == 409) {
+      return '该实例已重新上线，无法删除';
+    }
+  }
+  return '删除离线实例失败，请刷新后重试';
+}
+
+String? _gatewayErrorMessage(Object error) {
+  if (error is! DioException) return null;
+  final data = error.response?.data;
+  if (data is! Map<Object?, Object?>) return null;
+  final detail = data['error'];
+  if (detail is! Map<Object?, Object?>) return null;
+  return detail['message'] as String?;
 }
 
 class _InstanceMachineGroup {
@@ -359,6 +392,7 @@ class _SectionHeader extends StatelessWidget {
 
 class _MachineInstanceGroup extends StatefulWidget {
   const _MachineInstanceGroup({
+    super.key,
     required this.group,
     required this.webUi,
     required this.onOpenWebUi,
@@ -380,6 +414,12 @@ class _MachineInstanceGroupState extends State<_MachineInstanceGroup> {
   bool _clearing = false;
   bool _expanded = true;
   final ExpansibleController _expansion = ExpansibleController();
+
+  @override
+  void dispose() {
+    _expansion.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

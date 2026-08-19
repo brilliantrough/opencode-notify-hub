@@ -29,9 +29,10 @@ class FakeActiveSessions extends ActiveSessions {
 }
 
 class FakeInstancePresences extends InstancePresences {
-  FakeInstancePresences(this._initial);
+  FakeInstancePresences(this._initial, {this.forgetError});
 
   final Map<String, OpenCodeInstancePresence> _initial;
+  final Object? forgetError;
   final List<String> forgotten = [];
 
   @override
@@ -39,6 +40,8 @@ class FakeInstancePresences extends InstancePresences {
 
   @override
   Future<void> forgetOffline(String instanceId) async {
+    final error = forgetError;
+    if (error != null) throw error;
     forgotten.add(instanceId);
     state = Map.of(state)..remove(instanceId);
   }
@@ -556,6 +559,35 @@ void main() {
     expect(find.text('docs'), findsOneWidget);
   });
 
+  testWidgets('replacing a machine group does not reuse expansion state', (
+    tester,
+  ) async {
+    final first = instance(
+      'first',
+      InstancePresenceState.offline,
+      machine: 'first-machine',
+    );
+    final controller = FakeInstancePresences({first.instanceId: first});
+    await pumpHome(tester, instanceController: controller);
+    await tester.tap(find.byTooltip('折叠机器实例'));
+    await tester.pumpAndSettle();
+
+    final second = instance(
+      'second',
+      InstancePresenceState.offline,
+      machine: 'second-machine',
+    );
+    controller.replaceAll([second]);
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey('machine-second-machine')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('instance-second')), findsOneWidget);
+  });
+
   testWidgets('deletes an offline instance but not an active one', (
     tester,
   ) async {
@@ -574,6 +606,34 @@ void main() {
     expect(controller.forgotten, ['offline']);
     expect(find.byKey(const ValueKey('instance-offline')), findsNothing);
     expect(find.byKey(const ValueKey('instance-active')), findsOneWidget);
+  });
+
+  testWidgets('explains when the gateway lacks the instance deletion route', (
+    tester,
+  ) async {
+    final request = RequestOptions(path: '/v1/instances/offline');
+    final offline = instance('offline', InstancePresenceState.offline);
+    final controller = FakeInstancePresences(
+      {offline.instanceId: offline},
+      forgetError: DioException(
+        requestOptions: request,
+        response: Response<Object>(
+          requestOptions: request,
+          statusCode: 404,
+          data: const {
+            'error': {'code': 'NOT_FOUND', 'message': 'Route not found'},
+          },
+        ),
+        type: DioExceptionType.badResponse,
+      ),
+    );
+    await pumpHome(tester, instanceController: controller);
+
+    await tester.tap(find.byKey(const ValueKey('delete-instance-offline')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('当前服务器尚未部署离线实例清理接口'), findsOneWidget);
+    expect(find.byKey(const ValueKey('instance-offline')), findsOneWidget);
   });
 
   testWidgets(
