@@ -5,12 +5,19 @@ All notable changes will be documented in this file. The project intends to use
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-08-20
+
 ### Added
 
 - Machine-grouped OpenCode instance presence with owner-scoped removal of stale
   offline instances.
 - Live, paginated device-local notification history backed by SQLite with a
   10,000-entry retention limit and an external legacy JSON import tool.
+
+### Fixed
+
+- Stabilized machine-group lifecycle handling when presence snapshots replace
+  groups while the client UI is mounted.
 
 ## [0.1.0-beta.1] - 2026-08-19
 
