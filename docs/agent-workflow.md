@@ -104,13 +104,14 @@ Rules:
 2. Make the smallest change that satisfies the acceptance criteria.
 3. Add focused regression tests at the behavior boundary.
 4. Run focused tests while developing.
-5. Run the required component and platform gates before commit and push.
+5. Run only the affected component checks needed for the change's risk. Do not
+   trigger or reproduce the full cross-platform CI matrix by default.
 6. Update documentation when behavior, configuration, data, API, or operations
    change.
 7. Re-fetch, inspect the final diff, commit a coherent change, and push the
    current shared main or explicitly assigned task branch.
 
-Common repository gates:
+Available repository checks (select the affected subset):
 
 ```bash
 pnpm docs:check
@@ -124,7 +125,13 @@ flutter analyze
 ```
 
 Desktop builds must run on the target OS. Gateway integration and image tests
-require Docker. Never mark a platform verified from unit tests alone.
+require Docker. The maintainer owns final desktop UI acceptance; an Agent should
+not automate difficult native UI flows unless explicitly asked to diagnose one.
+
+Direct pushes to shared `main` do not trigger GitHub CI. The workflow runs for
+pull requests or by explicit manual dispatch. A release request made after the
+maintainer has run the application is authorization to build and publish files,
+not a request to repeat the full automated or interactive test matrix.
 
 ## Pull request contract
 
@@ -143,8 +150,8 @@ with `Closes #<number>` when one exists and include:
 
 The reviewing agent should inspect the full diff, reproduce high-risk behavior,
 and check that tests can fail on the reported bug. The implementing agent must
-not approve its own PR. Merge through GitHub after required checks pass; use the
-repository's chosen merge policy consistently.
+not approve its own PR. Merge through GitHub after the checks requested for that
+PR pass; use the repository's chosen merge policy consistently.
 
 ## Cross-machine handoff
 
@@ -199,7 +206,8 @@ an agent. Follow these constraints on every machine:
 Configure the repository for safe shared-main maintenance:
 
 1. Block force pushes and branch deletion on `main`.
-2. Keep CI running on direct pushes and pull requests.
+2. Run CI on pull requests and explicit manual dispatch, not routine direct
+   pushes or release tags.
 3. Require concurrent branches to be current before release-critical merges.
 4. Enable private vulnerability reporting.
 5. Create the component/platform/state labels above.

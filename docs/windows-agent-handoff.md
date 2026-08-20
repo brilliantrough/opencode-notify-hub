@@ -194,7 +194,7 @@ cannot prove native behavior:
 - system-browser WebUI launch, localhost loading, reopen, and tunnel teardown;
 - sleep/resume, display scaling, long Chinese text, and clean-machine packaging.
 
-## Toolchain And Automated Verification
+## Toolchain And Lightweight Verification
 
 Expected toolchain:
 
@@ -208,7 +208,7 @@ Dart      3.12.x
 Visual Studio must include Desktop development with C++, MSVC, a Windows SDK,
 CMake/Ninja, and Developer Mode for plugin symlinks.
 
-Run from the repository root in PowerShell:
+For ordinary Windows alignment, run from the repository root in PowerShell:
 
 ```powershell
 $env:PUB_HOSTED_URL = "https://pub.flutter-io.cn"
@@ -217,19 +217,9 @@ $env:FLUTTER_STORAGE_BASE_URL = "https://storage.flutter-io.cn"
 corepack enable
 pnpm install --frozen-lockfile
 flutter pub get
-pnpm docs:check
-pnpm typecheck
-pnpm test
-pnpm build
-flutter analyze
 
 Set-Location apps\client
-flutter test
-flutter test integration_test\desktop_flow_test.dart -d windows
 flutter build windows --release
-
-Set-Location ..\..\packages\notify_api
-dart test
 ```
 
 Distribute and test the entire
@@ -239,10 +229,15 @@ registry URL changes, line-ending churn, generated plugin registrants, or other
 environment-only drift without understanding each hunk.
 
 The SQLite package is delivered as a Dart native asset. Confirm the complete
-Windows Release directory contains the generated native asset, then cold-launch
-the packaged executable and open History before accepting the build.
+Windows Release directory contains the generated native asset. The maintainer
+performs the cold launch and History/UI checks manually; do not automate the
+full native acceptance flow unless explicitly asked to diagnose a failure.
 
-## Manual Windows Acceptance Tasks
+## Maintainer Manual Windows Acceptance Reference
+
+This checklist belongs to maintainer-led hands-on validation. A Windows Agent
+records results supplied by the maintainer, but does not attempt the full UI
+sequence unless explicitly asked to diagnose one behavior.
 
 1. Cold launch: the window appears promptly with title `OpenCode Notify`.
 2. Stored account: successful restore reaches Home; unreachable server shows
@@ -300,6 +295,9 @@ spend time recreating Linux integration evidence.
 - If the pull already contains the needed client changes, make no speculative
   refactors. Only fix a Windows compile error or an observed Windows-native
   incompatibility.
+- Do not run the full Flutter, Node, Dart, or desktop integration suites for
+  routine alignment. Run a focused check only when it covers a changed seam or
+  diagnoses a concrete build/native failure.
 - Do not run `integration_test/live_acceptance_test.dart` or the full interactive
   acceptance list for this alignment pass. Skip Windows tests that require an
   unreliable native environment unless they are needed to diagnose a compile or
@@ -349,15 +347,15 @@ git diff --stat main...HEAD
 git log --oneline main..HEAD
 ```
 
-Return exact automated and manual results, sanitized screenshots for the
-machine-aware notification/History and browser WebUI flows, remaining risks,
-and SHA-256 values for `client.exe`, `data/app.so`, native notification DLLs,
-and the complete Release archive. Include the branch SHA and the exact command
-the Linux agent should run to inspect it.
+Return the build result, any focused diagnostics actually run,
+maintainer-supplied manual status, remaining risks, and SHA-256 values for
+`client.exe`, `data/app.so`, native notification DLLs, and the complete Release
+archive. Include the branch SHA and the exact command the Linux agent should run
+to inspect it.
 
 Commit only intended files on the Windows branch. Do not push or merge back to
-`main` until the maintainer explicitly requests it and the complete Windows
-verification evidence is recorded.
+`main` until the maintainer explicitly requests it. Do not invent missing UI
+evidence; record manual validation as maintainer-owned.
 
 ## Windows Release Handoff
 
@@ -368,16 +366,20 @@ release build is different from an ordinary Windows parity branch:
   coordinator.
 - Fast-forward local `main` with `git pull --ff-only`; do not build a release
   from a Windows feature branch, a dirty worktree, or an unpushed commit.
-- Run all Windows automated gates and the applicable manual acceptance checks
-  before packaging.
+- Do not run the full Windows automated matrix or Agent-driven UI acceptance
+  before packaging. The maintainer's prior application test and explicit
+  release request authorize the file build; run only the dependency, compile,
+  packaging, and archive-integrity checks needed to produce trustworthy files.
 - Package the complete
   `apps\client\build\windows\x64\runner\Release\` directory plus `LICENSE`
   into `opencode-notify-client-windows-x64-<version>.zip`.
-- Transfer that ZIP to the Linux Release coordinator together with its SHA-256,
-  exact source SHA, test results, manual results, remaining risks, and key
-  executable/DLL checksums.
+- Transfer that ZIP to the designated Release coordinator together with its
+  SHA-256,
+  exact source SHA, build result, maintainer-supplied validation status,
+  remaining risks, and key executable/DLL checksums.
 - Do not transfer only `client.exe`; the Flutter data directory and native DLLs
   are required runtime files.
-- Do not commit the ZIP, create or push the release tag, or upload the GitHub
-  Release. Linux verifies all final assets, generates `SHA256SUMS.txt`, creates
-  the annotated tag, and performs the single GitHub Release upload.
+- Do not commit the ZIP. Create or push the release tag and upload the GitHub
+  Release only when the maintainer explicitly designates Windows as the Release
+  coordinator and all Linux, Windows, and Plugin assets have been received and
+  verified. Otherwise transfer the ZIP to the designated coordinator.

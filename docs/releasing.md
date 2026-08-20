@@ -5,21 +5,23 @@ separate assets for each platform/component; Linux and Windows clients and the
 Plugin must never be hidden inside one combined archive.
 
 This document is the canonical Release SOP for both development agents. The
-Linux agent is the Release coordinator and the only agent that creates tags and
-uploads the GitHub Release. The Windows agent builds and verifies the Windows
-client, then transfers the complete Windows archive to the Linux agent.
+maintainer designates one Release coordinator for each release; it may be the
+Linux or Windows agent. Linux builds the Linux client and Plugin, Windows builds
+the Windows client, and the designated coordinator receives all complete
+archives before creating the tag and uploading one GitHub Release.
 
 ## Ownership And Source Of Truth
 
 - Every release artifact is built from one exact commit on `main`.
-- Linux owns version preparation, Contracts/OpenAPI, Plugin build, Linux client
-  build, release staging, checksums, release notes, tag creation, and GitHub
-  Release upload.
-- Windows owns Windows client tests, Windows native acceptance, Windows Release
-  build, complete-bundle packaging, and transfer of the Windows archive and
-  checksum to Linux.
-- Windows must not create the tag, publish the Release, edit Plugin/Gateway/
-  Contracts behavior, or upload a partial `client.exe`.
+- Linux owns Contracts/OpenAPI, the Plugin build, and the Linux client build.
+- Windows owns the Windows Release build and complete-bundle packaging. The
+  maintainer owns final Windows native/UI acceptance.
+- The maintainer-designated Release coordinator owns version preparation,
+  cross-platform artifact collection, checksums, release notes, tag creation,
+  and the single GitHub Release upload.
+- Windows must not edit Plugin/Gateway/Contracts behavior or upload a partial
+  `client.exe`. Neither platform creates the tag unless it is the designated
+  coordinator and has verified all final assets.
 - Release assets are platform-specific and independently downloadable.
 - `docs/project_memory/linux-current-state.md` and
   `docs/project_memory/windows-current-state.md` are local coordination memory;
@@ -87,9 +89,22 @@ The Gateway is not bundled into either desktop archive. Publish its immutable
 container image tag and digest in the release notes or a separate operator
 release record.
 
-## Release Gates
+## Release Verification Policy
 
-Run the shared gates before building release artifacts:
+The maintainer performs final application and desktop UI acceptance. A
+maintainer statement that the application has been tested and a request to
+release are release authorization. Release agents must not repeat expensive
+interactive UI flows or the full cross-platform test matrix unless explicitly
+asked to diagnose a failure.
+
+For normal Linux development, use focused, risk-based checks for the changed
+component. For Windows alignment, synchronize the shared client code, resolve
+dependencies, fix only observed compile/native blockers, and build the complete
+Release directory. The Windows maintainer performs the final manual run.
+
+The following checks remain available for pull requests, explicit diagnostic
+requests, or a release risk that cannot be covered locally, but are not default
+release gates:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -106,23 +121,29 @@ bash apps/gateway/tests/deploy/image-smoke.sh
 git diff --check
 ```
 
-Also run the manual E2E checklist from [e2e-verification.md](e2e-verification.md)
-against a staging gateway. A successful CI run is required for the exact
-release-preparation commit before the tag is created.
+Do not trigger GitHub CI for routine direct pushes or releases. The workflow is
+reserved for pull requests and explicit manual dispatch. A successful CI run is
+not required before a maintainer-authorized file release.
 
 Before the first public release, also:
 
 - enable GitHub private vulnerability reporting or configure the private
   security contact documented in `SECURITY.md`;
-- protect `main` and require the complete CI workflow;
+- protect `main` according to the maintainer's chosen direct-push/PR policy;
 - create the issue labels referenced by the issue forms;
 - confirm the repository description, topics, support channel, and public
   owner/contact links;
 - review Git history for secrets and private infrastructure identifiers.
 
-## Phase 1: Prepare The Release On Linux
+## Phase 1: Prepare The Release
 
-The Linux agent coordinates this phase.
+The maintainer-designated Release coordinator performs this phase from the
+shared `main` checkout. Source ownership boundaries remain unchanged.
+
+Shell examples below use Bash. A Windows coordinator may use PowerShell
+equivalents (`Get-FileHash`, `Compress-Archive`, and `gh release create`) while
+preserving the same source-SHA, archive-layout, checksum, and single-upload
+requirements.
 
 1. Start from a clean checkout and update `main`:
 
@@ -134,25 +155,27 @@ The Linux agent coordinates this phase.
    ```
 
 2. Choose the version, update `CHANGELOG.md`, and update the component version
-   fields. Commit and push the release-preparation change to `main`.
+   fields. Commit and push the release-preparation change to `main`. Direct
+   pushes do not trigger CI; do not manually dispatch it for routine releases.
 
-3. Wait for CI on that exact commit. Record the resulting full SHA as
-   `RELEASE_SHA`:
+3. Record the exact release-preparation SHA as `RELEASE_SHA`. Do not wait for or
+   trigger GitHub CI unless the maintainer explicitly requests it:
 
    ```bash
-   export RELEASE_VERSION="0.1.0-beta.1"
+   export RELEASE_VERSION="0.1.0-beta.2"
    export RELEASE_SHA="$(git rev-parse HEAD)"
    test "$(git branch --show-current)" = main
+   test "$(git rev-parse origin/main)" = "$RELEASE_SHA"
+   test -z "$(git status --porcelain)"
    ```
 
-4. Send the Windows agent the exact `RELEASE_SHA`, `RELEASE_VERSION`, and the
-   Windows build instructions from Phase 3. Windows must not build from a
-   stale branch or from an uncommitted worktree.
+4. Send both platform agents the exact `RELEASE_SHA` and `RELEASE_VERSION`.
+   Neither platform may build from a stale branch or uncommitted worktree.
 
 ## Phase 2: Build Linux And Plugin
 
-Run these commands on Linux from `main@$RELEASE_SHA` after the shared gates
-pass:
+Run these commands on Linux from `main@$RELEASE_SHA` after the maintainer has
+authorized the release:
 
 ```bash
 test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
@@ -219,25 +242,20 @@ if ($actual -ne $expected) { throw "Wrong release SHA: $actual" }
 if (git status --porcelain) { throw "Release worktree is not clean" }
 ```
 
-Run the Windows gates from the repository root:
+Resolve dependencies and build the Windows Release bundle from the repository
+root. Do not run the full Windows test matrix unless explicitly requested or
+needed to diagnose a build/native failure:
 
 ```powershell
 corepack enable
 pnpm install --frozen-lockfile
 flutter pub get
-pnpm docs:check
-pnpm typecheck
-pnpm test
-pnpm build
-flutter analyze
 
 Set-Location apps\client
-flutter test
-flutter test integration_test\desktop_flow_test.dart -d windows
 flutter build windows --release
 ```
 
-The Windows agent must test and package the entire directory:
+The Windows agent must inspect and package the entire directory:
 
 ```text
 apps\client\build\windows\x64\runner\Release\
@@ -246,7 +264,7 @@ apps\client\build\windows\x64\runner\Release\
 Create a versioned archive containing a top-level directory and `LICENSE`:
 
 ```powershell
-$version = "0.1.0-beta.1"
+$version = "0.1.0-beta.2"
 $name = "opencode-notify-client-windows-x64-$version"
 $stage = Join-Path $env:TEMP $name
 $archive = Join-Path $env:TEMP "$name.zip"
@@ -259,23 +277,24 @@ Compress-Archive -Path $stage -DestinationPath $archive -Force
 Get-FileHash $archive -Algorithm SHA256
 ```
 
-Transfer the complete ZIP to the Linux Release coordinator out of band. Also
-send:
+Transfer the complete ZIP to the designated Release coordinator out of band.
+Also send:
 
 - the exact `RELEASE_SHA` and version;
 - the ZIP filename and SHA-256;
-- the complete Windows automated test results;
-- manual acceptance results and remaining risks;
+- any focused checks run, manual acceptance status supplied by the maintainer,
+  and remaining risks;
 - checksums for `client.exe`, `data/app.so`, native notification/audio DLLs,
   and the complete ZIP.
 
-The Windows agent must not push a tag or upload the GitHub Release. Its local
-archive is a handoff artifact, not a repository file.
+The Windows archive is a handoff artifact, not a repository file. The Windows
+agent must not push a tag or upload the GitHub Release unless the maintainer has
+designated it as the coordinator and it has received every final platform asset.
 
-## Phase 4: Linux Verify And Upload
+## Phase 4: Coordinator Verification
 
 Copy the transferred Windows ZIP into the same external `$RELEASE_DIR` used in
-Phase 2. The Linux agent verifies it before publishing:
+Phase 2. The designated coordinator verifies it before publishing:
 
 ```bash
 unzip -l "$RELEASE_DIR/opencode-notify-client-windows-x64-${RELEASE_VERSION}.zip"
@@ -309,10 +328,10 @@ SHA256SUMS.txt
 
 ## Phase 5: Tag And Create The GitHub Release
 
-Only the Linux Release coordinator creates the annotated tag and publishes the
-Release, after the Windows archive has been received and verified. Write the
-final notes to `$RELEASE_DIR/release-notes.md`, using the required content list
-below, before running these commands:
+Only the maintainer-designated Release coordinator creates the annotated tag and
+publishes the Release, after all platform archives have been received and
+file-verified. Write the final notes to `$RELEASE_DIR/release-notes.md`, using
+the required content list below, before running these commands:
 
 ```bash
 git -C "$REPO" status --short
@@ -342,6 +361,9 @@ git -C "$REPO" push origin "v${RELEASE_VERSION}"
 Use `--prerelease` for beta versions. Omit it only for a release that has
 passed the stable release gates. GitHub automatically provides source archives;
 do not upload a second manually-created source archive.
+
+Do not manually dispatch GitHub CI for the release commit or tag. The repository
+workflow intentionally does not run on direct pushes or tags.
 
 The release notes must include:
 

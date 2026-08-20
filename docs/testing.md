@@ -1,5 +1,13 @@
 # Testing Guide
 
+These commands are a menu, not a mandatory matrix for every change. Linux
+development should run the narrowest checks that cover the changed behavior.
+GitHub CI is reserved for pull requests or explicit manual dispatch. Windows
+source-alignment work normally requires dependency resolution and a Release
+build; the maintainer performs final native UI acceptance. When the maintainer
+has already tested the application and authorizes a release, do not repeat the
+full suites below unless a build failure or specific risk requires diagnosis.
+
 ## TypeScript workspace
 
 Run unit/contract tests, type checks, and builds from the repository root:
