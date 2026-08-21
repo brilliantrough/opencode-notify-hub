@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -11,9 +13,14 @@ import 'webui_tunnel.dart';
 typedef WebUiBrowserLauncher = Future<bool> Function(Uri uri);
 
 final webUiBrowserLauncherProvider = Provider<WebUiBrowserLauncher>(
-  (ref) =>
-      (uri) => launchUrl(uri, mode: LaunchMode.externalApplication),
+  (ref) => (uri) => launchUrl(uri, mode: webUiLaunchMode(Platform.isAndroid)),
 );
+
+/// Android must keep the Notify process foregrounded while its loopback bridge
+/// serves the WebUI. An external browser can freeze the background Dart isolate.
+@visibleForTesting
+LaunchMode webUiLaunchMode(bool isAndroid) =>
+    isAndroid ? LaunchMode.inAppWebView : LaunchMode.externalApplication;
 
 enum WebUiBrowserStatus { idle, opening, active }
 

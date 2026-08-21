@@ -6,6 +6,7 @@ import 'package:client/sessions/webui_browser_controller.dart';
 import 'package:client/sessions/webui_tunnel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class _FakeAuthController extends AuthController {
   @override
@@ -54,6 +55,11 @@ class _FakeTunnel extends GatewayWebUiTunnel {
 }
 
 void main() {
+  test('uses an in-app WebView on Android to keep the tunnel process active', () {
+    expect(webUiLaunchMode(true), LaunchMode.inAppWebView);
+    expect(webUiLaunchMode(false), LaunchMode.externalApplication);
+  });
+
   test('starts one tunnel and reopens it in the system browser', () async {
     final auth = _FakeAuthController();
     final tunnel = _FakeTunnel(Uri.parse('http://127.0.0.1:42000/'));

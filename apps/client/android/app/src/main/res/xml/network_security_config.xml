@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Loopback-only cleartext permission for the temporary OpenCode WebUI tunnel.
+     The in-app WebView loads the local bridge over http://127.0.0.1; everything
+     else keeps the platform default (cleartext disabled). -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>
