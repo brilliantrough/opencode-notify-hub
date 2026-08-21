@@ -608,9 +608,10 @@ describe("permission decisions", () => {
       });
       expect(conflict.result.state).toBe("conflicting");
 
-      // Unsupported OpenCode version: incompatible.
+      // Unsupported Plugin control protocol: incompatible.
       const incompatible = await registerPlugin(aliceCredential, {
-        openCodeVersion: "1.18.17",
+        openCodeVersion: "1.18.19",
+        protocolVersion: 1,
       });
       expect(incompatible.result.state).toBe("incompatible");
 

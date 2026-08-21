@@ -52,7 +52,7 @@ class FakeMailer implements Mailer {
   }
 }
 
-describe("incompatible-version notification-only behavior (AC4)", () => {
+describe("incompatible-protocol notification-only behavior (AC4)", () => {
   let pg: TestPostgres;
   let handle: GatewayDatabase;
   let app: FastifyInstance;
@@ -193,7 +193,7 @@ describe("incompatible-version notification-only behavior (AC4)", () => {
   }
 
   /**
-   * Register a Plugin instance with an unsupported OpenCode version and
+   * Register a Plugin instance with an unsupported control protocol and
    * return the socket, instanceId, and registration result.
    */
   async function registerIncompatiblePlugin(
@@ -209,8 +209,8 @@ describe("incompatible-version notification-only behavior (AC4)", () => {
         machine: "devbox",
         project: "notify",
         directory: "/work/notify",
-        openCodeVersion: "1.18.17",
-        protocolVersion: 2,
+        openCodeVersion: "1.18.19",
+        protocolVersion: 1,
       }),
     );
     const result = (await resultPromise) as { type: string; instanceId: string; state: string };
@@ -297,7 +297,7 @@ describe("incompatible-version notification-only behavior (AC4)", () => {
     return res.statusCode;
   }
 
-  it("registers an unsupported version as incompatible, still delivers notifications, and excludes the instance from pending collection and commands with silence", async () => {
+  it("registers an unsupported protocol as incompatible, still delivers notifications, and excludes the instance from pending collection and commands with silence", async () => {
     const token = await createUser("incompatible@example.com");
     const credential = await createPluginCredential(token);
     const desktop = await connectDesktop(token);
@@ -316,7 +316,8 @@ describe("incompatible-version notification-only behavior (AC4)", () => {
     expect(presenceInstances[0]).toMatchObject({
       instanceId: instance.instanceId,
       state: "incompatible",
-      openCodeVersion: "1.18.17",
+      openCodeVersion: "1.18.19",
+      protocolVersion: 1,
     });
 
     // Notification ingest and delivery keep working end to end.

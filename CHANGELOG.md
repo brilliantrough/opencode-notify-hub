@@ -5,6 +5,11 @@ All notable changes will be documented in this file. The project intends to use
 
 ## [Unreleased]
 
+### Fixed
+
+- Treat the Plugin control protocol as the compatibility boundary so OpenCode
+  patch releases such as 1.18.19 remain remotely controllable.
+
 ## [0.1.0-beta.2] - 2026-08-20
 
 ### Added

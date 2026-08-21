@@ -92,19 +92,21 @@ Record before verifying, and keep it sanitized:
 
 ## Compatibility matrix
 
-OpenCode Notify 1.18.18 is the pinned, verified OpenCode target. Compatibility
-is per machine/instance and is published to the desktop client as instance
-presence.
+OpenCode 1.18.18 remains the pinned evidence target. Runtime compatibility is
+defined by the Notify Plugin control protocol, not an exact OpenCode host
+version: the Plugin adapts host API differences and reports the host version for
+diagnostics. Compatibility is per machine/instance and is published to the
+client as instance presence.
 
 | Component | Compatible | Behavior |
 | --- | --- | --- |
-| OpenCode version | `1.18.18` (pinned) | Full notification and Remote Unblock. |
+| OpenCode version | diagnostic; evidence pinned to `1.18.18` | Patch releases do not require a Gateway deployment. |
 | OpenCode launch mode | `opencode serve`, `opencode web` | Officially supported modes. |
-| Plugin bundle (upgraded) | ships against the V2 paths | Establishes the control WSS; fully actionable. |
+| Plugin control protocol | version `2` | Establishes the control WSS; fully actionable. |
 | Older Plugin (notification-era) | notification-only | Sends ordinary notifications; no control connection, no config migration required. |
-| Incompatible OpenCode version | notification-only, diagnosable | Registers as `state: "incompatible"`; presence shows the instance and its OpenCode version; excluded from pending collection and commands (`404`), notifications keep flowing. |
+| Incompatible Plugin protocol | notification-only, diagnosable | Registers as `state: "incompatible"`; presence shows the instance and versions; excluded from pending collection and commands (`404`), notifications keep flowing. |
 
-An incompatible version never blocks notifications and never receives remote
+An incompatible protocol never blocks notifications and never receives remote
 commands; its instance stays visible so an operator can diagnose why it is not
 actionable. The `state: "incompatible"` presence contract is proven by the
 `incompatible-notification-only` integration suite.

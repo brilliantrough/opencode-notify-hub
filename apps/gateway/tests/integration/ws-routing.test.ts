@@ -678,10 +678,32 @@ describe("WebSocket routing", () => {
       });
     });
 
-    it.each([
-      ["1.18.17", 2],
-      ["1.18.18", 1],
-    ])(
+    it("accepts an OpenCode patch release when the control protocol is supported", async () => {
+      const alice = await createUser("compatible-patch@example.com");
+      const credential = await createIngestCredential(alice.token);
+      const plugin = await connectPlugin(credential);
+      const instanceId = randomUUID();
+      const registered = nextMessage(plugin);
+      plugin.send(
+        JSON.stringify({
+          type: "register",
+          instanceId,
+          machine: "devbox",
+          project: "notify",
+          directory: "/work/compatible-patch",
+          openCodeVersion: "1.18.19",
+          protocolVersion: 2,
+        }),
+      );
+
+      expect(await registered).toEqual({
+        type: "registration",
+        instanceId,
+        state: "controllable",
+      });
+    });
+
+    it.each([["1.18.19", 1]])(
       "reports OpenCode %s / protocol %i as incompatible without breaking notification ingest",
       async (openCodeVersion, protocolVersion) => {
         const alice = await createUser(`incompatible-${protocolVersion}@example.com`);

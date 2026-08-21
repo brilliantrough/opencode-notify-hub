@@ -70,7 +70,6 @@ export const COMMAND_OUTCOME_TTL_MS = 10 * 60 * 1000;
 export const MAX_COMMAND_OUTCOMES = 1024;
 
 const READY_OPEN = 1;
-const SUPPORTED_OPENCODE_VERSION = "1.18.18";
 const SUPPORTED_PROTOCOL_VERSION = 2;
 
 /** The `register` member of the extended Plugin control client protocol. */
@@ -1073,9 +1072,10 @@ export class InstanceRegistry {
     }
 
     connection.instanceId = registration.instanceId;
-    const compatible =
-      registration.openCodeVersion === SUPPORTED_OPENCODE_VERSION &&
-      registration.protocolVersion === SUPPORTED_PROTOCOL_VERSION;
+    // The Plugin adapts OpenCode's host API to this protocol. Keep the host
+    // version diagnostic-only so an OpenCode patch release does not require a
+    // Gateway deployment; fail closed only when the Plugin protocol changes.
+    const compatible = registration.protocolVersion === SUPPORTED_PROTOCOL_VERSION;
     const ownershipKey = this.ownershipKey(connection.auth.userId, registration);
     this.pruneOfflineOwnership(
       connection.auth.userId,
