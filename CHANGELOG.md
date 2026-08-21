@@ -17,7 +17,8 @@ All notable changes will be documented in this file. The project intends to use
   notifications survive backgrounding without vendor push services, an
   in-app WebUI browser keeping the loopback tunnel alive, and a
   battery-optimization whitelist guidance tile.
-- First signed Android APK release asset (release keystore, arm64).
+- First release-signed Android APK asset (universal APK covering
+  arm64-v8a, armeabi-v7a, and x86_64).
 - "Forgot password" email-code reset across clients.
 
 ### Changed
