@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:client/devices/devices_controller.dart';
+import 'package:client/keepalive/keep_alive.dart';
 import 'package:client/notifications/alert_sound.dart';
 import 'package:client/notifications/custom_sound_store.dart';
 import 'package:client/settings/settings_controller.dart';
@@ -13,10 +14,39 @@ class MockStartupToggle extends Mock implements StartupToggle {}
 
 class MockCustomSoundStore extends Mock implements CustomSoundStore {}
 
+class FakeKeepAlive extends KeepAliveBridge {
+  // All channel-touching methods are overridden; the real channel is never
+  // reached.
+  var startCalls = 0;
+  var stopCalls = 0;
+  var rejectNext = false;
+
+  @override
+  Future<bool> start() async {
+    if (rejectNext) {
+      rejectNext = false;
+      return false;
+    }
+    startCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> stop() async {
+    if (rejectNext) {
+      rejectNext = false;
+      return false;
+    }
+    stopCalls++;
+    return true;
+  }
+}
+
 Future<ProviderContainer> _createContainer({
   Map<String, Object> initialValues = const {},
   StartupToggle? startupToggle,
   CustomSoundStore? customSoundStore,
+  KeepAliveBridge? keepAlive,
   bool resetStore = true,
 }) async {
   // Only reset the mock store when simulating a fresh device; a "restart"
@@ -36,6 +66,7 @@ Future<ProviderContainer> _createContainer({
     overrides: [
       sharedPreferencesProvider.overrideWithValue(Future.value(prefs)),
       startupToggleProvider.overrideWithValue(toggle),
+      if (keepAlive != null) keepAliveProvider.overrideWithValue(keepAlive),
       if (customSoundStore != null)
         customSoundStoreProvider.overrideWithValue(customSoundStore),
     ],
@@ -62,6 +93,7 @@ void main() {
       expect(state.paused, isFalse);
       expect(state.launchAtStartup, isFalse);
       expect(state.textScale, 1);
+      expect(state.keepAliveEnabled, isTrue);
     });
 
     test('loads persisted values', () async {
@@ -72,6 +104,7 @@ void main() {
           SettingsController.pausedKey: true,
           SettingsController.launchAtStartupKey: true,
           SettingsController.textScaleKey: 1.25,
+          SettingsController.keepAliveEnabledKey: false,
         },
       );
 
@@ -82,6 +115,7 @@ void main() {
       expect(state.paused, isTrue);
       expect(state.launchAtStartup, isTrue);
       expect(state.textScale, 1.25);
+      expect(state.keepAliveEnabled, isFalse);
     });
 
     test(
@@ -277,6 +311,57 @@ void main() {
 
       final second = await _createContainer(resetStore: false);
       expect(second.read(settingsControllerProvider).launchAtStartup, isTrue);
+    });
+
+    group('setKeepAliveEnabled', () {
+      test('stops the service, persists, and restores it back', () async {
+        final keepAlive = FakeKeepAlive();
+        final first = await _createContainer(keepAlive: keepAlive);
+
+        await first
+            .read(settingsControllerProvider.notifier)
+            .setKeepAliveEnabled(false);
+        expect(
+          first.read(settingsControllerProvider).keepAliveEnabled,
+          isFalse,
+        );
+        expect(keepAlive.stopCalls, 1);
+
+        await first
+            .read(settingsControllerProvider.notifier)
+            .setKeepAliveEnabled(true);
+        expect(
+          first.read(settingsControllerProvider).keepAliveEnabled,
+          isTrue,
+        );
+        expect(keepAlive.startCalls, 1);
+
+        final second = await _createContainer(resetStore: false);
+        expect(
+          second.read(settingsControllerProvider).keepAliveEnabled,
+          isTrue,
+        );
+      });
+
+      test('reverts state and storage when the platform rejects the change',
+          () async {
+        final keepAlive = FakeKeepAlive()..rejectNext = true;
+        final container = await _createContainer(keepAlive: keepAlive);
+
+        await container
+            .read(settingsControllerProvider.notifier)
+            .setKeepAliveEnabled(false);
+
+        expect(
+          container.read(settingsControllerProvider).keepAliveEnabled,
+          isTrue,
+        );
+        final second = await _createContainer(resetStore: false);
+        expect(
+          second.read(settingsControllerProvider).keepAliveEnabled,
+          isTrue,
+        );
+      });
     });
 
     test(

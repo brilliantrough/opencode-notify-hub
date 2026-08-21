@@ -85,6 +85,37 @@ void main() {
         }
       },
     );
+
+    test(
+      'Android keep-alive: paused/hidden keep the socket while the foreground '
+      'service runs; detached still disconnects',
+      () {
+        expect(
+          realtimeForegroundFor(
+            AppLifecycleState.paused,
+            isDesktop: false,
+            keepAlive: true,
+          ),
+          isTrue,
+        );
+        expect(
+          realtimeForegroundFor(
+            AppLifecycleState.hidden,
+            isDesktop: false,
+            keepAlive: true,
+          ),
+          isTrue,
+        );
+        expect(
+          realtimeForegroundFor(
+            AppLifecycleState.detached,
+            isDesktop: false,
+            keepAlive: true,
+          ),
+          isFalse,
+        );
+      },
+    );
   });
 
   group('FCM auth gating', () {

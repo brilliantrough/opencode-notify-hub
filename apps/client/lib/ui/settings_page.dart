@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_controller.dart';
 import '../config/server_config.dart';
 import '../devices/device_identity.dart';
+import '../keepalive/keep_alive.dart';
 import '../notifications/alert_sound.dart';
 import '../notifications/custom_sound_store.dart';
 import '../notifications/sound_player.dart';
@@ -23,6 +24,21 @@ bool _isDesktopPlatform() {
     final platform = currentPlatform();
     return platform == ClientPlatform.linux ||
         platform == ClientPlatform.windows;
+  } on UnsupportedError {
+    return false;
+  }
+}
+
+/// Whether the current platform supports the Android keep-alive controls
+/// (foreground service + battery optimization exemption). Overridable in
+/// tests.
+final androidSettingsSupportedProvider = Provider<bool>(
+  (ref) => _isAndroidPlatform(),
+);
+
+bool _isAndroidPlatform() {
+  try {
+    return currentPlatform() == ClientPlatform.android;
   } on UnsupportedError {
     return false;
   }
@@ -52,6 +68,12 @@ class SettingsPage extends ConsumerWidget {
 
   /// Key of the launch-at-startup switch.
   static const Key autostartSwitchKey = ValueKey('settings-autostart-switch');
+
+  /// Key of the Android keep-alive switch.
+  static const Key keepAliveSwitchKey = ValueKey('settings-keep-alive-switch');
+
+  /// Key of the battery-optimization whitelist entry.
+  static const Key batteryWhitelistKey = ValueKey('settings-battery-whitelist');
 
   static const Key textScaleSliderKey = ValueKey('settings-text-scale-slider');
   static const Key textScaleDecreaseKey = ValueKey(
@@ -255,6 +277,18 @@ class SettingsPage extends ConsumerWidget {
             value: settings.paused,
             onChanged: controller.setPaused,
           ),
+          if (ref.watch(androidSettingsSupportedProvider)) ...[
+            SwitchListTile(
+              key: keepAliveSwitchKey,
+              title: const Text('后台保持运行'),
+              subtitle: const Text(
+                '通过前台服务在后台维持连接，锁屏也能收到通知（会常驻一条静默通知）',
+              ),
+              value: settings.keepAliveEnabled,
+              onChanged: controller.setKeepAliveEnabled,
+            ),
+            const _BatteryWhitelistTile(),
+          ],
           // OS autostart only exists on desktop platforms.
           if (desktopSettingsSupported)
             SwitchListTile(
@@ -338,6 +372,57 @@ class SettingsPage extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Android-only entry that reports and requests the battery-optimization
+/// exemption, which makes the keep-alive service reliable on aggressive
+/// ROMs (ColorOS/MIUI).
+class _BatteryWhitelistTile extends ConsumerStatefulWidget {
+  const _BatteryWhitelistTile();
+
+  @override
+  ConsumerState<_BatteryWhitelistTile> createState() =>
+      _BatteryWhitelistTileState();
+}
+
+class _BatteryWhitelistTileState extends ConsumerState<_BatteryWhitelistTile> {
+  bool? _ignoring;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    final ignoring =
+        await ref.read(keepAliveProvider).isIgnoringBatteryOptimizations();
+    if (mounted) {
+      setState(() => _ignoring = ignoring);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = switch (_ignoring) {
+      null => '正在检查电池优化状态…',
+      true => '已忽略电池优化，后台连接更稳定',
+      false => '未忽略电池优化，后台可能被系统冻结，点按申请',
+    };
+    return ListTile(
+      key: SettingsPage.batteryWhitelistKey,
+      leading: const Icon(Icons.battery_saver_outlined),
+      title: const Text('电池优化白名单'),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () async {
+        await ref.read(keepAliveProvider).requestIgnoreBatteryOptimizations();
+        // Give the system dialog a moment before re-reading the state.
+        await Future<void>.delayed(const Duration(seconds: 2));
+        await _refresh();
+      },
     );
   }
 }

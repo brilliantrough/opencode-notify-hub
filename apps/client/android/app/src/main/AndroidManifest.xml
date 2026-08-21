@@ -2,11 +2,26 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Runtime notification permission, required on Android 13+ (API 33). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Keep-alive foreground service (background WebSocket notifications). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <application
         android:label="OpenCode Notify"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:networkSecurityConfig="@xml/network_security_config">
+        <!-- Keeps the process alive so the realtime socket survives
+             backgrounding on devices without a reachable push service.
+             specialUse avoids the Android 15 dataSync 6-hour timeout. -->
+        <service
+            android:name=".KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the notification WebSocket alive while the app is backgrounded so self-hosted alerts arrive without vendor push services."/>
+        </service>
         <!-- FCM delivery. -->
         <service
             android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingService"

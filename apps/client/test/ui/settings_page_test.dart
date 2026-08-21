@@ -2,6 +2,7 @@ import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
 import 'package:client/config/server_config.dart';
 import 'package:client/devices/devices_controller.dart';
+import 'package:client/keepalive/keep_alive.dart';
 import 'package:client/notifications/alert_sound.dart';
 import 'package:client/notifications/custom_sound_store.dart';
 import 'package:client/notifications/sound_player.dart';
@@ -22,6 +23,29 @@ class MockCustomSoundStore extends Mock implements CustomSoundStore {}
 
 class MockSoundPlayer extends Mock implements SoundPlayer {}
 
+class FakeKeepAlive extends KeepAliveBridge {
+  var startCalls = 0;
+  var stopCalls = 0;
+
+  @override
+  Future<bool> start() async {
+    startCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> stop() async {
+    stopCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> isIgnoringBatteryOptimizations() async => true;
+
+  @override
+  Future<bool> requestIgnoreBatteryOptimizations() async => true;
+}
+
 Future<ProviderContainer> _pumpSettingsPage(
   WidgetTester tester, {
   Map<String, Object> initialValues = const {},
@@ -29,6 +53,8 @@ Future<ProviderContainer> _pumpSettingsPage(
   CustomSoundStore? customSoundStore,
   SoundPlayer? soundPlayer,
   bool? autostartSupported,
+  bool? androidSupported,
+  KeepAliveBridge? keepAlive,
   FakeAuthController? authController,
   ServerConfigStore? serverConfigStore,
 }) async {
@@ -69,6 +95,10 @@ Future<ProviderContainer> _pumpSettingsPage(
         serverConfigStoreProvider.overrideWithValue(serverConfigStore),
       if (autostartSupported != null)
         desktopSettingsSupportedProvider.overrideWithValue(autostartSupported),
+      if (androidSupported != null)
+        androidSettingsSupportedProvider.overrideWithValue(androidSupported),
+      if (keepAlive != null)
+        keepAliveProvider.overrideWithValue(keepAlive),
     ],
   );
   addTearDown(container.dispose);
@@ -107,6 +137,41 @@ void main() {
     expect(sound.value, isTrue);
     expect(pause.value, isFalse);
     expect(autostart.value, isFalse);
+  });
+
+  testWidgets('shows Android keep-alive controls only on Android', (
+    tester,
+  ) async {
+    await _pumpSettingsPage(tester, androidSupported: true);
+
+    expect(find.byKey(SettingsPage.keepAliveSwitchKey), findsOneWidget);
+    expect(find.byKey(SettingsPage.batteryWhitelistKey), findsOneWidget);
+    final Switch keepAlive = tester.widget(
+      _switchOf(SettingsPage.keepAliveSwitchKey),
+    );
+    expect(keepAlive.value, isTrue);
+
+    await _pumpSettingsPage(tester, androidSupported: false);
+    expect(find.byKey(SettingsPage.keepAliveSwitchKey), findsNothing);
+    expect(find.byKey(SettingsPage.batteryWhitelistKey), findsNothing);
+  });
+
+  testWidgets('toggling keep-alive off stops the service', (tester) async {
+    final keepAlive = FakeKeepAlive();
+    final container = await _pumpSettingsPage(
+      tester,
+      androidSupported: true,
+      keepAlive: keepAlive,
+    );
+
+    await tester.tap(find.byKey(SettingsPage.keepAliveSwitchKey));
+    await tester.pumpAndSettle();
+
+    expect(
+      container.read(settingsControllerProvider).keepAliveEnabled,
+      isFalse,
+    );
+    expect(keepAlive.stopCalls, 1);
   });
 
   testWidgets('confirmed logout clears the current session', (tester) async {

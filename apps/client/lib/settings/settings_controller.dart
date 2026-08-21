@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../keepalive/keep_alive.dart';
+
 import '../devices/devices_controller.dart' show sharedPreferencesProvider;
 import '../notifications/alert_sound.dart';
 import '../notifications/custom_sound_store.dart';
@@ -88,6 +90,7 @@ class SettingsState {
     this.paused = false,
     this.launchAtStartup = false,
     this.textScale = 1,
+    this.keepAliveEnabled = true,
   });
 
   final bool soundEnabled;
@@ -96,6 +99,11 @@ class SettingsState {
   final bool paused;
   final bool launchAtStartup;
   final double textScale;
+
+  /// Android: keep the process alive with a foreground service so the
+  /// realtime socket survives backgrounding. Defaults to enabled — the
+  /// maintainer's devices have no reachable push service.
+  final bool keepAliveEnabled;
 
   AlertSound get alertSound => resolveAlertSound(alertSoundId, customSound);
 
@@ -106,6 +114,7 @@ class SettingsState {
     bool? paused,
     bool? launchAtStartup,
     double? textScale,
+    bool? keepAliveEnabled,
   }) => SettingsState(
     soundEnabled: soundEnabled ?? this.soundEnabled,
     alertSoundId: alertSoundId ?? this.alertSoundId,
@@ -113,6 +122,7 @@ class SettingsState {
     paused: paused ?? this.paused,
     launchAtStartup: launchAtStartup ?? this.launchAtStartup,
     textScale: textScale ?? this.textScale,
+    keepAliveEnabled: keepAliveEnabled ?? this.keepAliveEnabled,
   );
 
   @override
@@ -123,7 +133,8 @@ class SettingsState {
       other.customSound == customSound &&
       other.paused == paused &&
       other.launchAtStartup == launchAtStartup &&
-      other.textScale == textScale;
+      other.textScale == textScale &&
+      other.keepAliveEnabled == keepAliveEnabled;
 
   @override
   int get hashCode => Object.hash(
@@ -133,13 +144,15 @@ class SettingsState {
     paused,
     launchAtStartup,
     textScale,
+    keepAliveEnabled,
   );
 
   @override
   String toString() =>
       'SettingsState(soundEnabled: $soundEnabled, '
       'alertSoundId: $alertSoundId, paused: $paused, '
-      'launchAtStartup: $launchAtStartup, textScale: $textScale)';
+      'launchAtStartup: $launchAtStartup, keepAliveEnabled: '
+      '$keepAliveEnabled, textScale: $textScale)';
 }
 
 /// Riverpod controller for [SettingsState], persisted to
@@ -165,6 +178,9 @@ class SettingsController extends Notifier<SettingsState> {
 
   /// Shared-preferences key for [SettingsState.textScale].
   static const String textScaleKey = 'settings_text_scale_v1';
+
+  /// Shared-preferences key for [SettingsState.keepAliveEnabled].
+  static const String keepAliveEnabledKey = 'settings_keep_alive_enabled_v1';
 
   static const double minTextScale = 0.75;
   static const double maxTextScale = 1.5;
@@ -234,6 +250,7 @@ class SettingsController extends Notifier<SettingsState> {
         paused: prefs.getBool(pausedKey) ?? false,
         launchAtStartup: launchAtStartupEnabled,
         textScale: normalizeTextScale(prefs.getDouble(textScaleKey) ?? 1),
+        keepAliveEnabled: prefs.getBool(keepAliveEnabledKey) ?? true,
       );
     } finally {
       if (!_hydrated.isCompleted) {
@@ -314,6 +331,27 @@ class SettingsController extends Notifier<SettingsState> {
   static double normalizeTextScale(double value) {
     final clamped = value.clamp(minTextScale, maxTextScale);
     return (clamped * 100).round() / 100;
+  }
+
+  /// Enables or disables the Android keep-alive foreground service and
+  /// persists the choice.
+  ///
+  /// The OS service is applied through [keepAliveProvider]. When the platform
+  /// rejects the transition, both [state] and the persisted value revert so
+  /// they stay consistent with what is actually running.
+  Future<void> setKeepAliveEnabled(bool enabled) async {
+    await _hydrated.future;
+    final previous = state.keepAliveEnabled;
+    state = state.copyWith(keepAliveEnabled: enabled);
+    final prefs = await _prefs;
+    await prefs.setBool(keepAliveEnabledKey, enabled);
+    final applied = enabled
+        ? await ref.read(keepAliveProvider).start()
+        : await ref.read(keepAliveProvider).stop();
+    if (!applied) {
+      state = state.copyWith(keepAliveEnabled: previous);
+      await prefs.setBool(keepAliveEnabledKey, previous);
+    }
   }
 
   /// Enables or disables OS autostart and persists the choice.

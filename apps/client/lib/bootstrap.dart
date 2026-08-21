@@ -16,6 +16,7 @@ import 'devices/device_identity.dart';
 import 'devices/devices_controller.dart';
 import 'fcm/fcm_service.dart';
 import 'firebase_options.dart';
+import 'keepalive/keep_alive.dart';
 import 'notifications/android_notification_service.dart';
 import 'notifications/desktop_notification_service.dart';
 import 'notifications/notification_intent.dart';
@@ -120,6 +121,13 @@ class AppBootstrap {
           overrides.add(fcmAvailableProvider.overrideWithValue(true));
         }
         service = notificationService ?? AndroidNotificationService();
+        // Restore the keep-alive foreground service for devices without a
+        // reachable push channel; the persisted default is enabled.
+        final keepAliveEnabled =
+            preferences.getBool(SettingsController.keepAliveEnabledKey) ?? true;
+        if (keepAliveEnabled) {
+          unawaited(KeepAliveBridge.instance.start());
+        }
     }
     await service.init();
     overrides.add(notificationServiceProvider.overrideWithValue(service));
@@ -178,6 +186,8 @@ class AppBootstrap {
             .read(appForegroundProvider.notifier)
             .setForeground(foreground);
       },
+      keepRealtimeAlive: () =>
+          container.read(settingsControllerProvider).keepAliveEnabled,
       onExitRequested: _isDesktop
           ? () async {
               await windowManager.hide();
@@ -367,18 +377,22 @@ class AppBootstrap {
 /// process runs. GTK reports `detached` when a window is hidden to the tray,
 /// so treating it as offline would silently disable desktop notifications;
 /// actual process exit is handled by [AppBootstrap.shutdown]. On Android,
-/// `paused`/`hidden`/`detached` disconnect the socket and FCM takes over.
+/// `paused`/`hidden`/`detached` disconnect the socket and FCM takes over —
+/// unless [keepAlive] reports the keep-alive foreground service is running,
+/// in which case the process stays unfrozen and `paused`/`hidden` keep the
+/// socket connected (FCM-less delivery). `detached` destroys the engine, so
+/// it is always offline.
 @visibleForTesting
 bool realtimeForegroundFor(
   AppLifecycleState state, {
   required bool isDesktop,
+  bool keepAlive = false,
 }) =>
     isDesktop ||
     switch (state) {
       AppLifecycleState.resumed || AppLifecycleState.inactive => true,
-      AppLifecycleState.paused ||
-      AppLifecycleState.hidden ||
       AppLifecycleState.detached => false,
+      AppLifecycleState.paused || AppLifecycleState.hidden => keepAlive,
     };
 
 /// Maps `WidgetsBinding` lifecycle transitions onto the realtime foreground
@@ -388,17 +402,26 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
     required bool isDesktop,
     required void Function(bool foreground) onForegroundChanged,
     required Future<AppExitResponse> Function() onExitRequested,
+    bool Function()? keepRealtimeAlive,
   }) : _isDesktop = isDesktop,
        _onForegroundChanged = onForegroundChanged,
-       _onExitRequested = onExitRequested;
+       _onExitRequested = onExitRequested,
+       _keepRealtimeAlive = keepRealtimeAlive;
 
   final bool _isDesktop;
   final void Function(bool foreground) _onForegroundChanged;
   final Future<AppExitResponse> Function() _onExitRequested;
+  final bool Function()? _keepRealtimeAlive;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _onForegroundChanged(realtimeForegroundFor(state, isDesktop: _isDesktop));
+    _onForegroundChanged(
+      realtimeForegroundFor(
+        state,
+        isDesktop: _isDesktop,
+        keepAlive: _keepRealtimeAlive?.call() ?? false,
+      ),
+    );
   }
 
   @override

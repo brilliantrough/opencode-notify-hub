@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="keep_alive_channel_name">后台运行</string>
+    <string name="keep_alive_title">OpenCode Notify 正在后台运行</string>
+    <string name="keep_alive_text">保持连接以接收通知，点按返回应用</string>
+</resources>
