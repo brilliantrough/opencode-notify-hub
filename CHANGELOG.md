@@ -5,10 +5,37 @@ All notable changes will be documented in this file. The project intends to use
 
 ## [Unreleased]
 
+## [0.2.0-beta.1] - 2026-08-21
+
+### Added
+
+- Gateway admin panel at `/admin`: operator login and password change, user
+  list and count, admin-created accounts (bypassing the whitelist and email
+  verification), user password reset with session revocation, and a
+  registration whitelist (email-domain suffixes plus exact addresses).
+- Android client with a specialUse keep-alive foreground service so realtime
+  notifications survive backgrounding without vendor push services, an
+  in-app WebUI browser keeping the loopback tunnel alive, and a
+  battery-optimization whitelist guidance tile.
+- First signed Android APK release asset (release keystore, arm64).
+- "Forgot password" email-code reset across clients.
+
+### Changed
+
+- Clients no longer prefill a default server address; the gateway origin must
+  be entered once and is then persisted (the server is private to each
+  deployment).
+- Registration is closed by default and only opens through the admin-managed
+  whitelist; rejected addresses get a localized contact-administrator message.
+
 ### Fixed
 
 - Treat the Plugin control protocol as the compatibility boundary so OpenCode
   patch releases such as 1.18.19 remain remotely controllable.
+- Android WebUI launches in an in-app WebView: an external browser froze the
+  app process and killed the loopback tunnel.
+- Settings state equality again includes the font scale so UI updates are not
+  silently dropped.
 
 ## [0.1.0-beta.2] - 2026-08-20
 
