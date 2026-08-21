@@ -52,7 +52,7 @@ dev_dependencies:
   build_runner: ^2.15.1
   drift_dev: ^2.34.0
   # 0.44.6 removed an API still used by the newest drift_dev resolvable here.
-  sqlparser: 0.44.5
+  sqlparser: 0.45.0
 
 flutter:
   uses-material-design: true
