@@ -18,6 +18,7 @@ export const ErrorCodes = {
   INTERNAL: "INTERNAL",
   // Semantic auth-domain codes on top of the HTTP status.
   EMAIL_TAKEN: "EMAIL_TAKEN",
+  EMAIL_NOT_ALLOWED: "EMAIL_NOT_ALLOWED",
   INVALID_CODE: "INVALID_CODE",
   SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
   // Authenticated session flows.

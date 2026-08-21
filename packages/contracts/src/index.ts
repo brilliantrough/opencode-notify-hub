@@ -10,6 +10,16 @@ import {
   tokenPairSchema,
   verifyEmailBodySchema,
 } from "./schemas/auth.js";
+import {
+  adminChangePasswordBodySchema,
+  adminCreateUserBodySchema,
+  adminLoginBodySchema,
+  adminResetPasswordBodySchema,
+  adminTokenSchema,
+  adminUserListSchema,
+  adminUserSchema,
+  adminWhitelistSchema,
+} from "./schemas/admin.js";
 import { errorResponseSchema, healthStatusSchema } from "./schemas/common.js";
 import {
   commandAcceptedSchema,
@@ -53,6 +63,19 @@ export const validateResetPasswordBody = ajv.compile(resetPasswordBodySchema);
 export const validateRefreshBody = ajv.compile(refreshBodySchema);
 export const validateTokenPair = ajv.compile(tokenPairSchema);
 
+export const validateAdminLoginBody = ajv.compile(adminLoginBodySchema);
+export const validateAdminChangePasswordBody = ajv.compile(
+  adminChangePasswordBodySchema,
+);
+export const validateAdminCreateUserBody = ajv.compile(adminCreateUserBodySchema);
+export const validateAdminResetPasswordBody = ajv.compile(
+  adminResetPasswordBodySchema,
+);
+export const validateAdminWhitelist = ajv.compile(adminWhitelistSchema);
+export const validateAdminToken = ajv.compile(adminTokenSchema);
+export const validateAdminUser = ajv.compile(adminUserSchema);
+export const validateAdminUserList = ajv.compile(adminUserListSchema);
+
 export const validateRegisterDeviceBody = ajv.compile(registerDeviceBodySchema);
 export const validatePatchDeviceBody = ajv.compile(patchDeviceBodySchema);
 export const validateDevice = ajv.compile(deviceSchema);
@@ -83,6 +106,7 @@ export const validateCommandOutcome = ajv.compile(commandOutcomeSchema);
 export const validateCommandAccepted = ajv.compile(commandAcceptedSchema);
 export const validateSendPromptBody = ajv.compile(sendPromptBodySchema);
 
+export * from "./schemas/admin.js";
 export * from "./schemas/auth.js";
 export * from "./schemas/common.js";
 export * from "./schemas/commands.js";

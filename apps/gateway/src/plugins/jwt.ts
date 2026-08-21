@@ -8,10 +8,28 @@ import type { Clock } from "../lib/clock.js";
 /** Access tokens live exactly 900 seconds (specification section 8.2). */
 export const ACCESS_TOKEN_TTL_SECONDS = 900;
 
+/**
+ * Admin panel sessions live longer than user access tokens (they are used
+ * interactively in a browser tab and carry no refresh flow).
+ */
+export const ADMIN_TOKEN_TTL_SECONDS = 12 * 60 * 60;
+
+/** Marker role of admin-panel tokens; user tokens carry no role claim. */
+export const ADMIN_TOKEN_ROLE = "admin";
+
 export interface AccessTokenPayload {
   sub: string;
   iat: number;
   exp: number;
+  /** Present only on admin-panel tokens. */
+  role?: string;
+}
+
+export interface SignTokenOptions {
+  /** Extra claim distinguishing token audiences (admin panel). */
+  role?: string;
+  /** Overrides the default 900s TTL (admin sessions use a longer one). */
+  ttlSeconds?: number;
 }
 
 /**
@@ -20,7 +38,7 @@ export interface AccessTokenPayload {
  * deterministically instead of waiting out real TTLs.
  */
 export interface AccessTokens {
-  sign(userId: string): string;
+  sign(userId: string, options?: SignTokenOptions): string;
   /** Returns the payload, or null for malformed, badly signed, or expired tokens. */
   verify(token: string): AccessTokenPayload | null;
 }
@@ -85,12 +103,14 @@ export function createAccessTokens(deps: {
     createHmac("sha256", key).update(input, "utf8").digest();
 
   return {
-    sign(userId) {
+    sign(userId, options = {}) {
       const iat = Math.floor(deps.clock.nowMs() / 1000);
+      const ttl = options.ttlSeconds ?? ACCESS_TOKEN_TTL_SECONDS;
       const payload = base64urlJson({
         sub: userId,
         iat,
-        exp: iat + ACCESS_TOKEN_TTL_SECONDS,
+        exp: iat + ttl,
+        ...(options.role !== undefined ? { role: options.role } : {}),
       } satisfies AccessTokenPayload);
       const signingInput = `${header}.${payload}`;
       return `${signingInput}.${hmac(signingInput).toString("base64url")}`;
@@ -159,7 +179,9 @@ export function registerJwtAuth(app: FastifyInstance, accessTokens: AccessTokens
         ? header.slice("Bearer ".length)
         : null;
     const payload = token === null ? null : accessTokens.verify(token);
-    if (payload === null) {
+    if (payload === null || payload.role !== undefined) {
+      // Admin-panel tokens are not user sessions: their subject is not a
+      // user id, so they must never satisfy the user guard.
       await reply
         .status(401)
         .send(errorBody(ErrorCodes.UNAUTHORIZED, "Missing or invalid access token"));

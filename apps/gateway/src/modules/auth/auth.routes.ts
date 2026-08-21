@@ -29,6 +29,10 @@ function sendAuthError(reply: FastifyReply, error: unknown): FastifyReply {
     switch (error.kind) {
       case "EMAIL_TAKEN":
         return reply.status(409).send(errorBody(ErrorCodes.EMAIL_TAKEN, error.message));
+      case "EMAIL_NOT_ALLOWED":
+        return reply
+          .status(403)
+          .send(errorBody(ErrorCodes.EMAIL_NOT_ALLOWED, error.message));
       case "INVALID_CODE":
         return reply.status(400).send(errorBody(ErrorCodes.INVALID_CODE, error.message));
       case "MAIL_UNAVAILABLE":

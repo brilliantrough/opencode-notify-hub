@@ -6,14 +6,16 @@ import { createDb } from "../../src/db/client.js";
 import { buildTestConfig } from "../helpers/build-test-app.js";
 import { TestPostgres } from "../helpers/postgres.js";
 
-/** The seven account tables of specification section 12, sorted. */
+/** The account tables of specification section 12 plus the admin tables, sorted. */
 const ACCOUNT_TABLES = [
+  "admin_users",
   "devices",
   "email_verification_tokens",
   "ingest_keys",
   "password_reset_tokens",
   "refresh_token_families",
   "refresh_tokens",
+  "registration_whitelist",
   "users",
 ] as const;
 
@@ -42,7 +44,7 @@ describe("explicit database migrations", () => {
     await pg.stop();
   });
 
-  it("creates exactly the seven account tables plus Drizzle's migration table", async () => {
+  it("creates exactly the account tables plus Drizzle's migration table", async () => {
     expect(await tableNames(pg, "public")).toEqual([...ACCOUNT_TABLES]);
     expect(await tableNames(pg, "drizzle")).toEqual(["__drizzle_migrations"]);
   });

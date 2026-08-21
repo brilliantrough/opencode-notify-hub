@@ -1,6 +1,8 @@
 import { buildServer } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db/client.js";
+import { DrizzleAdminRepository } from "./modules/admin/admin.repository.js";
+import { WhitelistRegistrationPolicy } from "./modules/admin/admin.service.js";
 import { resolvePort } from "./port.js";
 import { installGracefulShutdown } from "./shutdown.js";
 
@@ -10,7 +12,10 @@ const config = loadConfig();
 
 // The entrypoint owns the database handle; the app factory only borrows it.
 const db = createDb(config.databaseUrl);
-const app = await buildServer({ config, db: db.db });
+// Production registration gate: self-service sign-up requires the email to
+// match the admin-managed whitelist (suffix or exact address).
+const registrationPolicy = new WhitelistRegistrationPolicy(new DrizzleAdminRepository(db.db));
+const app = await buildServer({ config, db: db.db, registrationPolicy });
 
 // SIGINT/SIGTERM: stop accepts, close every realtime socket with 1012 and
 // drain (app.close runs the registry's preClose hook), then end the

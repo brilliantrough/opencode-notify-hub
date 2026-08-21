@@ -57,6 +57,8 @@ describe("loadConfig", () => {
       firebaseServiceAccountJson: validEnv.FIREBASE_SERVICE_ACCOUNT_JSON,
       allowedOrigins: ["https://app.example.com", "https://admin.example.com"],
       logLevel: "info",
+      adminUsername: "admin",
+      adminInitialPassword: "12345678",
     });
   });
 

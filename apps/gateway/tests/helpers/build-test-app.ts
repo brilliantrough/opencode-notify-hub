@@ -34,6 +34,10 @@ export const noopFcmSender: FcmSender = {
   async send(): Promise<void> {},
 };
 
+/** Test credentials of the seeded admin account (see buildTestConfig). */
+export const TEST_ADMIN_USERNAME = "admin";
+export const TEST_ADMIN_PASSWORD = "admin-test-password";
+
 export function buildTestConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   return {
     databaseUrl: "postgres://user:pass@localhost:5432/notify_test",
@@ -50,6 +54,8 @@ export function buildTestConfig(overrides: Partial<GatewayConfig> = {}): Gateway
     firebaseServiceAccountJson: JSON.stringify(TEST_FIREBASE_SERVICE_ACCOUNT),
     allowedOrigins: ["https://app.test"],
     logLevel: "silent",
+    adminUsername: "admin",
+    adminInitialPassword: "admin-test-password",
     ...overrides,
   };
 }

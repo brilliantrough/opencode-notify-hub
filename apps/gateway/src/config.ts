@@ -36,7 +36,19 @@ export interface GatewayConfig {
   firebaseServiceAccountJson: string;
   allowedOrigins: string[];
   logLevel: LogLevel;
+  /**
+   * Operator account seeded into `admin_users` at startup (ON CONFLICT DO
+   * NOTHING, so later panel password changes always win). Optional env
+   * ADMIN_USERNAME / ADMIN_INITIAL_PASSWORD with safe defaults.
+   */
+  adminUsername: string;
+  adminInitialPassword: string;
 }
+
+/** Default admin panel username when ADMIN_USERNAME is not set. */
+export const DEFAULT_ADMIN_USERNAME = "admin";
+/** Default admin panel password when ADMIN_INITIAL_PASSWORD is not set. */
+export const DEFAULT_ADMIN_INITIAL_PASSWORD = "12345678";
 
 export class ConfigError extends Error {
   readonly issues: string[];
@@ -224,6 +236,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     }
   }
 
+  const adminUsername = env.ADMIN_USERNAME?.trim() || DEFAULT_ADMIN_USERNAME;
+  if (adminUsername.length > 64) {
+    issues.push("ADMIN_USERNAME must be at most 64 characters");
+  }
+  const adminInitialPassword =
+    env.ADMIN_INITIAL_PASSWORD?.trim() || DEFAULT_ADMIN_INITIAL_PASSWORD;
+  if (adminInitialPassword.length < 8 || adminInitialPassword.length > 128) {
+    issues.push("ADMIN_INITIAL_PASSWORD must be between 8 and 128 characters");
+  }
+
   if (issues.length > 0) {
     throw new ConfigError(issues);
   }
@@ -243,5 +265,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     firebaseServiceAccountJson,
     allowedOrigins,
     logLevel,
+    adminUsername,
+    adminInitialPassword,
   };
 }

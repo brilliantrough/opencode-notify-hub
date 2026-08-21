@@ -145,3 +145,54 @@ export const ingestKeys = pgTable(
       .where(sql`${table.revokedAt} is null`),
   ],
 );
+
+/**
+ * Operator accounts of the admin panel. Single-user deployments seed one
+ * row from ADMIN_USERNAME/ADMIN_INITIAL_PASSWORD at startup; the password
+ * is changed through the panel and only its Argon2id hash is stored.
+ */
+export const adminUsers = pgTable(
+  "admin_users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    username: text("username").notNull().unique(),
+    // Argon2id hash; the raw password never reaches the database.
+    passwordHash: text("password_hash").notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "admin_users_username_normalized",
+      sql`${table.username} = lower(btrim(${table.username}))`,
+    ),
+  ],
+);
+
+/**
+ * Registration allowlist managed from the admin panel. `kind` is either
+ * `domain` (the address must end with `@<value>`, e.g. nju.edu.cn) or
+ * `email` (exact normalized match). The list gates only self-service
+ * registration; the admin can always add accounts directly.
+ */
+export const registrationWhitelist = pgTable(
+  "registration_whitelist",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(),
+    value: text("value").notNull().unique(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      "registration_whitelist_kind_check",
+      sql`${table.kind} in ('domain', 'email')`,
+    ),
+    check(
+      "registration_whitelist_value_normalized",
+      sql`${table.value} = lower(btrim(${table.value}))`,
+    ),
+  ],
+);

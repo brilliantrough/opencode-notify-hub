@@ -49,14 +49,16 @@ const SENTINELS = {
   eventQuestion: "SENTINEL-SWEEP-EVENT-QUESTION-5b6c7d8e",
 };
 
-/** The seven account tables of specification section 12: the exact public allowlist. */
+/** The account tables of specification section 12 plus the admin tables: the exact public allowlist. */
 const PUBLIC_TABLE_ALLOWLIST = [
+  "admin_users",
   "devices",
   "email_verification_tokens",
   "ingest_keys",
   "password_reset_tokens",
   "refresh_token_families",
   "refresh_tokens",
+  "registration_whitelist",
   "users",
 ];
 

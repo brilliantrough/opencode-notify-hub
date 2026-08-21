@@ -1,6 +1,16 @@
 import type { FromSchema } from "json-schema-to-ts";
 
 import type {
+  adminChangePasswordBodySchema,
+  adminCreateUserBodySchema,
+  adminLoginBodySchema,
+  adminResetPasswordBodySchema,
+  adminTokenSchema,
+  adminUserListSchema,
+  adminUserSchema,
+  adminWhitelistSchema,
+} from "./schemas/admin.js";
+import type {
   emailBodySchema,
   loginBodySchema,
   refreshBodySchema,
@@ -63,6 +73,15 @@ export type VerifyEmailBody = FromSchema<typeof verifyEmailBodySchema>;
 export type ResetPasswordBody = FromSchema<typeof resetPasswordBodySchema>;
 export type RefreshBody = FromSchema<typeof refreshBodySchema>;
 export type TokenPair = FromSchema<typeof tokenPairSchema>;
+
+export type AdminLoginBody = FromSchema<typeof adminLoginBodySchema>;
+export type AdminChangePasswordBody = FromSchema<typeof adminChangePasswordBodySchema>;
+export type AdminCreateUserBody = FromSchema<typeof adminCreateUserBodySchema>;
+export type AdminResetPasswordBody = FromSchema<typeof adminResetPasswordBodySchema>;
+export type AdminWhitelist = FromSchema<typeof adminWhitelistSchema>;
+export type AdminToken = FromSchema<typeof adminTokenSchema>;
+export type AdminUser = FromSchema<typeof adminUserSchema>;
+export type AdminUserList = FromSchema<typeof adminUserListSchema>;
 
 export type RegisterDeviceBody = FromSchema<typeof registerDeviceBodySchema>;
 export type PatchDeviceBody = FromSchema<typeof patchDeviceBodySchema>;

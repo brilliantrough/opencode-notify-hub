@@ -31,6 +31,7 @@ export interface TokenPair {
 
 export type AuthErrorKind =
   | "EMAIL_TAKEN"
+  | "EMAIL_NOT_ALLOWED"
   | "INVALID_CODE"
   | "MAIL_UNAVAILABLE"
   | "INVALID_CREDENTIALS"
@@ -66,11 +67,25 @@ export interface AuthServiceDeps {
   clock: Clock;
   accessTokens: AccessTokens;
   /**
+   * Optional self-service registration gate (the admin-managed whitelist).
+   * Absent in unit tests and DB-free embeddings; the entrypoint wires the
+   * production whitelist-backed policy. Admin-created accounts bypass it.
+   */
+  registrationPolicy?: RegistrationPolicy;
+  /**
    * Sanitized delivery-failure logging (pino-compatible warn subset).
    * Only the internal user id is logged — never the email address, the
    * one-time code, or the SMTP transport error.
    */
   logger?: AuthLogger;
+}
+
+/**
+ * Decides whether an email address may self-register. The production
+ * implementation reads the admin-managed whitelist table.
+ */
+export interface RegistrationPolicy {
+  isEmailAllowed(email: string): Promise<boolean>;
 }
 
 /** Pino-compatible warn-only logger subset. */
@@ -83,6 +98,7 @@ export class AuthService {
   private readonly mailer: Mailer;
   private readonly clock: Clock;
   private readonly accessTokens: AccessTokens;
+  private readonly registrationPolicy?: RegistrationPolicy;
   private readonly logger?: AuthLogger;
   /**
    * Argon2id hash verified against when the email is unknown, so a login
@@ -96,6 +112,9 @@ export class AuthService {
     this.mailer = deps.mailer;
     this.clock = deps.clock;
     this.accessTokens = deps.accessTokens;
+    if (deps.registrationPolicy !== undefined) {
+      this.registrationPolicy = deps.registrationPolicy;
+    }
     if (deps.logger !== undefined) {
       this.logger = deps.logger;
     }
@@ -108,6 +127,15 @@ export class AuthService {
    */
   async register(email: string, password: string): Promise<void> {
     const normalized = normalizeEmail(email);
+    if (
+      this.registrationPolicy !== undefined &&
+      !(await this.registrationPolicy.isEmailAllowed(normalized))
+    ) {
+      throw new AuthError(
+        "EMAIL_NOT_ALLOWED",
+        "Email is not allowed to register; contact the administrator",
+      );
+    }
     if ((await this.repository.findUserByEmail(normalized)) !== null) {
       throw new AuthError("EMAIL_TAKEN", "Email already registered");
     }

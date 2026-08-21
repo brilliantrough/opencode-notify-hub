@@ -10,7 +10,10 @@ import { systemClock, type Clock } from "./lib/clock.js";
 import { clientErrorCode, ErrorCodes, errorBody } from "./lib/errors.js";
 import { DrizzleAuthRepository } from "./modules/auth/auth.repository.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
-import { AuthService } from "./modules/auth/auth.service.js";
+import { AuthService, type RegistrationPolicy } from "./modules/auth/auth.service.js";
+import { DrizzleAdminRepository } from "./modules/admin/admin.repository.js";
+import { adminRoutes } from "./modules/admin/admin.routes.js";
+import { AdminService } from "./modules/admin/admin.service.js";
 import { DrizzleDeviceRepository } from "./modules/devices/devices.repository.js";
 import { deviceRoutes } from "./modules/devices/devices.routes.js";
 import { CompositeEventDispatcher } from "./modules/events/dispatcher.js";
@@ -70,6 +73,12 @@ export interface GatewayDeps {
   /** Realtime tuning; tests shrink the heartbeat interval. */
   realtime?: { pingIntervalMs?: number };
   /**
+   * Self-service registration gate; defaults to unrestricted at the app
+   * factory level. The production entrypoint wires the admin-managed
+   * whitelist policy (modules/admin); tests inject fakes or leave it open.
+   */
+  registrationPolicy?: RegistrationPolicy;
+  /**
    * Control-channel tuning; tests shrink the pending-snapshot timeout so
    * partial-snapshot behavior is exercised without real waits, the
    * answer-command timeout so result-unknown behavior is exercised without
@@ -100,6 +109,7 @@ const LOG_REDACT_PATHS = [
   // Request body credentials and tokens.
   "body.password",
   "body.newPassword",
+  "body.currentPassword",
   "body.refreshToken",
   "body.token",
   "body.secret",
@@ -134,6 +144,7 @@ const LOG_REDACT_PATHS = [
   ...[
     "password",
     "newPassword",
+    "currentPassword",
     "refreshToken",
     "token",
     "secret",
@@ -266,9 +277,21 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
       mailer: deps.mailer ?? new NodemailerMailer(config.smtp),
       clock,
       accessTokens,
+      ...(deps.registrationPolicy !== undefined
+        ? { registrationPolicy: deps.registrationPolicy }
+        : {}),
       logger: app.log,
     });
     await app.register(authRoutes(authService));
+    const adminRepository = new DrizzleAdminRepository(deps.db);
+    const adminService = new AdminService({
+      repository: adminRepository,
+      clock,
+      accessTokens,
+      seedUsername: config.adminUsername,
+      seedPassword: config.adminInitialPassword,
+    });
+    await app.register(adminRoutes(adminService, accessTokens));
     const deviceRepository = new DrizzleDeviceRepository(deps.db);
     await app.register(deviceRoutes(deviceRepository));
     const ingestKeyRepository = new DrizzleIngestKeyRepository(deps.db);
