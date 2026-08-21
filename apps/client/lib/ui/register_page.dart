@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/auth_controller.dart';
+import '../config/server_config.dart';
 import 'auth_messages.dart';
 
 /// Minimum accepted password length, matching the gateway's rule.
@@ -56,6 +57,10 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       _passwordsMatch;
 
   Future<void> _submit() async {
+    if (ref.read(serverConfigProvider).gatewayHttpBase.isEmpty) {
+      setState(() => _error = '请先在登录页设置服务器地址');
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;

@@ -19,6 +19,9 @@ void main() {
         container.read(serverConfigProvider).gatewayHttpBase,
         ServerConfig.defaultGatewayHttpBase,
       );
+      // The default is deliberately empty: the server address is private
+      // to each deployment and must be entered once by the user.
+      expect(ServerConfig.defaultGatewayHttpBase, '');
 
       await container
           .read(serverConfigProvider.notifier)

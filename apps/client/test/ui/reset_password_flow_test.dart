@@ -1,6 +1,7 @@
 import 'package:client/app.dart';
 import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
+import 'package:client/config/server_config.dart';
 import 'package:client/ui/forgot_password_page.dart';
 import 'package:client/ui/login_page.dart';
 import 'package:client/ui/reset_password_page.dart';
@@ -16,7 +17,12 @@ void main() {
   Future<void> pumpFlow(WidgetTester tester) async {
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [authControllerProvider.overrideWith(() => auth)],
+        overrides: [
+          authControllerProvider.overrideWith(() => auth),
+          serverConfigStoreProvider.overrideWithValue(
+            MemoryServerConfigStore('https://gateway.example.com'),
+          ),
+        ],
         child: const MaterialApp(home: AuthGate()),
       ),
     );

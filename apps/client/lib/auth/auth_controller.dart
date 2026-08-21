@@ -26,6 +26,14 @@ class AuthEmailTaken extends AuthFailure {
   const AuthEmailTaken([super.message = 'Email already registered']);
 }
 
+/// `403 EMAIL_NOT_ALLOWED` — the address is not on the registration
+/// whitelist; only the server administrator can open registration.
+class AuthEmailNotAllowed extends AuthFailure {
+  const AuthEmailNotAllowed([
+    super.message = 'Email is not allowed to register',
+  ]);
+}
+
 /// `401 INVALID_CREDENTIALS` — wrong email or password.
 class AuthInvalidCredentials extends AuthFailure {
   const AuthInvalidCredentials([super.message = 'Invalid email or password']);
@@ -390,6 +398,7 @@ class AuthController extends Notifier<AuthState> {
     final code = _errorCode(response.data);
     return switch (code) {
       'EMAIL_TAKEN' => const AuthEmailTaken(),
+      'EMAIL_NOT_ALLOWED' => const AuthEmailNotAllowed(),
       'INVALID_CREDENTIALS' => const AuthInvalidCredentials(),
       'EMAIL_UNVERIFIED' => const AuthUnverified(),
       'INVALID_CODE' => const AuthInvalidCode(),

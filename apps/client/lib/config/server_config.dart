@@ -6,7 +6,9 @@ import 'app_config.dart';
 class ServerConfig {
   const ServerConfig._(this.gatewayHttpBase);
 
-  static const defaultGatewayHttpBase = 'https://notify.pezayo.com';
+  /// No default server: the address is private to each deployment, so the
+  /// user must enter it once on the login page (persisted afterwards).
+  static const defaultGatewayHttpBase = '';
 
   final String gatewayHttpBase;
 
@@ -40,7 +42,7 @@ class ServerConfig {
   }
 
   static ServerConfig fromStored(String? value) {
-    if (value == null) {
+    if (value == null || value.trim().isEmpty) {
       return const ServerConfig._(defaultGatewayHttpBase);
     }
     try {

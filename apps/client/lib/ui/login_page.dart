@@ -55,6 +55,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       _passwordController.text.isNotEmpty;
 
   Future<void> _submit() async {
+    if (ref.read(serverConfigProvider).gatewayHttpBase.isEmpty) {
+      setState(() => _error = '请先点击上方"服务器"设置服务器地址');
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;
@@ -95,7 +99,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 leading: const Icon(Icons.dns_outlined),
                 title: const Text('服务器'),
                 subtitle: Text(
-                  server,
+                  server.isEmpty ? '未设置，点击配置' : server,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

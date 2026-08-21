@@ -1,6 +1,7 @@
 import 'package:client/app.dart';
 import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
+import 'package:client/config/server_config.dart';
 import 'package:client/ui/register_page.dart';
 import 'package:client/ui/verify_email_page.dart';
 import 'package:flutter/material.dart';
@@ -15,7 +16,12 @@ void main() {
   Future<void> pumpRegister(WidgetTester tester, {Widget? home}) async {
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [authControllerProvider.overrideWith(() => auth)],
+        overrides: [
+          authControllerProvider.overrideWith(() => auth),
+          serverConfigStoreProvider.overrideWithValue(
+            MemoryServerConfigStore('https://gateway.example.com'),
+          ),
+        ],
         child: MaterialApp(home: home ?? const RegisterPage()),
       ),
     );

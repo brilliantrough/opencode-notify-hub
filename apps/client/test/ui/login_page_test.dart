@@ -22,11 +22,15 @@ void main() {
     WidgetTester tester, {
     List<Override> extraOverrides = const [],
     Widget? home,
+    MemoryServerConfigStore? serverStore,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           authControllerProvider.overrideWith(() => auth),
+          serverConfigStoreProvider.overrideWithValue(
+            serverStore ?? MemoryServerConfigStore('https://gateway.example.com'),
+          ),
           ...extraOverrides,
         ],
         child: MaterialApp(home: home ?? const LoginPage()),
@@ -77,10 +81,7 @@ void main() {
     tester,
   ) async {
     final store = MemoryServerConfigStore('https://old.example.com');
-    await pumpLogin(
-      tester,
-      extraOverrides: [serverConfigStoreProvider.overrideWithValue(store)],
-    );
+    await pumpLogin(tester, serverStore: store);
 
     expect(find.text('https://old.example.com'), findsOneWidget);
     await tester.tap(find.byKey(LoginPage.serverKey));
@@ -94,6 +95,27 @@ void main() {
 
     expect(store.read(), 'https://new.example.com');
     expect(find.text('https://new.example.com'), findsOneWidget);
+  });
+
+  testWidgets('unset server blocks submit with a setup hint', (tester) async {
+    await pumpLogin(
+      tester,
+      serverStore: MemoryServerConfigStore(),
+      home: const AuthGate(),
+    );
+
+    expect(find.text('未设置，点击配置'), findsOneWidget);
+
+    await enterCredentials(
+      tester,
+      email: 'user@example.com',
+      password: 'secret1',
+    );
+    await tester.tap(find.byKey(LoginPage.submitKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('请先点击上方"服务器"设置服务器地址'), findsOneWidget);
+    expect(auth.logins, isEmpty);
   });
 
   testWidgets('tapping 登录 calls login with the entered credentials', (
