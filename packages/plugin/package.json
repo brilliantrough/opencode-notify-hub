@@ -21,13 +21,13 @@
   },
   "dependencies": {
     "@notify/contracts": "workspace:*",
-    "@opencode-ai/plugin": "^1.18.15",
-    "@opencode-ai/sdk": "^1.18.15"
+    "@opencode-ai/plugin": "^1.18.25",
+    "@opencode-ai/sdk": "^1.18.25"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.0",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   }
 }

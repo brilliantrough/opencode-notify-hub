@@ -23,11 +23,11 @@
     "ajv-formats": "^3.0.1"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.0",
     "json-schema-to-ts": "^3.1.1",
-    "tsx": "^4.23.11",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.10",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11",
     "yaml": "^2.9.0"
   }
 }
