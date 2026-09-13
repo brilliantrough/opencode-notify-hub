@@ -1,4 +1,8 @@
 import type { FromSchema } from "json-schema-to-ts";
+import type { sessionCatalogSchema, sessionCatalogQuerySchema } from "./schemas/sessions.js";
+
+export type SessionCatalog = FromSchema<typeof sessionCatalogSchema>;
+export type SessionCatalogQuery = FromSchema<typeof sessionCatalogQuerySchema>;
 
 import type {
   adminChangePasswordBodySchema,

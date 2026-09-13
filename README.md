@@ -39,7 +39,8 @@ data boundaries.
 - Android foreground WebSocket delivery and background FCM delivery.
 - Best-effort text prompts to online Sessions and temporary browser access to
   OpenCode's own WebUI through a client-held tunnel.
-- Per-user ingest keys with one-time secret display and revocation.
+- Per-user ingest keys with local secret recall, copyable server configuration,
+  and revocation.
 - HMAC-signed event ingestion, short-lived access tokens, and refresh rotation.
 - Self-hosted Docker gateway with PostgreSQL, SMTP, health checks, and backups.
 - Shared JSON Schema/OpenAPI contracts with a generated Dart API client.

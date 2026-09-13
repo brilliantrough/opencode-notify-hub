@@ -8,12 +8,20 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../auth/auth_controller.dart';
 import '../auth/auth_state.dart';
+import '../keepalive/keep_alive.dart';
+import '../settings/settings_controller.dart';
 import 'webui_tunnel.dart';
 
 typedef WebUiBrowserLauncher = Future<bool> Function(Uri uri);
 
 final webUiBrowserLauncherProvider = Provider<WebUiBrowserLauncher>(
-  (ref) => (uri) => launchUrl(uri, mode: webUiLaunchMode(Platform.isAndroid)),
+  (ref) => (uri) async {
+    if (Platform.isAndroid &&
+        ref.read(settingsControllerProvider).keepAliveEnabled) {
+      await ref.read(keepAliveProvider).start();
+    }
+    return launchUrl(uri, mode: webUiLaunchMode(Platform.isAndroid));
+  },
 );
 
 /// Android must keep the Notify process foregrounded while its loopback bridge
@@ -24,11 +32,19 @@ LaunchMode webUiLaunchMode(bool isAndroid) =>
 
 enum WebUiBrowserStatus { idle, opening, active }
 
+class WebUiConnection {
+  const WebUiConnection(this.instanceId, this.status, this.localUri);
+  final String instanceId;
+  final WebUiBrowserStatus status;
+  final Uri? localUri;
+}
+
 class WebUiBrowserState {
   const WebUiBrowserState._({
     required this.status,
     this.instanceId,
     this.localUri,
+    this.connections = const {},
   });
 
   const WebUiBrowserState.idle() : this._(status: WebUiBrowserStatus.idle);
@@ -46,9 +62,26 @@ class WebUiBrowserState {
   final WebUiBrowserStatus status;
   final String? instanceId;
   final Uri? localUri;
+  final Map<String, WebUiConnection> connections;
+
+  WebUiBrowserState.multiple(Map<String, WebUiConnection> connections)
+    : this._(
+        connections: connections,
+        status: connections.isEmpty
+            ? WebUiBrowserStatus.idle
+            : connections.values.any(
+                (c) => c.status == WebUiBrowserStatus.active,
+              )
+            ? WebUiBrowserStatus.active
+            : WebUiBrowserStatus.opening,
+      );
 
   bool activeFor(String candidate) =>
-      status == WebUiBrowserStatus.active && instanceId == candidate;
+      connections[candidate]?.status == WebUiBrowserStatus.active ||
+      (status == WebUiBrowserStatus.active && instanceId == candidate);
+  bool openingFor(String candidate) =>
+      connections[candidate]?.status == WebUiBrowserStatus.opening ||
+      (status == WebUiBrowserStatus.opening && instanceId == candidate);
 }
 
 final webUiBrowserControllerProvider =
@@ -56,21 +89,28 @@ final webUiBrowserControllerProvider =
       WebUiBrowserController.new,
     );
 
-/// Owns the one temporary browser tunnel for the current account.
+/// One long-lived local origin per opened instance, shared by all its sessions.
 class WebUiBrowserController extends Notifier<WebUiBrowserState> {
-  GatewayWebUiTunnel? _tunnel;
+  final Map<String, GatewayWebUiTunnel> _tunnels = {};
+  final Map<String, StreamSubscription<bool>> _subscriptions = {};
 
   @override
   WebUiBrowserState build() {
     ref.listen<AuthState>(authControllerProvider, (previous, next) {
-      if (previous is Authenticated && next is! Authenticated) {
+      if (previous is Authenticated &&
+          (next is! Authenticated || previous.email != next.email)) {
         unawaited(close());
       }
     });
     ref.onDispose(() {
-      final tunnel = _tunnel;
-      _tunnel = null;
-      if (tunnel != null) unawaited(tunnel.close());
+      for (final subscription in _subscriptions.values) {
+        unawaited(subscription.cancel());
+      }
+      for (final tunnel in _tunnels.values) {
+        unawaited(tunnel.close());
+      }
+      _subscriptions.clear();
+      _tunnels.clear();
     });
     return const WebUiBrowserState.idle();
   }
@@ -83,62 +123,103 @@ class WebUiBrowserController extends Notifier<WebUiBrowserState> {
     String? sessionId,
   }) async {
     final initialPath = _sessionPath(directory, sessionId);
-    final current = state;
-    if (current.activeFor(instanceId) &&
-        current.localUri != null &&
-        current.localUri!.path == initialPath) {
-      return await _launch(current.localUri!) ? null : '无法打开系统默认浏览器';
+    final current = state.connections[instanceId];
+    if (current?.localUri != null) {
+      final uri = current!.localUri!.resolve(initialPath);
+      if (!await _launch(uri)) return '无法打开浏览器';
+      if (ref.mounted && state.connections.containsKey(instanceId)) {
+        _update(instanceId, state.connections[instanceId]!.status, uri);
+      }
+      return null;
     }
-    if (current.status == WebUiBrowserStatus.opening) {
+    if (_tunnels.containsKey(instanceId)) {
       return 'OpenCode WebUI 正在打开';
     }
 
-    await close();
-    state = WebUiBrowserState.opening(instanceId);
-    final tunnel = ref.read(webUiTunnelFactoryProvider)(instanceId);
-    tunnel.initialPath = initialPath;
-    _tunnel = tunnel;
+    _update(instanceId, WebUiBrowserStatus.opening, null);
+    GatewayWebUiTunnel? tunnel;
     try {
-      final uri = await tunnel.start();
-      if (_tunnel != tunnel) return null;
-      unawaited(_observe(tunnel));
+      tunnel = ref.read(webUiTunnelFactoryProvider)(instanceId);
+      tunnel.initialPath = initialPath;
+      _tunnels[instanceId] = tunnel;
+      final uri = (await tunnel.start()).resolve(initialPath);
+      if (!ref.mounted || _tunnels[instanceId] != tunnel) {
+        return 'OpenCode WebUI 连接已关闭';
+      }
+      final started = tunnel;
+      _update(instanceId, WebUiBrowserStatus.active, uri);
+      _subscriptions[instanceId] = tunnel.connectionChanges.listen((connected) {
+        if (!ref.mounted || _tunnels[instanceId] != started) return;
+        _update(
+          instanceId,
+          connected ? WebUiBrowserStatus.active : WebUiBrowserStatus.opening,
+          state.connections[instanceId]?.localUri ?? uri,
+        );
+      });
+      unawaited(_observe(instanceId, tunnel));
       if (!await _launch(uri)) {
-        await close();
+        await close(instanceId);
         return '无法打开系统默认浏览器';
       }
-      if (_tunnel != tunnel) {
-        return 'OpenCode WebUI 临时连接已关闭';
+      if (!ref.mounted || _tunnels[instanceId] != tunnel) {
+        return 'OpenCode WebUI 连接已关闭';
       }
-      state = WebUiBrowserState.active(instanceId, uri);
       return null;
     } catch (_) {
-      if (_tunnel == tunnel) {
-        _tunnel = null;
-        state = const WebUiBrowserState.idle();
+      if (ref.mounted && (tunnel == null || _tunnels[instanceId] == tunnel)) {
+        await close(instanceId);
       }
-      await tunnel.close();
-      return '无法建立 OpenCode WebUI 临时连接';
+      await tunnel?.close();
+      return '无法建立 OpenCode WebUI 连接';
     }
   }
 
   String _sessionPath(String? directory, String? sessionId) {
-    if (directory == null ||
-        directory.isEmpty ||
-        sessionId == null ||
-        sessionId.isEmpty) {
+    if (directory == null || directory.isEmpty) {
       return '/';
     }
     final encodedDirectory = base64Url
         .encode(utf8.encode(directory))
         .replaceAll('=', '');
-    return '/$encodedDirectory/session/${Uri.encodeComponent(sessionId)}';
+    return '/$encodedDirectory/session${sessionId == null || sessionId.isEmpty ? '' : '/${Uri.encodeComponent(sessionId)}'}';
   }
 
-  Future<void> close() async {
-    final tunnel = _tunnel;
-    _tunnel = null;
-    state = const WebUiBrowserState.idle();
-    await tunnel?.close();
+  void _update(String id, WebUiBrowserStatus status, Uri? uri) {
+    state = WebUiBrowserState.multiple({
+      ...state.connections,
+      id: WebUiConnection(id, status, uri),
+    });
+  }
+
+  /// Returning from Android's browser retries disconnected transports; Windows
+  /// power-resume also replaces sockets that still look connected after sleep.
+  void resume({bool afterSleep = false}) {
+    for (final tunnel in _tunnels.values.toList()) {
+      tunnel.resume(afterSleep: afterSleep);
+    }
+  }
+
+  Future<String?> reopen(String instanceId) async {
+    final uri = state.connections[instanceId]?.localUri;
+    if (uri == null) return '连接尚未建立';
+    return await _launch(uri) ? null : '无法打开浏览器';
+  }
+
+  Future<void> close([String? instanceId]) async {
+    final ids = instanceId == null
+        ? state.connections.keys.toList()
+        : [instanceId];
+    final closing = <Future<void>>[];
+    final next = Map.of(state.connections);
+    for (final id in ids) {
+      next.remove(id);
+      final subscription = _subscriptions.remove(id);
+      if (subscription != null) closing.add(subscription.cancel());
+      final tunnel = _tunnels.remove(id);
+      if (tunnel != null) closing.add(tunnel.close());
+    }
+    state = WebUiBrowserState.multiple(next);
+    await Future.wait(closing);
   }
 
   Future<bool> _launch(Uri uri) async {
@@ -149,11 +230,8 @@ class WebUiBrowserController extends Notifier<WebUiBrowserState> {
     }
   }
 
-  Future<void> _observe(GatewayWebUiTunnel tunnel) async {
+  Future<void> _observe(String instanceId, GatewayWebUiTunnel tunnel) async {
     await tunnel.done;
-    if (_tunnel == tunnel) {
-      _tunnel = null;
-      state = const WebUiBrowserState.idle();
-    }
+    if (ref.mounted && _tunnels[instanceId] == tunnel) await close(instanceId);
   }
 }

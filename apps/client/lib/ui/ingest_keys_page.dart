@@ -1,18 +1,99 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:notify_api/notify_api.dart';
 
 import '../ingest_keys/ingest_keys_controller.dart';
+import 'key_setup_dialog.dart';
 
-/// Lists the authenticated user's ingest keys and manages their lifecycle:
-/// creation (with the one-time secret shown exactly once), refresh, and
-/// revocation.
-class IngestKeysPage extends ConsumerWidget {
+class IngestKeysPage extends ConsumerStatefulWidget {
   const IngestKeysPage({super.key});
+  @override
+  ConsumerState<IngestKeysPage> createState() => _IngestKeysPageState();
+}
+
+class _IngestKeysPageState extends ConsumerState<IngestKeysPage> {
+  bool _creating = false;
+  bool _refreshing = false;
+  final _revoking = <String>{};
+
+  void _message(String text) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
+
+  Future<void> _refresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      await ref.read(ingestKeysControllerProvider.notifier).list();
+    } catch (_) {
+      _message('刷新失败，请检查连接后重试');
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  Future<void> _revoke(IngestKey key) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('撤销「${key.name}」？'),
+        content: const Text('使用此密钥的 OpenCode 实例将停止接入，需要换用其他密钥。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('撤销密钥'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _revoking.add(key.id));
+    try {
+      await ref.read(ingestKeysControllerProvider.notifier).revoke(key.id);
+      _message('密钥已撤销');
+    } catch (_) {
+      _message('撤销失败，请重试');
+    } finally {
+      if (mounted) setState(() => _revoking.remove(key.id));
+    }
+  }
+
+  Future<void> _create() async {
+    if (_creating) return;
+    setState(() => _creating = true);
+    try {
+      final name = await showDialog<String>(
+        context: context,
+        builder: (_) => const _CreateKeyDialog(),
+      );
+      if (name == null || !mounted) return;
+      final created = await ref
+          .read(ingestKeysControllerProvider.notifier)
+          .create(name);
+      if (!mounted) return;
+      await showKeySetupDialog(
+        context,
+        IngestKey(
+          id: created.id,
+          name: created.name,
+          createdAt: created.createdAt,
+        ),
+        createdSecret: created.secret,
+      );
+    } catch (_) {
+      _message('未能完成密钥创建，请刷新列表查看结果');
+    } finally {
+      if (mounted) setState(() => _creating = false);
+    }
+  }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final keys = ref.watch(ingestKeysControllerProvider);
     return Scaffold(
       appBar: AppBar(
@@ -20,190 +101,127 @@ class IngestKeysPage extends ConsumerWidget {
         actions: [
           IconButton(
             key: const ValueKey('refresh-ingest-keys'),
-            icon: const Icon(Icons.refresh),
             tooltip: '刷新',
-            onPressed: () => _refresh(context, ref),
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshing ? null : _refresh,
           ),
         ],
       ),
       body: switch (keys) {
-        AsyncData(:final value) =>
-          value.isEmpty
-              ? const Center(child: Text('暂无密钥'))
-              : ListView(
-                  children: [
-                    for (final key in value)
-                      ListTile(
-                        key: ValueKey(key.id),
-                        title: Text(key.name),
-                        subtitle: Text(_subtitle(key)),
-                        trailing: IconButton(
-                          key: ValueKey('revoke-${key.id}'),
-                          icon: const Icon(Icons.delete_outline),
-                          tooltip: '撤销',
-                          onPressed: () => _revoke(context, ref, key),
-                        ),
-                      ),
-                  ],
+        AsyncData(:final value) => RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(bottom: 88),
+            children: [
+              if (_refreshing) const LinearProgressIndicator(),
+              if (value.isEmpty)
+                const ListTile(
+                  title: Text('暂无密钥'),
+                  subtitle: Text('新建一条密钥，即可复制服务器配置命令'),
                 ),
-        AsyncError(:final error) => Center(child: Text('加载失败: $error')),
+              for (final key in value)
+                ListTile(
+                  key: ValueKey(key.id),
+                  leading: const Icon(Icons.key_outlined),
+                  title: Text(key.name),
+                  subtitle: Text(
+                    '创建于 ${_date(key.createdAt)} · ${key.lastUsedAt == null ? "从未使用" : "最近使用 ${_date(key.lastUsedAt!)}"}\n点按查看密钥或导出配置',
+                  ),
+                  onTap: _revoking.contains(key.id)
+                      ? null
+                      : () => showKeySetupDialog(context, key),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        key: ValueKey('configure-${key.id}'),
+                        tooltip: '查看密钥 / 导出配置',
+                        icon: const Icon(Icons.terminal),
+                        onPressed: _revoking.contains(key.id)
+                            ? null
+                            : () => showKeySetupDialog(context, key),
+                      ),
+                      IconButton(
+                        key: ValueKey('revoke-${key.id}'),
+                        tooltip: '撤销',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: _revoking.contains(key.id)
+                            ? null
+                            : () => _revoke(key),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        AsyncError() => Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('无法加载密钥'),
+              TextButton.icon(
+                onPressed: _refresh,
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
+              ),
+            ],
+          ),
+        ),
         _ => const Center(child: CircularProgressIndicator()),
       },
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _createKey(context, ref),
+        onPressed: _creating ? null : _create,
         icon: const Icon(Icons.add),
-        label: const Text('新建密钥'),
+        label: Text(_creating ? '正在创建…' : '新建密钥'),
       ),
     );
   }
 
-  static String _subtitle(IngestKey key) {
-    final created = '创建于 ${key.createdAt.toLocal()}';
-    final lastUsed = key.lastUsedAt;
-    return lastUsed == null
-        ? '$created · 从未使用'
-        : '$created · 最近使用 ${lastUsed.toLocal()}';
-  }
-
-  Future<void> _refresh(BuildContext context, WidgetRef ref) async {
-    try {
-      await ref.read(ingestKeysControllerProvider.notifier).list();
-    } catch (error) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('刷新失败: $error')));
-      }
-    }
-  }
-
-  Future<void> _revoke(
-    BuildContext context,
-    WidgetRef ref,
-    IngestKey key,
-  ) async {
-    try {
-      await ref.read(ingestKeysControllerProvider.notifier).revoke(key.id);
-    } catch (error) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('撤销失败: $error')));
-      }
-    }
-  }
-
-  Future<void> _createKey(BuildContext context, WidgetRef ref) async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => const _CreateKeyDialog(),
-    );
-    if (name == null || name.isEmpty || !context.mounted) {
-      return;
-    }
-    final CreateIngestKeyResponse created;
-    try {
-      created = await ref
-          .read(ingestKeysControllerProvider.notifier)
-          .create(name);
-    } catch (error) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('创建失败: $error')));
-      }
-      return;
-    }
-    // The secret is shown exactly once, here in this dialog. It is not in
-    // the controller state and is discarded when the dialog closes.
-    if (context.mounted) {
-      await showDialog<void>(
-        context: context,
-        builder: (context) => _SecretDialog(secret: created.secret),
-      );
-    }
-  }
+  String _date(DateTime date) => date.toLocal().toString().substring(0, 16);
 }
 
 class _CreateKeyDialog extends StatefulWidget {
   const _CreateKeyDialog();
-
   @override
   State<_CreateKeyDialog> createState() => _CreateKeyDialogState();
 }
 
 class _CreateKeyDialogState extends State<_CreateKeyDialog> {
-  final _controller = TextEditingController();
-
+  final _name = TextEditingController();
   @override
   void dispose() {
-    _controller.dispose();
+    _name.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('新建密钥'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: const InputDecoration(labelText: '名称'),
-        onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
-          child: const Text('创建'),
-        ),
-      ],
-    );
+  void _submit() {
+    if (_name.text.trim().isNotEmpty && _name.text.trim().length <= 64) {
+      Navigator.pop(context, _name.text.trim());
+    }
   }
-}
-
-class _SecretDialog extends StatelessWidget {
-  const _SecretDialog({required this.secret});
-
-  final String secret;
 
   @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('密钥已创建'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('密钥仅显示一次，请立即复制保存。'),
-          const SizedBox(height: 12),
-          SelectableText(
-            secret,
-            style: const TextStyle(fontFamily: 'monospace'),
-          ),
-        ],
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('新建密钥'),
+    content: TextField(
+      controller: _name,
+      autofocus: true,
+      maxLength: 64,
+      decoration: const InputDecoration(labelText: '名称', hintText: '例如 阿里云开发机'),
+      onChanged: (_) => setState(() {}),
+      onSubmitted: (_) => _submit(),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
       ),
-      actions: [
-        TextButton.icon(
-          icon: const Icon(Icons.copy),
-          label: const Text('复制'),
-          onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: secret));
-            if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('已复制')));
-            }
-          },
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
-        ),
-      ],
-    );
-  }
+      FilledButton(
+        onPressed: _name.text.trim().isEmpty ? null : _submit,
+        child: const Text('创建'),
+      ),
+    ],
+  );
 }

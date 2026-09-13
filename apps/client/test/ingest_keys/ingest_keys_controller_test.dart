@@ -2,6 +2,8 @@ import 'package:built_collection/built_collection.dart';
 import 'package:client/auth/auth_controller.dart';
 import 'package:client/auth/auth_state.dart';
 import 'package:client/ingest_keys/ingest_keys_controller.dart';
+import 'package:client/ingest_keys/local_key_secrets.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,6 +23,7 @@ class SeededAuthController extends AuthController {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() {
     registerFallbackValue(CreateIngestKeyBody((b) => b.name = ''));
   });
@@ -87,6 +90,7 @@ void main() {
   }
 
   setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
     ingestKeysApi = MockIngestKeysApi();
     stubList(const []);
     container = ProviderContainer(
@@ -113,7 +117,12 @@ void main() {
       final result = await keys();
 
       expect(result, [
-        IngestKey(id: 'key-1', name: 'ci-runner', createdAt: t1, lastUsedAt: t2),
+        IngestKey(
+          id: 'key-1',
+          name: 'ci-runner',
+          createdAt: t1,
+          lastUsedAt: t2,
+        ),
         IngestKey(id: 'key-2', name: 'laptop', createdAt: t1),
       ]);
       verify(() => ingestKeysApi.listIngestKeys()).called(greaterThan(0));
@@ -132,63 +141,72 @@ void main() {
   });
 
   group('create', () {
-    test('returns the one-time secret and adds a secret-free row to state',
-        () async {
-      when(
-        () => ingestKeysApi.createIngestKey(
-          createIngestKeyBody: any(named: 'createIngestKeyBody'),
-        ),
-      ).thenAnswer(
-        (_) async => Response<CreateIngestKeyResponse>(
-          data: CreateIngestKeyResponse(
-            (b) => b
-              ..id = 'key-9'
-              ..name = 'new-key'
-              ..secret = 'nk-secret-abc'
-              ..createdAt = t2.toUtc(),
+    test(
+      'persists a local secret and adds a secret-free row to state',
+      () async {
+        when(
+          () => ingestKeysApi.createIngestKey(
+            createIngestKeyBody: any(named: 'createIngestKeyBody'),
           ),
-          statusCode: 201,
-          requestOptions: RequestOptions(path: '/v1/ingest-keys'),
-        ),
-      );
-      await keys();
+        ).thenAnswer(
+          (_) async => Response<CreateIngestKeyResponse>(
+            data: CreateIngestKeyResponse(
+              (b) => b
+                ..id = 'key-9'
+                ..name = 'new-key'
+                ..secret = 'nk-secret-abc'
+                ..createdAt = t2.toUtc(),
+            ),
+            statusCode: 201,
+            requestOptions: RequestOptions(path: '/v1/ingest-keys'),
+          ),
+        );
+        await keys();
 
-      final created = await controller().create('new-key');
+        final created = await controller().create('new-key');
 
-      // The one-time secret lives only in the method result.
-      expect(created.secret, 'nk-secret-abc');
-      expect(created.id, 'key-9');
-      final captured =
-          verify(
-                () => ingestKeysApi.createIngestKey(
-                  createIngestKeyBody: captureAny(named: 'createIngestKeyBody'),
-                ),
-              ).captured.single
-              as CreateIngestKeyBody;
-      expect(captured.name, 'new-key');
-      // The state row carries no secret (IngestKey has no secret field).
-      final current = await keys();
-      expect(current, [
-        IngestKey(id: 'key-9', name: 'new-key', createdAt: t2),
-      ]);
-    });
+        expect(
+          await container.read(localKeySecretsProvider).read(created.id),
+          'nk-secret-abc',
+        );
+        expect(created.secret, 'nk-secret-abc');
+        expect(created.id, 'key-9');
+        final captured =
+            verify(
+                  () => ingestKeysApi.createIngestKey(
+                    createIngestKeyBody: captureAny(
+                      named: 'createIngestKeyBody',
+                    ),
+                  ),
+                ).captured.single
+                as CreateIngestKeyBody;
+        expect(captured.name, 'new-key');
+        // The state row carries no secret (IngestKey has no secret field).
+        final current = await keys();
+        expect(current, [
+          IngestKey(id: 'key-9', name: 'new-key', createdAt: t2),
+        ]);
+      },
+    );
 
-    test('throws StateError when unauthenticated and never calls the gateway',
-        () async {
-      final unauthenticated = unauthenticatedContainer();
+    test(
+      'throws StateError when unauthenticated and never calls the gateway',
+      () async {
+        final unauthenticated = unauthenticatedContainer();
 
-      await expectLater(
-        unauthenticated
-            .read(ingestKeysControllerProvider.notifier)
-            .create('x'),
-        throwsStateError,
-      );
-      verifyNever(
-        () => ingestKeysApi.createIngestKey(
-          createIngestKeyBody: any(named: 'createIngestKeyBody'),
-        ),
-      );
-    });
+        await expectLater(
+          unauthenticated
+              .read(ingestKeysControllerProvider.notifier)
+              .create('x'),
+          throwsStateError,
+        );
+        verifyNever(
+          () => ingestKeysApi.createIngestKey(
+            createIngestKeyBody: any(named: 'createIngestKeyBody'),
+          ),
+        );
+      },
+    );
   });
 
   group('list', () {
@@ -203,16 +221,18 @@ void main() {
       expect((await keys()).map((k) => k.id), ['key-1', 'key-3']);
     });
 
-    test('throws StateError when unauthenticated and never calls the gateway',
-        () async {
-      final unauthenticated = unauthenticatedContainer();
+    test(
+      'throws StateError when unauthenticated and never calls the gateway',
+      () async {
+        final unauthenticated = unauthenticatedContainer();
 
-      await expectLater(
-        unauthenticated.read(ingestKeysControllerProvider.notifier).list(),
-        throwsStateError,
-      );
-      verifyNever(() => ingestKeysApi.listIngestKeys());
-    });
+        await expectLater(
+          unauthenticated.read(ingestKeysControllerProvider.notifier).list(),
+          throwsStateError,
+        );
+        verifyNever(() => ingestKeysApi.listIngestKeys());
+      },
+    );
   });
 
   group('revoke', () {
@@ -234,17 +254,19 @@ void main() {
       expect((await keys()).map((k) => k.id), ['key-2']);
     });
 
-    test('throws StateError when unauthenticated and never calls the gateway',
-        () async {
-      final unauthenticated = unauthenticatedContainer();
+    test(
+      'throws StateError when unauthenticated and never calls the gateway',
+      () async {
+        final unauthenticated = unauthenticatedContainer();
 
-      await expectLater(
-        unauthenticated
-            .read(ingestKeysControllerProvider.notifier)
-            .revoke('x'),
-        throwsStateError,
-      );
-      verifyNever(() => ingestKeysApi.revokeIngestKey(id: any(named: 'id')));
-    });
+        await expectLater(
+          unauthenticated
+              .read(ingestKeysControllerProvider.notifier)
+              .revoke('x'),
+          throwsStateError,
+        );
+        verifyNever(() => ingestKeysApi.revokeIngestKey(id: any(named: 'id')));
+      },
+    );
   });
 }

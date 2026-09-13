@@ -69,6 +69,9 @@ lib/src/model/plugin_control_client_message_one_of4.dart
 lib/src/model/plugin_control_client_message_one_of5.dart
 lib/src/model/plugin_control_client_message_one_of6.dart
 lib/src/model/plugin_control_client_message_one_of7.dart
+lib/src/model/plugin_control_client_message_one_of8.dart
+lib/src/model/plugin_control_client_message_one_of8_catalog.dart
+lib/src/model/plugin_control_client_message_one_of8_catalog_sessions_inner.dart
 lib/src/model/plugin_control_server_message.dart
 lib/src/model/plugin_control_server_message_one_of.dart
 lib/src/model/plugin_control_server_message_one_of1.dart
@@ -77,11 +80,15 @@ lib/src/model/plugin_control_server_message_one_of3.dart
 lib/src/model/plugin_control_server_message_one_of4.dart
 lib/src/model/plugin_control_server_message_one_of5.dart
 lib/src/model/plugin_control_server_message_one_of6.dart
+lib/src/model/plugin_control_server_message_one_of7.dart
+lib/src/model/plugin_control_server_message_one_of7_query.dart
+lib/src/model/plugin_control_server_message_one_of8.dart
 lib/src/model/refresh_body.dart
 lib/src/model/register_body.dart
 lib/src/model/register_device_body.dart
 lib/src/model/reset_password_body.dart
 lib/src/model/send_prompt_body.dart
+lib/src/model/session_catalog.dart
 lib/src/model/token_pair.dart
 lib/src/model/verify_email_body.dart
 lib/src/model/ws_server_message.dart

@@ -28,10 +28,14 @@ class FakeDevicesController extends DevicesController {
     return _patch(id, soundEnabled: soundEnabled);
   }
 
+  @override
+  Future<Device> rename(String id, String name) => _patch(id, name: name);
+
   Future<Device> _patch(
     String id, {
     bool? enabled,
     bool? soundEnabled,
+    String? name,
   }) async {
     final current = state.value!;
     late Device updated;
@@ -40,6 +44,7 @@ class FakeDevicesController extends DevicesController {
         if (device.id == id)
           updated = device.rebuild(
             (b) => b
+              ..name = name ?? device.name
               ..enabled = enabled ?? device.enabled
               ..soundEnabled = soundEnabled ?? device.soundEnabled,
           )
@@ -73,9 +78,7 @@ void main() {
     controller = FakeDevicesController(devices);
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [
-          devicesControllerProvider.overrideWith(() => controller),
-        ],
+        overrides: [devicesControllerProvider.overrideWith(() => controller)],
         child: const MaterialApp(home: DevicesPage()),
       ),
     );
@@ -93,8 +96,8 @@ void main() {
 
     expect(find.text('工作站'), findsOneWidget);
     expect(find.text('手机'), findsOneWidget);
-    expect(find.text('linux'), findsOneWidget);
-    expect(find.text('android'), findsOneWidget);
+    expect(find.textContaining('linux'), findsOneWidget);
+    expect(find.textContaining('android'), findsOneWidget);
   });
 
   testWidgets('empty state when no devices are registered', (tester) async {
@@ -102,24 +105,32 @@ void main() {
     expect(find.text('暂无设备'), findsOneWidget);
   });
 
+  testWidgets('device name opens a rename dialog and saves the new name', (
+    tester,
+  ) async {
+    await pumpDevices(tester, [device(id: 'd1', name: '工作站')]);
+    await tester.tap(find.text('工作站'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), '开发电脑');
+    await tester.pump();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(find.text('开发电脑'), findsOneWidget);
+    expect(find.text('工作站'), findsNothing);
+  });
+
   testWidgets('enable toggle calls setEnabled and updates the switch', (
     tester,
   ) async {
     await pumpDevices(tester, [device(id: 'd1', name: '工作站')]);
 
-    expect(
-      switchOf(tester, DevicesPage.enabledSwitchKey('d1')).value,
-      isTrue,
-    );
+    expect(switchOf(tester, DevicesPage.enabledSwitchKey('d1')).value, isTrue);
 
     await tester.tap(find.byKey(DevicesPage.enabledSwitchKey('d1')));
     await tester.pumpAndSettle();
 
     expect(controller.enabledCalls, [(id: 'd1', enabled: false)]);
-    expect(
-      switchOf(tester, DevicesPage.enabledSwitchKey('d1')).value,
-      isFalse,
-    );
+    expect(switchOf(tester, DevicesPage.enabledSwitchKey('d1')).value, isFalse);
   });
 
   testWidgets('sound toggle calls setSoundEnabled and updates the switch', (
@@ -127,18 +138,12 @@ void main() {
   ) async {
     await pumpDevices(tester, [device(id: 'd1', name: '工作站')]);
 
-    expect(
-      switchOf(tester, DevicesPage.soundSwitchKey('d1')).value,
-      isFalse,
-    );
+    expect(switchOf(tester, DevicesPage.soundSwitchKey('d1')).value, isFalse);
 
     await tester.tap(find.byKey(DevicesPage.soundSwitchKey('d1')));
     await tester.pumpAndSettle();
 
     expect(controller.soundCalls, [(id: 'd1', soundEnabled: true)]);
-    expect(
-      switchOf(tester, DevicesPage.soundSwitchKey('d1')).value,
-      isTrue,
-    );
+    expect(switchOf(tester, DevicesPage.soundSwitchKey('d1')).value, isTrue);
   });
 }

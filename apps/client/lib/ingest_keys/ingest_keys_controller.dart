@@ -3,6 +3,7 @@ import 'package:notify_api/notify_api.dart';
 
 import '../auth/auth_controller.dart';
 import '../auth/auth_state.dart';
+import 'local_key_secrets.dart';
 
 final ingestKeysApiProvider = Provider<IngestKeysApi>(
   (ref) => ref.watch(apiClientProvider).notifyApi.getIngestKeysApi(),
@@ -15,10 +16,7 @@ final ingestKeysControllerProvider =
 
 /// A registered ingest key as shown in the client.
 ///
-/// Deliberately has **no secret field**: the one-time secret returned by
-/// `POST /v1/ingest-keys` exists only in the [CreateIngestKeyResponse]
-/// handed back by [IngestKeysController.create] and is never stored in
-/// state (or anywhere else).
+/// Secrets are kept separately in the device credential store, not in list state.
 class IngestKey {
   const IngestKey({
     required this.id,
@@ -66,17 +64,17 @@ class IngestKeysController extends AsyncNotifier<List<IngestKey>> {
     if (auth is! Authenticated) {
       return const [];
     }
+    ref.watch(localKeySecretsProvider);
     return _listKeys();
   }
 
   /// Creates a new ingest key named [name].
   ///
   /// Returns the gateway's [CreateIngestKeyResponse], which carries the
-  /// one-time secret (`secret`). The secret is held only in this method
-  /// result — the row added to state is a secret-free [IngestKey] — so the
-  /// caller (the UI) can display it exactly once.
+  /// secret (`secret`). Persist a local copy before returning it to the UI.
   Future<CreateIngestKeyResponse> create(String name) async {
     _requireAuthenticated();
+    final secrets = ref.read(localKeySecretsProvider);
     final response = await _api.createIngestKey(
       createIngestKeyBody: CreateIngestKeyBody((b) => b.name = name),
     );
@@ -84,9 +82,18 @@ class IngestKeysController extends AsyncNotifier<List<IngestKey>> {
     if (created == null) {
       throw StateError('Empty createIngestKey response');
     }
-    final current = await future;
+    try {
+      await secrets.save(created.id, created.secret);
+    } catch (_) {
+      // Creation succeeded. The dialog retains the response and offers save retry.
+    }
+    if (!_isCurrent(secrets)) {
+      throw StateError('账号已切换，请在原账号查看已创建的密钥');
+    }
+    ref.invalidate(localKeySecretProvider(created.id));
+    final current = state.value ?? const <IngestKey>[];
     state = AsyncData([
-      ...current,
+      ...current.where((key) => key.id != created.id),
       IngestKey(
         id: created.id,
         name: created.name,
@@ -99,16 +106,27 @@ class IngestKeysController extends AsyncNotifier<List<IngestKey>> {
   /// Re-fetches the key list from the gateway, replacing the state.
   Future<List<IngestKey>> list() async {
     _requireAuthenticated();
+    final secrets = ref.read(localKeySecretsProvider);
     final keys = await _listKeys();
-    state = AsyncData(keys);
+    if (_isCurrent(secrets)) state = AsyncData(keys);
     return keys;
   }
 
   /// Revokes (deletes) an ingest key and removes its row from state.
   Future<void> revoke(String id) async {
     _requireAuthenticated();
+    final secrets = ref.read(localKeySecretsProvider);
     await _api.revokeIngestKey(id: id);
-    final current = await future;
+    try {
+      await secrets.remove(id);
+    } catch (_) {
+      /* Revocation already succeeded. */
+    }
+    if (!_isCurrent(secrets)) {
+      return;
+    }
+    ref.invalidate(localKeySecretProvider(id));
+    final current = state.value ?? const <IngestKey>[];
     state = AsyncData([
       for (final key in current)
         if (key.id != id) key,
@@ -123,6 +141,11 @@ class IngestKeysController extends AsyncNotifier<List<IngestKey>> {
     }
     return data.map(_toIngestKey).toList();
   }
+
+  bool _isCurrent(LocalKeySecrets secrets) =>
+      ref.mounted &&
+      ref.read(authControllerProvider) is Authenticated &&
+      ref.read(localKeySecretsProvider).scope == secrets.scope;
 
   void _requireAuthenticated() {
     if (ref.read(authControllerProvider) is! Authenticated) {

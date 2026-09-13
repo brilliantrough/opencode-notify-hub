@@ -1,4 +1,5 @@
 import { randomUUID as nodeRandomUUID } from "node:crypto";
+import { validateSessionCatalogQuery, type SessionCatalog, type SessionCatalogQuery } from "@notify/contracts";
 
 import type {
   PendingInteraction,
@@ -55,6 +56,7 @@ export type WebUiResponseFrame =
 type SocketFactory = (url: string, authorization: string) => ControlSocket;
 
 export interface ControlChannelOptions {
+  listSessions?: (query: SessionCatalogQuery, signal: AbortSignal) => Promise<SessionCatalog>;
   gatewayUrl: string;
   credential: string;
   machine: string;
@@ -174,7 +176,7 @@ export class ControlChannel implements PluginControl {
   private openCodeVersion: string | null = null;
   private registered = false;
   private collectionInFlight: Promise<PendingInteraction[]> | null = null;
-  private readonly webUiAborts = new Map<string, Set<AbortController>>();
+  private readonly webUiAborts = new Map<string, Map<string, AbortController>>();
 
   constructor(options: ControlChannelOptions) {
     this.options = options;
@@ -278,8 +280,7 @@ export class ControlChannel implements PluginControl {
     });
     socket.addEventListener("close", (event) => {
       if (closeCode(event) === 4403) {
-        this.running = false;
-        this.socket = null;
+        if (this.socket === socket) this.stop();
         return;
       }
       this.drop(socket);
@@ -323,6 +324,18 @@ export class ControlChannel implements PluginControl {
     }
     if (!this.registered) {
       return; // commands and requests before registration are ignored
+    }
+    if (frame.type === "session_catalog_request") {
+      if (isUuid(frame.requestId) && validateSessionCatalogQuery(frame.query)) {
+        void this.answerCatalog(socket, frame.requestId, frame.query as SessionCatalogQuery);
+      }
+      return;
+    }
+    if (frame.type === "webui_http_cancel") {
+      if (isUuid(frame.tunnelId) && isUuid(frame.requestId)) {
+        this.webUiAborts.get(frame.tunnelId)?.get(frame.requestId)?.abort();
+      }
+      return;
     }
     if (frame.type === "pending_snapshot_request") {
       if (typeof frame.requestId !== "string" || frame.requestId.length === 0) {
@@ -376,6 +389,21 @@ export class ControlChannel implements PluginControl {
    * throws: adapter failures and timeouts both yield an empty interaction
    * list, and a socket that vanished mid-query is left alone.
    */
+  private async answerCatalog(socket: ControlSocket, requestId: string, query: SessionCatalogQuery): Promise<void> {
+    let result: Pick<Extract<PluginControlClientMessage, { type: "session_catalog_response" }>, "status" | "catalog">;
+    try {
+      result = this.options.listSessions
+        ? { status: "ready", catalog: await this.options.listSessions(query, AbortSignal.timeout(8_000)) }
+        : { status: "unsupported" };
+    } catch {
+      result = { status: "error" };
+    }
+    if (!this.running || this.socket !== socket) return;
+    try {
+      socket.send(JSON.stringify({ type: "session_catalog_response", requestId, instanceId: this.instanceId, ...result }));
+    } catch { /* Connection recovery owns transport failures. */ }
+  }
+
   private async answerSnapshot(socket: ControlSocket, requestId: string): Promise<void> {
     const interactions = await this.collectInteractions();
     if (!this.running || this.socket !== socket) {
@@ -585,8 +613,8 @@ export class ControlChannel implements PluginControl {
       return;
     }
     const abort = new AbortController();
-    const active = this.webUiAborts.get(request.tunnelId) ?? new Set<AbortController>();
-    active.add(abort);
+    const active = this.webUiAborts.get(request.tunnelId) ?? new Map<string, AbortController>();
+    active.set(request.requestId, abort);
     this.webUiAborts.set(request.tunnelId, active);
     try {
       await this.options.webUiRequest(request, abort.signal, emit);
@@ -610,7 +638,7 @@ export class ControlChannel implements PluginControl {
         requestId: request.requestId,
       });
     } finally {
-      active.delete(abort);
+      active.delete(request.requestId);
       if (active.size === 0) {
         this.webUiAborts.delete(request.tunnelId);
       }
@@ -621,7 +649,7 @@ export class ControlChannel implements PluginControl {
     const active = this.webUiAborts.get(tunnelId);
     if (active !== undefined) {
       this.webUiAborts.delete(tunnelId);
-      for (const abort of active) abort.abort();
+      for (const abort of active.values()) abort.abort();
     }
     this.options.webUiTunnelClose?.(tunnelId);
   }
@@ -682,6 +710,7 @@ export class ControlChannel implements PluginControl {
     }
     this.socket = null;
     this.registered = false;
+    for (const tunnelId of [...this.webUiAborts.keys()]) this.closeWebUiTunnel(tunnelId);
     try {
       socket.close();
     } catch {

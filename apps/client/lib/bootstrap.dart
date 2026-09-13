@@ -4,6 +4,7 @@ import 'dart:ui' show AppExitResponse;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,6 +26,8 @@ import 'notifications/notification_service.dart';
 import 'pending/pending_controller.dart';
 import 'realtime/realtime_controller.dart';
 import 'settings/settings_controller.dart';
+import 'sessions/session_catalog.dart';
+import 'sessions/webui_browser_controller.dart';
 import 'tray/tray_controller.dart';
 
 /// Whether Firebase/FCM was initialized during bootstrap and foreground FCM
@@ -41,6 +44,7 @@ final trayControllerProvider = Provider<TrayController>((ref) {
     readPaused: () => ref.read(settingsControllerProvider).paused,
     writePaused: (paused) =>
         ref.read(settingsControllerProvider.notifier).setPaused(paused),
+    beforeQuit: () => ref.read(webUiBrowserControllerProvider.notifier).close(),
   );
   ref.onDispose(controller.dispose);
   return controller;
@@ -79,6 +83,7 @@ class AppBootstrap {
   ProviderContainer? _container;
   _AppLifecycleObserver? _lifecycleObserver;
   final List<void Function()> _subscriptionClosers = [];
+  static const _powerChannel = MethodChannel('dev.opencodenotify.client/power');
 
   bool get _isDesktop =>
       _platform == ClientPlatform.windows || _platform == ClientPlatform.linux;
@@ -174,6 +179,11 @@ class AppBootstrap {
   /// subscription that drives the realtime controller.
   void attach(ProviderContainer container) {
     _container = container;
+    if (_platform == ClientPlatform.windows) {
+      _powerChannel.setMethodCallHandler((call) async {
+        if (call.method == 'resume') _resumeRemoteAccess(afterSleep: true);
+      });
+    }
 
     _lifecycleObserver = _AppLifecycleObserver(
       isDesktop: _isDesktop,
@@ -188,6 +198,7 @@ class AppBootstrap {
       },
       keepRealtimeAlive: () =>
           container.read(settingsControllerProvider).keepAliveEnabled,
+      onResumed: () => _resumeRemoteAccess(),
       onExitRequested: _isDesktop
           ? () async {
               await windowManager.hide();
@@ -352,10 +363,25 @@ class AppBootstrap {
     }
   }
 
+  void _resumeRemoteAccess({bool afterSleep = false}) {
+    final container = _container;
+    if (container == null ||
+        container.read(authControllerProvider) is! Authenticated) {
+      return;
+    }
+    container
+        .read(webUiBrowserControllerProvider.notifier)
+        .resume(afterSleep: afterSleep);
+    unawaited(container.read(sessionCatalogProvider.notifier).refresh());
+  }
+
   /// Detaches lifecycle wiring and disposes the container, which stops the
   /// realtime controller, disconnects the socket, and disposes the tray and
   /// FCM controllers via their `ref.onDispose` hooks. Idempotent.
   Future<void> shutdown() async {
+    if (_platform == ClientPlatform.windows) {
+      _powerChannel.setMethodCallHandler(null);
+    }
     final observer = _lifecycleObserver;
     _lifecycleObserver = null;
     if (observer != null) {
@@ -403,15 +429,18 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
     required void Function(bool foreground) onForegroundChanged,
     required Future<AppExitResponse> Function() onExitRequested,
     bool Function()? keepRealtimeAlive,
+    VoidCallback? onResumed,
   }) : _isDesktop = isDesktop,
        _onForegroundChanged = onForegroundChanged,
        _onExitRequested = onExitRequested,
-       _keepRealtimeAlive = keepRealtimeAlive;
+       _keepRealtimeAlive = keepRealtimeAlive,
+       _onResumed = onResumed;
 
   final bool _isDesktop;
   final void Function(bool foreground) _onForegroundChanged;
   final Future<AppExitResponse> Function() _onExitRequested;
   final bool Function()? _keepRealtimeAlive;
+  final VoidCallback? _onResumed;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -422,6 +451,7 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
         keepAlive: _keepRealtimeAlive?.call() ?? false,
       ),
     );
+    if (state == AppLifecycleState.resumed) _onResumed?.call();
   }
 
   @override

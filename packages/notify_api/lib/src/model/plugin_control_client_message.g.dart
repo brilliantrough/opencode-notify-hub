@@ -30,6 +30,9 @@ _$pluginControlClientMessageTypeEnum_webuiHttpResponseChunk =
 const PluginControlClientMessageTypeEnum
 _$pluginControlClientMessageTypeEnum_webuiHttpResponseEnd =
     const PluginControlClientMessageTypeEnum._('webuiHttpResponseEnd');
+const PluginControlClientMessageTypeEnum
+_$pluginControlClientMessageTypeEnum_sessionCatalogResponse =
+    const PluginControlClientMessageTypeEnum._('sessionCatalogResponse');
 
 PluginControlClientMessageTypeEnum _$pluginControlClientMessageTypeEnumValueOf(
   String name,
@@ -51,6 +54,8 @@ PluginControlClientMessageTypeEnum _$pluginControlClientMessageTypeEnumValueOf(
       return _$pluginControlClientMessageTypeEnum_webuiHttpResponseChunk;
     case 'webuiHttpResponseEnd':
       return _$pluginControlClientMessageTypeEnum_webuiHttpResponseEnd;
+    case 'sessionCatalogResponse':
+      return _$pluginControlClientMessageTypeEnum_sessionCatalogResponse;
     default:
       throw ArgumentError(name);
   }
@@ -68,12 +73,50 @@ _$pluginControlClientMessageTypeEnumValues =
         _$pluginControlClientMessageTypeEnum_webuiHttpResponseStart,
         _$pluginControlClientMessageTypeEnum_webuiHttpResponseChunk,
         _$pluginControlClientMessageTypeEnum_webuiHttpResponseEnd,
+        _$pluginControlClientMessageTypeEnum_sessionCatalogResponse,
+      ],
+    );
+
+const PluginControlClientMessageStatusEnum
+_$pluginControlClientMessageStatusEnum_ready =
+    const PluginControlClientMessageStatusEnum._('ready');
+const PluginControlClientMessageStatusEnum
+_$pluginControlClientMessageStatusEnum_error =
+    const PluginControlClientMessageStatusEnum._('error');
+const PluginControlClientMessageStatusEnum
+_$pluginControlClientMessageStatusEnum_unsupported =
+    const PluginControlClientMessageStatusEnum._('unsupported');
+
+PluginControlClientMessageStatusEnum
+_$pluginControlClientMessageStatusEnumValueOf(String name) {
+  switch (name) {
+    case 'ready':
+      return _$pluginControlClientMessageStatusEnum_ready;
+    case 'error':
+      return _$pluginControlClientMessageStatusEnum_error;
+    case 'unsupported':
+      return _$pluginControlClientMessageStatusEnum_unsupported;
+    default:
+      throw ArgumentError(name);
+  }
+}
+
+final BuiltSet<PluginControlClientMessageStatusEnum>
+_$pluginControlClientMessageStatusEnumValues =
+    BuiltSet<PluginControlClientMessageStatusEnum>(
+      const <PluginControlClientMessageStatusEnum>[
+        _$pluginControlClientMessageStatusEnum_ready,
+        _$pluginControlClientMessageStatusEnum_error,
+        _$pluginControlClientMessageStatusEnum_unsupported,
       ],
     );
 
 Serializer<PluginControlClientMessageTypeEnum>
 _$pluginControlClientMessageTypeEnumSerializer =
     _$PluginControlClientMessageTypeEnumSerializer();
+Serializer<PluginControlClientMessageStatusEnum>
+_$pluginControlClientMessageStatusEnumSerializer =
+    _$PluginControlClientMessageStatusEnumSerializer();
 
 class _$PluginControlClientMessageTypeEnumSerializer
     implements PrimitiveSerializer<PluginControlClientMessageTypeEnum> {
@@ -86,6 +129,7 @@ class _$PluginControlClientMessageTypeEnumSerializer
     'webuiHttpResponseStart': 'webui_http_response_start',
     'webuiHttpResponseChunk': 'webui_http_response_chunk',
     'webuiHttpResponseEnd': 'webui_http_response_end',
+    'sessionCatalogResponse': 'session_catalog_response',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'register': 'register',
@@ -96,6 +140,7 @@ class _$PluginControlClientMessageTypeEnumSerializer
     'webui_http_response_start': 'webuiHttpResponseStart',
     'webui_http_response_chunk': 'webuiHttpResponseChunk',
     'webui_http_response_end': 'webuiHttpResponseEnd',
+    'session_catalog_response': 'sessionCatalogResponse',
   };
 
   @override
@@ -116,6 +161,43 @@ class _$PluginControlClientMessageTypeEnumSerializer
     Object serialized, {
     FullType specifiedType = FullType.unspecified,
   }) => PluginControlClientMessageTypeEnum.valueOf(
+    _fromWire[serialized] ?? (serialized is String ? serialized : ''),
+  );
+}
+
+class _$PluginControlClientMessageStatusEnumSerializer
+    implements PrimitiveSerializer<PluginControlClientMessageStatusEnum> {
+  static const Map<String, Object> _toWire = const <String, Object>{
+    'ready': 'ready',
+    'error': 'error',
+    'unsupported': 'unsupported',
+  };
+  static const Map<Object, String> _fromWire = const <Object, String>{
+    'ready': 'ready',
+    'error': 'error',
+    'unsupported': 'unsupported',
+  };
+
+  @override
+  final Iterable<Type> types = const <Type>[
+    PluginControlClientMessageStatusEnum,
+  ];
+  @override
+  final String wireName = 'PluginControlClientMessageStatusEnum';
+
+  @override
+  Object serialize(
+    Serializers serializers,
+    PluginControlClientMessageStatusEnum object, {
+    FullType specifiedType = FullType.unspecified,
+  }) => _toWire[object.name] ?? object.name;
+
+  @override
+  PluginControlClientMessageStatusEnum deserialize(
+    Serializers serializers,
+    Object serialized, {
+    FullType specifiedType = FullType.unspecified,
+  }) => PluginControlClientMessageStatusEnum.valueOf(
     _fromWire[serialized] ?? (serialized is String ? serialized : ''),
   );
 }

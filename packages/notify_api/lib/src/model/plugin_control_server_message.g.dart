@@ -61,6 +61,12 @@ _$pluginControlServerMessageTypeEnum_webuiHttpRequest =
 const PluginControlServerMessageTypeEnum
 _$pluginControlServerMessageTypeEnum_webuiTunnelClose =
     const PluginControlServerMessageTypeEnum._('webuiTunnelClose');
+const PluginControlServerMessageTypeEnum
+_$pluginControlServerMessageTypeEnum_sessionCatalogRequest =
+    const PluginControlServerMessageTypeEnum._('sessionCatalogRequest');
+const PluginControlServerMessageTypeEnum
+_$pluginControlServerMessageTypeEnum_webuiHttpCancel =
+    const PluginControlServerMessageTypeEnum._('webuiHttpCancel');
 
 PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
   String name,
@@ -80,6 +86,10 @@ PluginControlServerMessageTypeEnum _$pluginControlServerMessageTypeEnumValueOf(
       return _$pluginControlServerMessageTypeEnum_webuiHttpRequest;
     case 'webuiTunnelClose':
       return _$pluginControlServerMessageTypeEnum_webuiTunnelClose;
+    case 'sessionCatalogRequest':
+      return _$pluginControlServerMessageTypeEnum_sessionCatalogRequest;
+    case 'webuiHttpCancel':
+      return _$pluginControlServerMessageTypeEnum_webuiHttpCancel;
     default:
       throw ArgumentError(name);
   }
@@ -96,6 +106,8 @@ _$pluginControlServerMessageTypeEnumValues =
         _$pluginControlServerMessageTypeEnum_sessionPromptCommand,
         _$pluginControlServerMessageTypeEnum_webuiHttpRequest,
         _$pluginControlServerMessageTypeEnum_webuiTunnelClose,
+        _$pluginControlServerMessageTypeEnum_sessionCatalogRequest,
+        _$pluginControlServerMessageTypeEnum_webuiHttpCancel,
       ],
     );
 
@@ -190,6 +202,8 @@ class _$PluginControlServerMessageTypeEnumSerializer
     'sessionPromptCommand': 'session_prompt_command',
     'webuiHttpRequest': 'webui_http_request',
     'webuiTunnelClose': 'webui_tunnel_close',
+    'sessionCatalogRequest': 'session_catalog_request',
+    'webuiHttpCancel': 'webui_http_cancel',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
     'registration': 'registration',
@@ -199,6 +213,8 @@ class _$PluginControlServerMessageTypeEnumSerializer
     'session_prompt_command': 'sessionPromptCommand',
     'webui_http_request': 'webuiHttpRequest',
     'webui_tunnel_close': 'webuiTunnelClose',
+    'session_catalog_request': 'sessionCatalogRequest',
+    'webui_http_cancel': 'webuiHttpCancel',
   };
 
   @override

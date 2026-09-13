@@ -18,18 +18,37 @@ class DevicesPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final devices = ref.watch(devicesControllerProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('设备')),
+      appBar: AppBar(
+        title: const Text('设备'),
+        actions: [
+          IconButton(
+            tooltip: '刷新设备',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => ref.invalidate(devicesControllerProvider),
+          ),
+        ],
+      ),
       body: switch (devices) {
         AsyncData(:final value) =>
           value.isEmpty
               ? const Center(child: Text('暂无设备'))
               : ListView(
                   children: [
-                    for (final device in value)
-                      _DeviceTile(device: device),
+                    for (final device in value) _DeviceTile(device: device),
                   ],
                 ),
-        AsyncError(:final error) => Center(child: Text('加载失败: $error')),
+        AsyncError() => Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('无法加载设备'),
+              TextButton(
+                onPressed: () => ref.invalidate(devicesControllerProvider),
+                child: const Text('重试'),
+              ),
+            ],
+          ),
+        ),
         _ => const Center(child: CircularProgressIndicator()),
       },
     );
@@ -40,6 +59,49 @@ class _DeviceTile extends ConsumerWidget {
   const _DeviceTile({required this.device});
 
   final Device device;
+
+  Future<void> _rename(BuildContext context, WidgetRef ref) async {
+    var name = device.name;
+    final next = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('重命名设备'),
+          content: TextFormField(
+            initialValue: name,
+            autofocus: true,
+            maxLength: 64,
+            decoration: const InputDecoration(labelText: '设备名称'),
+            onChanged: (value) => setState(() => name = value),
+            onFieldSubmitted: (_) {
+              if (name.trim().isNotEmpty) {
+                Navigator.pop(dialogContext, name.trim());
+              }
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: name.trim().isEmpty
+                  ? null
+                  : () => Navigator.pop(dialogContext, name.trim()),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (next == null || next == device.name || !context.mounted) return;
+    await _toggle(
+      context,
+      ref,
+      () =>
+          ref.read(devicesControllerProvider.notifier).rename(device.id, next),
+    );
+  }
 
   Future<void> _toggle(
     BuildContext context,
@@ -63,7 +125,8 @@ class _DeviceTile extends ConsumerWidget {
     return ListTile(
       key: ValueKey('device-${device.id}'),
       title: Text(device.name),
-      subtitle: Text(device.platform.name),
+      subtitle: Text('${device.platform.name} · 点按重命名'),
+      onTap: () => _rename(context, ref),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

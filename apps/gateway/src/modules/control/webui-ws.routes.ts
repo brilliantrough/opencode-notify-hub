@@ -21,7 +21,7 @@ export function webUiWsRoutes(deps: {
               ? header.slice("Bearer ".length)
               : null;
           const payload = token === null ? null : deps.accessTokens.verify(token);
-          if (payload === null) {
+          if (payload === null || payload.role !== undefined) {
             await reply
               .status(401)
               .send(errorBody(ErrorCodes.UNAUTHORIZED, "Missing or invalid access token"));
@@ -42,6 +42,10 @@ export function webUiWsRoutes(deps: {
       (socket, request) => {
         deps.registry.addWebUiClient(request.userId as string, socket, {
           expiresAtMs: request.tokenExpiresAtMs as number,
+          verifyToken: token => {
+            const payload = deps.accessTokens.verify(token);
+            return payload?.role === undefined ? payload : null;
+          },
         });
       },
     );

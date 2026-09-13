@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../pending/pending_controller.dart';
@@ -11,6 +12,7 @@ import '../realtime/instance_presence.dart';
 import '../realtime/realtime_controller.dart';
 import '../realtime/ws_client.dart';
 import '../sessions/webui_browser_controller.dart';
+import '../sessions/session_catalog.dart';
 import 'pending_interaction_page.dart';
 import 'session_prompt_page.dart';
 import '../sessions/session_target.dart';
@@ -39,8 +41,24 @@ class HomePage extends ConsumerWidget {
     final interactions = pending.value ?? const <PendingInteraction>[];
     final offline = ref.watch(offlineLastKnownProvider);
     final webUi = ref.watch(webUiBrowserControllerProvider);
-    final ordered = sessions.values.toList()
-      ..sort((a, b) => b.lastHeartbeatAt.compareTo(a.lastHeartbeatAt));
+    final catalog = ref.watch(sessionCatalogProvider);
+    final remoteSessions = catalog.visible;
+    final ordered =
+        sessions.values
+            .where(
+              (s) =>
+                  !catalog.sessions.values.any(
+                    (r) =>
+                        r.session.sessionId == s.sessionId &&
+                        r.session.machine == s.machine &&
+                        r.session.directory == s.directory,
+                  ) &&
+                  '${s.title} ${s.machine} ${s.project}'.toLowerCase().contains(
+                    catalog.search.toLowerCase(),
+                  ),
+            )
+            .toList()
+          ..sort((a, b) => b.lastHeartbeatAt.compareTo(a.lastHeartbeatAt));
     final instanceGroups = _groupInstances(instances.values);
     return Scaffold(
       appBar: AppBar(
@@ -48,16 +66,19 @@ class HomePage extends ConsumerWidget {
         actions: [
           IconButton(
             key: const ValueKey('pending-refresh'),
-            tooltip: '刷新待处理请求',
+            tooltip: '刷新会话和待处理请求',
             icon: const Icon(Icons.refresh),
-            onPressed: () => unawaited(
-              ref.read(pendingInteractionsProvider.notifier).refresh(),
-            ),
+            onPressed: () {
+              unawaited(
+                ref.read(pendingInteractionsProvider.notifier).refresh(),
+              );
+              unawaited(ref.read(sessionCatalogProvider.notifier).refresh());
+            },
           ),
           if (webUi.status != WebUiBrowserStatus.idle)
             IconButton(
               key: const ValueKey('webui-tunnel-close'),
-              tooltip: '关闭 OpenCode WebUI 临时连接',
+              tooltip: '关闭全部 WebUI 连接',
               icon: const Icon(Icons.link_off_outlined),
               onPressed: () => unawaited(
                 ref.read(webUiBrowserControllerProvider.notifier).close(),
@@ -69,82 +90,221 @@ class HomePage extends ConsumerWidget {
           ),
         ],
       ),
-      body:
-          ordered.isEmpty &&
-              instances.isEmpty &&
+      body: ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: const _SessionSearchField(),
+          ),
+          if (catalog.loading)
+            const LinearProgressIndicator(
+              key: ValueKey('session-catalog-loading'),
+            ),
+          for (final error in catalog.errors.entries)
+            ListTile(
+              leading: const Icon(Icons.sync_problem_outlined),
+              title: Text(instances[error.key]?.project ?? '会话同步'),
+              subtitle: Text(error.value),
+              trailing: IconButton(
+                tooltip: '重试会话同步',
+                icon: const Icon(Icons.refresh),
+                onPressed: () => unawaited(
+                  ref.read(sessionCatalogProvider.notifier).refresh(),
+                ),
+              ),
+            ),
+          for (final connection in webUi.connections.values)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.link),
+              title: Text(
+                '${instances[connection.instanceId]?.project ?? "OpenCode"} · ${connection.status == WebUiBrowserStatus.active ? "已连接" : "正在重连"}',
+              ),
+              subtitle: connection.localUri == null
+                  ? null
+                  : Text(connection.localUri!.origin),
+              onTap: connection.localUri == null
+                  ? null
+                  : () async {
+                      final error = await ref
+                          .read(webUiBrowserControllerProvider.notifier)
+                          .reopen(connection.instanceId);
+                      if (error != null && context.mounted) {
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text(error)));
+                      }
+                    },
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (connection.localUri != null)
+                    IconButton(
+                      tooltip: '复制会话浏览器地址',
+                      icon: const Icon(Icons.copy),
+                      onPressed: () async {
+                        try {
+                          await Clipboard.setData(
+                            ClipboardData(text: connection.localUri.toString()),
+                          );
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('地址已复制；需在本机保持 Notify 运行'),
+                              ),
+                            );
+                          }
+                        } catch (_) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('复制失败，请重试')),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                  IconButton(
+                    tooltip: '关闭此实例的 WebUI 连接',
+                    icon: const Icon(Icons.link_off),
+                    onPressed: () => unawaited(
+                      ref
+                          .read(webUiBrowserControllerProvider.notifier)
+                          .close(connection.instanceId),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (pending.isLoading && interactions.isEmpty)
+            const LinearProgressIndicator(key: ValueKey('pending-loading')),
+          if (pending.hasError && interactions.isEmpty)
+            ListTile(
+              key: const ValueKey('pending-error'),
+              leading: const Icon(Icons.sync_problem_outlined),
+              title: const Text('待处理请求同步失败'),
+              trailing: IconButton(
+                tooltip: '重试',
+                icon: const Icon(Icons.refresh),
+                onPressed: () => unawaited(
+                  ref.read(pendingInteractionsProvider.notifier).refresh(),
+                ),
+              ),
+            ),
+          if (interactions.isNotEmpty) ...[
+            const _SectionHeader('待处理请求'),
+            for (final interaction in interactions)
+              _PendingTile(interaction: interaction),
+          ],
+          if (offline.isNotEmpty) ...[
+            const _SectionHeader('离线请求（只读）'),
+            for (final item in offline) _OfflineTile(item: item),
+          ],
+          if ((interactions.isNotEmpty || offline.isNotEmpty) &&
+              (instances.isNotEmpty || ordered.isNotEmpty))
+            const Divider(height: 24),
+          for (final pinned in [true, false]) ...[
+            if (remoteSessions.any((s) => s.pinned == pinned))
+              _SectionHeader(pinned ? '固定会话' : '最近会话（含空闲）'),
+            for (final item in remoteSessions.where((s) => s.pinned == pinned))
+              _SessionTile(
+                session: item.session.copyWith(
+                  pendingRequestIds: {
+                    for (final interaction in interactions)
+                      if (interaction.instanceId == item.instanceId &&
+                          interaction.sessionId == item.session.sessionId)
+                        interaction.requestId,
+                  },
+                ),
+                target:
+                    item.verified &&
+                        instances[item.instanceId]?.state ==
+                            InstancePresenceState.controllable
+                    ? instances[item.instanceId]
+                    : null,
+                webUi: webUi,
+                pinned: item.pinned,
+                statusLabel:
+                    instances[item.instanceId]?.state !=
+                        InstancePresenceState.controllable
+                    ? '离线 / 等待实例同步'
+                    : switch (item.status) {
+                        'busy' => '运行中',
+                        'retry' => '重试中',
+                        'idle' => '空闲',
+                        'missing' => '会话已删除或归档',
+                        _ => '状态待确认',
+                      },
+                onPin: () async {
+                  final error = await ref
+                      .read(sessionCatalogProvider.notifier)
+                      .togglePin(item);
+                  if (error != null && context.mounted) {
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text(error)));
+                  }
+                },
+                onOpenWebUi: (session, target) => _openWebUi(
+                  context,
+                  ref,
+                  target.instanceId,
+                  directory: session.directory,
+                  sessionId: session.sessionId,
+                ),
+              ),
+          ],
+          if (remoteSessions.isEmpty &&
+              ordered.isEmpty &&
               interactions.isEmpty &&
               offline.isEmpty &&
-              !pending.isLoading &&
-              !pending.hasError
-          ? const Center(child: Text('暂无会话'))
-          : ListView(
-              children: [
-                if (pending.isLoading && interactions.isEmpty)
-                  const LinearProgressIndicator(
-                    key: ValueKey('pending-loading'),
-                  ),
-                if (pending.hasError && interactions.isEmpty)
-                  ListTile(
-                    key: const ValueKey('pending-error'),
-                    leading: const Icon(Icons.sync_problem_outlined),
-                    title: const Text('待处理请求同步失败'),
-                    trailing: IconButton(
-                      tooltip: '重试',
-                      icon: const Icon(Icons.refresh),
-                      onPressed: () => unawaited(
-                        ref
-                            .read(pendingInteractionsProvider.notifier)
-                            .refresh(),
-                      ),
-                    ),
-                  ),
-                if (interactions.isNotEmpty) ...[
-                  const _SectionHeader('待处理请求'),
-                  for (final interaction in interactions)
-                    _PendingTile(interaction: interaction),
-                ],
-                if (offline.isNotEmpty) ...[
-                  const _SectionHeader('离线请求（只读）'),
-                  for (final item in offline) _OfflineTile(item: item),
-                ],
-                if ((interactions.isNotEmpty || offline.isNotEmpty) &&
-                    (instances.isNotEmpty || ordered.isNotEmpty))
-                  const Divider(height: 24),
-                if (instances.isNotEmpty) ...[
-                  const _SectionHeader('OpenCode 实例'),
-                  for (final group in instanceGroups)
-                    _MachineInstanceGroup(
-                      key: ValueKey(
-                        'machine-group-${group.machine.trim().toLowerCase()}',
-                      ),
-                      group: group,
-                      webUi: webUi,
-                      onOpenWebUi: (target) =>
-                          _openWebUi(context, ref, target.instanceId),
-                      onDelete: (instance) =>
-                          _forgetInstance(context, ref, instance),
-                      onClearOffline: () =>
-                          _clearOfflineGroup(context, ref, group),
-                    ),
-                ],
-                if (ordered.isNotEmpty && instances.isNotEmpty)
-                  const Divider(height: 24),
-                if (ordered.isNotEmpty) const _SectionHeader('会话'),
-                for (final session in ordered)
-                  _SessionTile(
-                    session: session,
-                    target: sessionControlTarget(session, instances.values),
-                    webUi: webUi,
-                    onOpenWebUi: (session, target) => _openWebUi(
-                      context,
-                      ref,
-                      target.instanceId,
-                      directory: session.directory,
-                      sessionId: session.sessionId,
-                    ),
-                  ),
-              ],
+              !catalog.loading)
+            const ListTile(
+              title: Text('暂无匹配会话'),
+              subtitle: Text('可以清空搜索或刷新列表，空闲会话也会自动同步'),
             ),
+          if (catalog.hasMore)
+            TextButton(
+              onPressed: catalog.loading || catalog.limit >= 200
+                  ? null
+                  : () => unawaited(
+                      ref.read(sessionCatalogProvider.notifier).loadMore(),
+                    ),
+              child: Text(
+                catalog.limit >= 200 ? '已显示最近 200 条，请搜索更早的会话' : '加载更多会话',
+              ),
+            ),
+          if (ordered.isNotEmpty) const _SectionHeader('实时会话'),
+          for (final session in ordered)
+            _SessionTile(
+              session: session,
+              target: sessionControlTarget(session, instances.values),
+              webUi: webUi,
+              onOpenWebUi: (session, target) => _openWebUi(
+                context,
+                ref,
+                target.instanceId,
+                directory: session.directory,
+                sessionId: session.sessionId,
+              ),
+            ),
+          if (instances.isNotEmpty) ...[
+            const Divider(height: 24),
+            const _SectionHeader('OpenCode 实例'),
+            for (final group in instanceGroups)
+              _MachineInstanceGroup(
+                key: ValueKey(
+                  'machine-group-${group.machine.trim().toLowerCase()}',
+                ),
+                group: group,
+                webUi: webUi,
+                onOpenWebUi: (target) => _openInstance(context, ref, target),
+                onDelete: (instance) => _forgetInstance(context, ref, instance),
+                onClearOffline: () => _clearOfflineGroup(context, ref, group),
+              ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -163,6 +323,29 @@ class HomePage extends ConsumerWidget {
         context,
       ).showSnackBar(SnackBar(content: Text(error)));
     }
+    if (error == null && sessionId != null && ref.context.mounted) {
+      await ref
+          .read(sessionCatalogProvider.notifier)
+          .markOpened(instanceId, sessionId);
+    }
+  }
+
+  Future<void> _openInstance(
+    BuildContext context,
+    WidgetRef ref,
+    OpenCodeInstancePresence instance,
+  ) async {
+    final controller = ref.read(sessionCatalogProvider.notifier);
+    if (controller.preferred(instance) == null) await controller.refresh();
+    if (!context.mounted) return;
+    final preferred = controller.preferred(instance);
+    await _openWebUi(
+      context,
+      ref,
+      instance.instanceId,
+      directory: instance.directory,
+      sessionId: preferred?.session.sessionId,
+    );
   }
 
   Future<void> _forgetInstance(
@@ -512,9 +695,7 @@ class _InstanceTileState extends State<_InstanceTile> {
     final detail = instance.state == InstancePresenceState.offline
         ? '${instance.openCodeVersion} · ${_elapsedText(instance.lastSeenAt)}'
         : 'OpenCode ${instance.openCodeVersion}';
-    final webUiOpening =
-        webUi.status == WebUiBrowserStatus.opening &&
-        webUi.instanceId == instance.instanceId;
+    final webUiOpening = webUi.openingFor(instance.instanceId);
     final webUiActive = webUi.activeFor(instance.instanceId);
     return ListTile(
       key: ValueKey('instance-${instance.instanceId}'),
@@ -531,9 +712,7 @@ class _InstanceTileState extends State<_InstanceTile> {
           if (instance.state == InstancePresenceState.controllable)
             IconButton(
               key: ValueKey('webui-instance-${instance.instanceId}'),
-              tooltip: webUiActive
-                  ? '在浏览器中重新打开 OpenCode WebUI 仪表盘'
-                  : '在浏览器中打开 OpenCode WebUI 仪表盘',
+              tooltip: webUiActive ? '继续此实例的上次会话' : '打开上次会话或最近会话',
               icon: webUiOpening
                   ? const SizedBox.square(
                       dimension: 20,
@@ -544,7 +723,7 @@ class _InstanceTileState extends State<_InstanceTile> {
                           ? Icons.open_in_browser
                           : Icons.language_outlined,
                     ),
-              onPressed: webUi.status == WebUiBrowserStatus.opening
+              onPressed: webUiOpening
                   ? null
                   : () => widget.onOpenWebUi(instance),
             ),
@@ -603,15 +782,75 @@ class WsStatusChip extends StatelessWidget {
   }
 }
 
+class _SessionSearchField extends ConsumerStatefulWidget {
+  const _SessionSearchField();
+  @override
+  ConsumerState<_SessionSearchField> createState() =>
+      _SessionSearchFieldState();
+}
+
+class _SessionSearchFieldState extends ConsumerState<_SessionSearchField> {
+  late final TextEditingController _text = TextEditingController(
+    text: ref.read(sessionCatalogProvider).search,
+  );
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = ref.watch(
+      sessionCatalogProvider.select((state) => state.search),
+    );
+    ref.listen(sessionCatalogProvider.select((state) => state.search), (
+      _,
+      next,
+    ) {
+      if (_text.text.trim() != next) _text.text = next;
+    });
+    return TextField(
+      key: const ValueKey('session-search'),
+      controller: _text,
+      maxLength: 200,
+      decoration: InputDecoration(
+        prefixIcon: const Icon(Icons.search),
+        hintText: '搜索会话、项目或机器',
+        counterText: '',
+        border: const OutlineInputBorder(),
+        suffixIcon: query.isEmpty
+            ? null
+            : IconButton(
+                key: const ValueKey('clear-session-search'),
+                tooltip: '清空搜索',
+                icon: const Icon(Icons.clear),
+                onPressed: () {
+                  _text.clear();
+                  ref.read(sessionCatalogProvider.notifier).search('');
+                },
+              ),
+      ),
+      onChanged: ref.read(sessionCatalogProvider.notifier).search,
+    );
+  }
+}
+
 class _SessionTile extends StatelessWidget {
   const _SessionTile({
     required this.session,
     required this.target,
     required this.webUi,
     required this.onOpenWebUi,
+    this.pinned,
+    this.statusLabel,
+    this.onPin,
   });
 
   final ActiveSession session;
+  final bool? pinned;
+  final String? statusLabel;
+  final VoidCallback? onPin;
   final OpenCodeInstancePresence? target;
   final WebUiBrowserState webUi;
   final void Function(ActiveSession session, OpenCodeInstancePresence target)
@@ -621,59 +860,83 @@ class _SessionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final pending = session.pendingRequestIds;
     final targetId = target?.instanceId;
-    final webUiOpening =
-        webUi.status == WebUiBrowserStatus.opening &&
-        webUi.instanceId == targetId;
+    final webUiOpening = targetId != null && webUi.openingFor(targetId);
     final webUiActive = targetId != null && webUi.activeFor(targetId);
-    return ListTile(
-      key: ValueKey('session-${session.sessionId}'),
-      title: Text('${session.machine} · ${session.project}'),
-      subtitle: Text('${session.title} · ${_elapsedText()}'),
-      trailing: target == null && pending.isEmpty
-          ? null
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (pending.isNotEmpty)
-                  Badge(
-                    key: ValueKey('pending-${session.sessionId}'),
-                    label: Text('${pending.length}'),
-                    child: const Icon(Icons.notification_important_outlined),
-                  ),
-                if (target != null)
-                  IconButton(
-                    key: ValueKey('prompt-${session.sessionId}'),
-                    tooltip: '发送到 OpenCode',
-                    icon: const Icon(Icons.edit_outlined),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => SessionPromptPage(
-                          session: session,
-                          target: target!,
-                        ),
-                      ),
-                    ),
-                  ),
-                if (target != null)
-                  IconButton(
-                    key: ValueKey('webui-${session.sessionId}'),
-                    tooltip: webUiActive ? '在浏览器中重新打开此会话' : '在浏览器中打开此会话',
-                    icon: webUiOpening
-                        ? const SizedBox.square(
-                            dimension: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(
-                            webUiActive
-                                ? Icons.open_in_browser
-                                : Icons.language_outlined,
-                          ),
-                    onPressed: webUi.status == WebUiBrowserStatus.opening
-                        ? null
-                        : () => onOpenWebUi(session, target!),
-                  ),
-              ],
+    final actions = <Widget>[
+      if (onPin != null)
+        IconButton(
+          tooltip: pinned == true ? '取消固定' : '固定会话',
+          icon: Icon(pinned == true ? Icons.star : Icons.star_border),
+          onPressed: onPin,
+        ),
+      if (pending.isNotEmpty)
+        Badge(
+          key: ValueKey('pending-${session.sessionId}'),
+          label: Text('${pending.length}'),
+          child: const Icon(Icons.notification_important_outlined),
+        ),
+      if (target != null)
+        IconButton(
+          key: ValueKey('prompt-${session.sessionId}'),
+          tooltip: '发送到 OpenCode',
+          icon: const Icon(Icons.edit_outlined),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  SessionPromptPage(session: session, target: target!),
             ),
+          ),
+        ),
+      if (target != null)
+        IconButton(
+          key: ValueKey('webui-${session.sessionId}'),
+          tooltip: webUiActive ? '在浏览器中重新打开此会话' : '在浏览器中打开此会话',
+          icon: webUiOpening
+              ? const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(
+                  webUiActive ? Icons.open_in_browser : Icons.language_outlined,
+                ),
+          onPressed: webUiOpening ? null : () => onOpenWebUi(session, target!),
+        ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked =
+            constraints.maxWidth < 560 ||
+            MediaQuery.textScalerOf(context).scale(14) > 21;
+        final subtitle = Text(
+          statusLabel == null
+              ? '${session.title} · ${_elapsedText()}'
+              : '${session.machine} · ${session.project}\n${pending.isNotEmpty ? "等待输入" : statusLabel} · ${_elapsedText()}',
+        );
+        return ListTile(
+          key: ValueKey('session-${session.sessionId}'),
+          title: Text(
+            statusLabel == null
+                ? '${session.machine} · ${session.project}'
+                : session.title,
+          ),
+          subtitle: stacked && actions.isNotEmpty
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    subtitle,
+                    Wrap(
+                      spacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: actions,
+                    ),
+                  ],
+                )
+              : subtitle,
+          trailing: stacked || actions.isEmpty
+              ? null
+              : Row(mainAxisSize: MainAxisSize.min, children: actions),
+        );
+      },
     );
   }
 

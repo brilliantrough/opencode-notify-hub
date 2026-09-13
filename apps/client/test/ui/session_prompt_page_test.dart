@@ -4,6 +4,7 @@ import 'package:client/realtime/instance_presence.dart';
 import 'package:client/sessions/session_prompt_controller.dart';
 import 'package:client/ui/session_prompt_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -56,6 +57,7 @@ void main() {
       find.byKey(const ValueKey('session-prompt-input')),
       'Continue and run the tests',
     );
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('send-session-prompt')));
     await tester.pumpAndSettle();
 
@@ -67,7 +69,7 @@ void main() {
             find.byKey(const ValueKey('send-session-prompt')),
           )
           .onPressed,
-      isNotNull,
+      isNull,
     );
     expect(
       tester
@@ -76,5 +78,16 @@ void main() {
           ?.text,
       isEmpty,
     );
+    await tester.enterText(
+      find.byKey(const ValueKey('session-prompt-input')),
+      'Continue again',
+    );
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(sent.last, 'instance-1|ses-1|command-1|Continue again');
+    expect(sent, hasLength(2));
   });
 }

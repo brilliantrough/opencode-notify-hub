@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../realtime/active_sessions.dart';
@@ -35,6 +36,10 @@ class _SessionPromptPageState extends ConsumerState<SessionPromptPage> {
   }
 
   Future<void> _send() async {
+    if (ref.read(sessionPromptStatesProvider)[widget.session.sessionId] ==
+        SessionPromptState.sending) {
+      return;
+    }
     final text = _textController.text.trim();
     if (text.isEmpty) return;
     await ref
@@ -47,7 +52,7 @@ class _SessionPromptPageState extends ConsumerState<SessionPromptPage> {
     if (mounted &&
         ref.read(sessionPromptStatesProvider)[widget.session.sessionId] ==
             SessionPromptState.sent) {
-      _textController.clear();
+      setState(_textController.clear);
     }
   }
 
@@ -58,52 +63,65 @@ class _SessionPromptPageState extends ConsumerState<SessionPromptPage> {
         SessionPromptState.idle;
     final sending = state == SessionPromptState.sending;
     final locked = sending;
-    return Scaffold(
-      appBar: AppBar(title: const Text('发送到 OpenCode')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        children: [
-          Text(
-            widget.session.title,
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${widget.session.machine} · ${widget.session.project}',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            widget.session.sessionId,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 24),
-          TextField(
-            key: const ValueKey('session-prompt-input'),
-            controller: _textController,
-            enabled: !locked,
-            autofocus: true,
-            minLines: 4,
-            maxLines: 12,
-            maxLength: 32000,
-            textInputAction: TextInputAction.newline,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              labelText: '输入要发送的内容',
-              alignLabelWithHint: true,
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter, control: true): _send,
+        const SingleActivator(LogicalKeyboardKey.enter, meta: true): _send,
+      },
+      child: Scaffold(
+        appBar: AppBar(title: const Text('发送到 OpenCode')),
+        body: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          children: [
+            Text(
+              widget.session.title,
+              style: Theme.of(context).textTheme.titleLarge,
             ),
-          ),
-          if (sending) const LinearProgressIndicator(),
-          if (state != SessionPromptState.idle && !sending)
-            _PromptStatus(state: state),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            key: const ValueKey('send-session-prompt'),
-            onPressed: locked ? null : _send,
-            icon: const Icon(Icons.send_outlined),
-            label: const Text('发送'),
-          ),
-        ],
+            const SizedBox(height: 6),
+            Text(
+              '${widget.session.machine} · ${widget.session.project}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 4),
+            SelectableText(
+              widget.session.sessionId,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 24),
+            TextField(
+              key: const ValueKey('session-prompt-input'),
+              controller: _textController,
+              enabled: !locked,
+              autofocus: true,
+              minLines: 4,
+              maxLines: 12,
+              maxLength: 32000,
+              textInputAction: TextInputAction.newline,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: '输入要发送的内容',
+                alignLabelWithHint: true,
+              ),
+            ),
+            if (sending) const LinearProgressIndicator(),
+            if (state != SessionPromptState.idle && !sending)
+              _PromptStatus(state: state),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              key: const ValueKey('send-session-prompt'),
+              onPressed: locked || _textController.text.trim().isEmpty
+                  ? null
+                  : _send,
+              icon: const Icon(Icons.send_outlined),
+              label: Text(sending ? '发送中…' : '发送'),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Enter 换行 · Ctrl+Enter 发送'),
+            ),
+          ],
+        ),
       ),
     );
   }

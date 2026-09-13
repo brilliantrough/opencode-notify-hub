@@ -54,6 +54,7 @@ import { QueuePump } from "./pump.js";
 import { PermissionReplyAdapter, type PermissionReplyClient } from "./permission-reply-adapter.js";
 import { QuestionReplyAdapter, type QuestionReplyClient } from "./question-reply-adapter.js";
 import { SessionPromptAdapter } from "./session-prompt-adapter.js";
+import { SessionCatalogAdapter } from "./session-catalog.js";
 import { WebUiProxy } from "./webui-proxy.js";
 import { GatewaySender } from "./sender.js";
 import {
@@ -199,6 +200,7 @@ export function createSessionNotifyHooks(
   let decider: PermissionReplyAdapter | null = null;
   let prompter: SessionPromptAdapter | null = null;
   let webUiProxy: WebUiProxy | null = null;
+  let catalog: SessionCatalogAdapter | null = null;
   const control =
     deps.control ??
     (input.serverUrl instanceof URL
@@ -248,6 +250,10 @@ export function createSessionNotifyHooks(
               fetch: loopbackFetch,
             });
             return prompter.send(sessionID, text, signal);
+          },
+          listSessions: (query, signal) => {
+            catalog ??= new SessionCatalogAdapter(directory, input.serverUrl, loopbackFetch);
+            return catalog.list(query, signal);
           },
           webUiRequest: (
             request: WebUiHttpRequest,

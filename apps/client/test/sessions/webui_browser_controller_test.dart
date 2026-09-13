@@ -55,10 +55,62 @@ class _FakeTunnel extends GatewayWebUiTunnel {
 }
 
 void main() {
-  test('uses an in-app WebView on Android to keep the tunnel process active', () {
-    expect(webUiLaunchMode(true), LaunchMode.inAppWebView);
-    expect(webUiLaunchMode(false), LaunchMode.externalApplication);
-  });
+  test(
+    'reuses the instance origin across sessions and keeps other instances alive',
+    () async {
+      final tunnels = <_FakeTunnel>[];
+      final launched = <Uri>[];
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(_FakeAuthController.new),
+          webUiTunnelFactoryProvider.overrideWithValue((_) {
+            final tunnel = _FakeTunnel(
+              Uri.parse('http://127.0.0.1:${42000 + tunnels.length}/'),
+            );
+            tunnels.add(tunnel);
+            return tunnel;
+          }),
+          webUiBrowserLauncherProvider.overrideWithValue((uri) async {
+            launched.add(uri);
+            return true;
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(
+        webUiBrowserControllerProvider.notifier,
+      );
+      await controller.open('one', directory: '/work', sessionId: 'a');
+      await controller.open('one', directory: '/work', sessionId: 'b');
+      await controller.open('two', directory: '/other', sessionId: 'c');
+      expect(tunnels, hasLength(2));
+      expect(launched[0].origin, launched[1].origin);
+      expect(launched[0].path, isNot(launched[1].path));
+      expect(tunnels.first.closeCalls, 0);
+      await controller.reopen('one');
+      expect(launched.last, launched[1]);
+      expect(
+        container
+            .read(webUiBrowserControllerProvider)
+            .connections['one']!
+            .localUri,
+        launched[1],
+      );
+      await controller.close('two');
+      expect(
+        container.read(webUiBrowserControllerProvider).activeFor('one'),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'uses an in-app WebView on Android to keep the tunnel process active',
+    () {
+      expect(webUiLaunchMode(true), LaunchMode.inAppWebView);
+      expect(webUiLaunchMode(false), LaunchMode.externalApplication);
+    },
+  );
 
   test('starts one tunnel and reopens it in the system browser', () async {
     final auth = _FakeAuthController();

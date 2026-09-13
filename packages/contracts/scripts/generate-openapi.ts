@@ -40,6 +40,7 @@ import { pendingInteractionSchema, pendingSnapshotSchema } from "../src/schemas/
 import { decidePermissionBodySchema } from "../src/schemas/permissions.js";
 import { answerQuestionBodySchema } from "../src/schemas/questions.js";
 import { wsServerMessageSchema } from "../src/schemas/ws.js";
+import { sessionCatalogSchema, sessionCatalogQuerySchema } from "../src/schemas/sessions.js";
 
 // The API version is sourced from the package metadata so the document can
 // never drift from the published contracts version.
@@ -511,6 +512,23 @@ const document = {
         },
       },
     },
+    "/v1/instances/{instanceId}/sessions": {
+      get: {
+        operationId: "getSessionCatalog",
+        tags: ["sessions"],
+        summary: "List recent and bookmarked main sessions, including idle sessions",
+        security: bearerSecurity,
+        parameters: [instanceIdPathParameter, ...Object.entries(sessionCatalogQuerySchema.properties).map(([name, schema]) => ({ name, in: "query", schema }))],
+        responses: {
+          "200": jsonResponse("Current session metadata", "SessionCatalog"),
+          "401": errorResponse("Unauthenticated"),
+          "404": errorResponse("Instance unavailable"),
+          "501": errorResponse("Plugin does not support session discovery"),
+          "502": errorResponse("OpenCode session query failed"),
+          "504": errorResponse("Plugin query timed out"),
+        },
+      },
+    },
     "/v1/instances/{instanceId}/sessions/{sessionId}/prompt": {
       post: {
         operationId: "sendSessionPrompt",
@@ -559,11 +577,13 @@ const document = {
         operationId: "connectWebUiTunnel",
         tags: ["sessions"],
         security: bearerSecurity,
-        summary: "Upgrade a temporary WebUI tunnel.",
+        summary: "Upgrade a renewable WebUI tunnel.",
         description:
           "The client sends one webui_tunnel_open frame naming an online instance, " +
           "then proxies HTTP and SSE requests through the authenticated tunnel. " +
-          "The tunnel is memory-only and ends when either WebSocket closes.",
+          "A webui_auth_refresh frame with a fresh accessToken renews authentication; " +
+          "webui_auth_ready acknowledges expiresAtMs without interrupting HTTP/SSE. " +
+          "The Gateway tunnel is memory-only; the client reconnects behind the same local origin.",
         responses: {
           "101": emptyResponse("WebUI tunnel upgrade accepted."),
           "401": errorResponse("Missing or invalid access token."),
@@ -664,6 +684,7 @@ const document = {
       RegisterDeviceBody: registerDeviceBodySchema,
       ResetPasswordBody: resetPasswordBodySchema,
       SendPromptBody: sendPromptBodySchema,
+      SessionCatalog: sessionCatalogSchema,
       TokenPair: tokenPairSchema,
       VerifyEmailBody: verifyEmailBodySchema,
       WsServerMessage: wsServerMessageSchema,

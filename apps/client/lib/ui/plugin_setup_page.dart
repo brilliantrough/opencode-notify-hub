@@ -3,6 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/server_config.dart';
+import '../ingest_keys/ingest_keys_controller.dart';
+import '../ingest_keys/plugin_environment.dart';
+import 'ingest_keys_page.dart';
+import 'key_setup_dialog.dart';
 
 /// Where OpenCode auto-discovers the plugin bundle.
 const pluginInstallPath = '~/.config/opencode/plugins/session-notify.js';
@@ -22,9 +26,12 @@ class PluginSetupPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final gatewayUrl = ref.watch(appConfigProvider).gatewayHttpBase;
-    final envExample =
-        'export NOTIFY_GATEWAY_URL=$gatewayUrl\n'
-        'export NOTIFY_INGEST_KEY=keyId.secret';
+    final envExample = pluginEnvironment(
+      gateway: gatewayUrl,
+      credential: 'keyId.secret',
+      machine: '',
+    );
+    final keys = ref.watch(ingestKeysControllerProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('插件安装')),
       body: ListView(
@@ -35,7 +42,24 @@ class PluginSetupPage extends ConsumerWidget {
           _CopyRow(value: pluginInstallPath, copyKey: copyPathKey),
           const SizedBox(height: 16),
           const _StepTitle('2. 配置环境变量'),
-          const Text('在启动 OpenCode 的环境中设置以下变量：'),
+          const Text('选择密钥，即可填写机器名并复制完整配置：'),
+          for (final key in keys.value ?? const <IngestKey>[])
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.key_outlined),
+              title: Text(key.name),
+              trailing: const Icon(Icons.terminal),
+              onTap: () => showKeySetupDialog(context, key),
+            ),
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const IngestKeysPage()),
+            ),
+            icon: const Icon(Icons.add),
+            label: const Text('新建或管理密钥'),
+          ),
+          if (keys.hasError) const Text('密钥暂时未能加载，可在密钥页重试。'),
+          const Text('也可以先复制下面的占位模板：'),
           const SizedBox(height: 8),
           Text(envExample),
           Align(
@@ -48,13 +72,16 @@ class PluginSetupPage extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 8),
-          const Text('NOTIFY_GATEWAY_URL 为本客户端连接的网关地址；'
-              'NOTIFY_INGEST_KEY 为「密钥」页创建的接入密钥（keyId.secret），'
-              '仅在创建时显示一次，请妥善保存。'),
+          const Text(
+            'NOTIFY_GATEWAY_URL 使用当前网关；NOTIFY_INGEST_KEY 填完整密钥（keyId.secret）；'
+            'NOTIFY_MACHINE 填服务器名称。新建密钥保存在本机，可随时回到密钥页查看与复制。',
+          ),
           const SizedBox(height: 16),
           const _StepTitle('3. 重启 OpenCode'),
-          const Text('插件在 OpenCode 启动时加载：安装文件或修改环境变量后，'
-              '需退出并重启 OpenCode 才能生效。'),
+          const Text(
+            '插件在 OpenCode 启动时加载：安装文件或修改环境变量后，'
+            '需退出并重启 OpenCode 才能生效。',
+          ),
         ],
       ),
     );
@@ -91,9 +118,7 @@ class _CopyRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Expanded(
-          child: Text(value),
-        ),
+        Expanded(child: Text(value)),
         IconButton(
           key: copyKey,
           icon: const Icon(Icons.copy, size: 16),

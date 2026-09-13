@@ -1,6 +1,7 @@
 import type { JSONSchema } from "json-schema-to-ts";
 
 import { pendingInteractionSchema } from "./pending.js";
+import { sessionCatalogSchema, sessionCatalogQuerySchema } from "./sessions.js";
 import {
   permissionCommandStatusSchema,
   permissionDecisionSchema,
@@ -192,6 +193,41 @@ const webUiTunnelCloseSchema = {
   },
 } as const satisfies JSONSchema;
 
+const webUiHttpCancelSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "tunnelId", "requestId"],
+  properties: {
+    type: { const: "webui_http_cancel" },
+    tunnelId: uuidString,
+    requestId: uuidString,
+  },
+} as const satisfies JSONSchema;
+
+const sessionCatalogRequestSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "requestId", "query"],
+  properties: {
+    type: { const: "session_catalog_request" },
+    requestId: uuidString,
+    query: sessionCatalogQuerySchema,
+  },
+} as const satisfies JSONSchema;
+
+const sessionCatalogResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "requestId", "instanceId", "status"],
+  properties: {
+    type: { const: "session_catalog_response" },
+    requestId: uuidString,
+    instanceId: uuidString,
+    status: { type: "string", enum: ["ready", "error", "unsupported"] },
+    catalog: sessionCatalogSchema,
+  },
+} as const satisfies JSONSchema;
+
 const webUiHttpResponseStartSchema = {
   type: "object",
   additionalProperties: false,
@@ -238,6 +274,7 @@ export const pluginControlClientMessageSchema = {
     webUiHttpResponseStartSchema,
     webUiHttpResponseChunkSchema,
     webUiHttpResponseEndSchema,
+    sessionCatalogResponseSchema,
   ],
 } as const satisfies JSONSchema;
 
@@ -274,5 +311,7 @@ export const pluginControlServerMessageSchema = {
     sessionPromptCommandSchema,
     webUiHttpRequestSchema,
     webUiTunnelCloseSchema,
+    sessionCatalogRequestSchema,
+    webUiHttpCancelSchema,
   ],
 } as const satisfies JSONSchema;

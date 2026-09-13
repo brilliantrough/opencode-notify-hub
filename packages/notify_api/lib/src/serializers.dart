@@ -66,6 +66,9 @@ import 'package:notify_api/src/model/plugin_control_client_message_one_of4.dart'
 import 'package:notify_api/src/model/plugin_control_client_message_one_of5.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of6.dart';
 import 'package:notify_api/src/model/plugin_control_client_message_one_of7.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of8.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of8_catalog.dart';
+import 'package:notify_api/src/model/plugin_control_client_message_one_of8_catalog_sessions_inner.dart';
 import 'package:notify_api/src/model/plugin_control_server_message.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
@@ -74,11 +77,15 @@ import 'package:notify_api/src/model/plugin_control_server_message_one_of3.dart'
 import 'package:notify_api/src/model/plugin_control_server_message_one_of4.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of5.dart';
 import 'package:notify_api/src/model/plugin_control_server_message_one_of6.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of7.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of7_query.dart';
+import 'package:notify_api/src/model/plugin_control_server_message_one_of8.dart';
 import 'package:notify_api/src/model/refresh_body.dart';
 import 'package:notify_api/src/model/register_body.dart';
 import 'package:notify_api/src/model/register_device_body.dart';
 import 'package:notify_api/src/model/reset_password_body.dart';
 import 'package:notify_api/src/model/send_prompt_body.dart';
+import 'package:notify_api/src/model/session_catalog.dart';
 import 'package:notify_api/src/model/token_pair.dart';
 import 'package:notify_api/src/model/verify_email_body.dart';
 import 'package:notify_api/src/model/ws_server_message.dart';
@@ -142,6 +149,9 @@ part 'serializers.g.dart';
   PluginControlClientMessageOneOf5,
   PluginControlClientMessageOneOf6,
   PluginControlClientMessageOneOf7,
+  PluginControlClientMessageOneOf8,
+  PluginControlClientMessageOneOf8Catalog,
+  PluginControlClientMessageOneOf8CatalogSessionsInner,
   PluginControlServerMessage,
   PluginControlServerMessageOneOf,
   PluginControlServerMessageOneOf1,
@@ -150,11 +160,15 @@ part 'serializers.g.dart';
   PluginControlServerMessageOneOf4,
   PluginControlServerMessageOneOf5,
   PluginControlServerMessageOneOf6,
+  PluginControlServerMessageOneOf7,
+  PluginControlServerMessageOneOf7Query,
+  PluginControlServerMessageOneOf8,
   RefreshBody,
   RegisterBody,
   RegisterDeviceBody,
   ResetPasswordBody,
   SendPromptBody,
+  SessionCatalog,
   TokenPair,
   VerifyEmailBody,
   WsServerMessage,

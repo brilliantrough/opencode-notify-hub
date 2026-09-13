@@ -10,6 +10,7 @@ import 'package:client/realtime/active_sessions.dart';
 import 'package:client/realtime/instance_presence.dart';
 import 'package:client/realtime/ws_client.dart';
 import 'package:client/sessions/webui_browser_controller.dart';
+import 'package:client/sessions/session_catalog.dart';
 import 'package:client/ui/home_page.dart';
 import 'package:client/ui/session_prompt_page.dart';
 import 'package:dio/dio.dart';
@@ -26,6 +27,11 @@ class FakeActiveSessions extends ActiveSessions {
 
   @override
   Map<String, ActiveSession> build() => _initial;
+}
+
+class FakeSessionCatalog extends SessionCatalogController {
+  @override
+  SessionCatalogState build() => const SessionCatalogState();
 }
 
 class FakeInstancePresences extends InstancePresences {
@@ -84,7 +90,7 @@ class FakeWebUiBrowserController extends WebUiBrowserController {
   }
 
   @override
-  Future<void> close() async {
+  Future<void> close([String? instanceId]) async {
     closeCalls++;
     state = const WebUiBrowserState.idle();
   }
@@ -155,6 +161,7 @@ Future<void> pumpAnswerableHome(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        sessionCatalogProvider.overrideWith(FakeSessionCatalog.new),
         wsStatusProvider.overrideWith(
           (ref) => Stream.value(WsStatus.connected),
         ),
@@ -210,6 +217,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          sessionCatalogProvider.overrideWith(FakeSessionCatalog.new),
           wsStatusProvider.overrideWith((ref) => Stream.value(status)),
           activeSessionsProvider.overrideWith(
             () => FakeActiveSessions(sessions),
@@ -360,7 +368,7 @@ void main() {
 
   testWidgets('empty state when there are no active sessions', (tester) async {
     await pumpHome(tester);
-    expect(find.text('暂无会话'), findsOneWidget);
+    expect(find.text('暂无匹配会话'), findsOneWidget);
   });
 
   testWidgets(
@@ -378,7 +386,7 @@ void main() {
       );
 
       final pendingHeader = tester.getTopLeft(find.text('待处理请求')).dy;
-      final sessionHeader = tester.getTopLeft(find.text('会话')).dy;
+      final sessionHeader = tester.getTopLeft(find.text('实时会话')).dy;
       expect(pendingHeader, lessThan(sessionHeader));
       expect(find.text('待回答'), findsOneWidget);
       expect(find.byKey(const ValueKey('pending-refresh')), findsOneWidget);

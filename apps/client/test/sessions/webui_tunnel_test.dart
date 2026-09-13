@@ -54,6 +54,127 @@ class _FakeChannel extends StreamChannelMixin<Object?>
 }
 
 void main() {
+  test(
+    'renews an active SSE and reconnects behind the same HTTP origin',
+    () async {
+      final channels = <_FakeChannel>[];
+      final tunnel = GatewayWebUiTunnel(
+        gatewayUri: Uri.parse('wss://notify.example.com/v1/webui/ws'),
+        accessToken: 'old',
+        instanceId: 'instance-1',
+        refreshToken: () async => 'new',
+        connector: (_, _) {
+          final channel = _FakeChannel();
+          channels.add(channel);
+          return channel;
+        },
+      );
+      final client = HttpClient();
+      addTearDown(() async {
+        client.close(force: true);
+        await tunnel.close();
+        for (final channel in channels) {
+          await channel.incoming.close();
+        }
+      });
+      final start = tunnel.start();
+      await _waitFor(
+        () => channels.isNotEmpty && channels.first.sink.sent.isNotEmpty,
+      );
+      final first = channels.first;
+      first.incoming.add(
+        jsonEncode({
+          'type': 'webui_tunnel_ready',
+          'tunnelId': 't1',
+          'expiresAtMs': DateTime.now().millisecondsSinceEpoch + 61000,
+        }),
+      );
+      final uri = await start;
+      final responseFuture = (await client.getUrl(
+        uri.resolve('/global/event'),
+      )).close();
+      await _waitFor(() => first.sink.sent.length >= 2);
+      final request =
+          jsonDecode(first.sink.sent[1] as String) as Map<String, dynamic>;
+      final id = request['requestId'];
+      first.incoming.add(
+        jsonEncode({
+          'type': 'webui_http_response_start',
+          'tunnelId': 't1',
+          'requestId': id,
+          'status': 200,
+          'headers': {
+            'content-type': ['text/event-stream'],
+          },
+        }),
+      );
+      first.incoming.add(
+        jsonEncode({
+          'type': 'webui_http_response_chunk',
+          'tunnelId': 't1',
+          'requestId': id,
+          'body': base64Encode(utf8.encode('data: before\n\n')),
+        }),
+      );
+      final response = await responseFuture;
+      final chunks = StreamIterator<List<int>>(response);
+      expect(await chunks.moveNext(), isTrue);
+      await _waitFor(
+        () => first.sink.sent.any(
+          (f) => jsonDecode(f as String)['type'] == 'webui_auth_refresh',
+        ),
+      );
+      expect(channels, hasLength(1));
+      first.incoming.add(
+        jsonEncode({
+          'type': 'webui_auth_ready',
+          'expiresAtMs': DateTime.now().millisecondsSinceEpoch + 900000,
+        }),
+      );
+      first.incoming.add(
+        jsonEncode({
+          'type': 'webui_http_response_chunk',
+          'tunnelId': 't1',
+          'requestId': id,
+          'body': base64Encode(utf8.encode('data: after\n\n')),
+        }),
+      );
+      expect(await chunks.moveNext(), isTrue);
+      expect(utf8.decode(chunks.current), 'data: after\n\n');
+      await first.incoming.close();
+      await _waitFor(
+        () => channels.length == 2 && channels.last.sink.sent.isNotEmpty,
+      );
+      final second = channels.last;
+      expect(second.sink.sent, hasLength(1)); // No HTTP request was replayed.
+      second.incoming.add(
+        jsonEncode({'type': 'webui_tunnel_ready', 'tunnelId': 't2'}),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final next = (await client.getUrl(uri.resolve('/session'))).close();
+      await _waitFor(() => second.sink.sent.length == 2);
+      final newId = jsonDecode(second.sink.sent[1] as String)['requestId'];
+      second.incoming.add(
+        jsonEncode({
+          'type': 'webui_http_response_start',
+          'tunnelId': 't2',
+          'requestId': newId,
+          'status': 204,
+          'headers': {},
+        }),
+      );
+      second.incoming.add(
+        jsonEncode({
+          'type': 'webui_http_response_end',
+          'tunnelId': 't2',
+          'requestId': newId,
+        }),
+      );
+      expect((await next).statusCode, 204);
+      await chunks.cancel();
+    },
+  );
+
   test('serves one local HTTP request through Gateway tunnel frames', () async {
     final channel = _FakeChannel();
     final tunnel = GatewayWebUiTunnel(

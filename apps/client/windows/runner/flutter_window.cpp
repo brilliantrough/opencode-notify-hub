@@ -1,6 +1,8 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -50,7 +52,17 @@ void FlutterWindow::OnDestroy() {
 LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
-                              LPARAM const lparam) noexcept {
+                               LPARAM const lparam) noexcept {
+  // A tray-hidden app may receive no Flutter foreground transition after sleep.
+  // Keep local HTTP listeners, but replace stale authenticated remote sockets.
+  if (message == WM_POWERBROADCAST && wparam == PBT_APMRESUMEAUTOMATIC &&
+      flutter_controller_) {
+    flutter::MethodChannel<flutter::EncodableValue> channel(
+        flutter_controller_->engine()->messenger(),
+        "dev.opencodenotify.client/power",
+        &flutter::StandardMethodCodec::GetInstance());
+    channel.InvokeMethod("resume", nullptr);
+  }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

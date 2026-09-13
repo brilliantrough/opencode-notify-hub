@@ -176,14 +176,34 @@ socket, not that OpenCode admitted or completed the turn. The Plugin submits the
 exact text through the V2 session prompt endpoint. There is no offline queue or
 automatic retry, and prompt text is redacted from logs and never persisted.
 
-`GET /v1/webui/ws` upgrades an authenticated native client to a temporary WebUI
+`GET /v1/instances/{instanceId}/sessions` queries the owner's online Plugin for
+session metadata. Query fields: `search` (title, up to 200 characters), `limit`
+(1–200, default 50), and comma-separated `sessionIds` (up to 4,096 characters;
+the Plugin looks up at most 50 explicit bookmarks). The response is
+`{ sessions: [{sessionId,title,directory,updatedAt,status}], hasMore }`.
+Statuses are `idle`, `busy`, `retry`, or `unknown` when status lookup failed.
+Only main, non-archived sessions in the Plugin's directory are returned. The
+Gateway relays the snapshot in memory and does not store it. `404` means an
+unavailable instance; `501` unsupported Plugin; `502` upstream query failure;
+`504` timeout (10 seconds, with an 8-second Plugin query deadline).
+
+`GET /v1/webui/ws` upgrades an authenticated native client to a renewable WebUI
 tunnel. The client exposes a random loopback HTTP port and opens it in the system
 browser; it remains the bridge while the browser is using that localhost URL.
 The first frame selects one owned online instance; subsequent correlated frames
 relay bounded HTTP request bodies and streamed HTTP/SSE responses through the
 Plugin to its loopback OpenCode server. The Gateway stores no WebUI body or
-tunnel state outside memory. Closing either WebSocket closes the tunnel; access
-token expiry closes the client side with `4401`.
+tunnel state outside memory. `webui_tunnel_ready` includes `tunnelId` and
+`expiresAtMs`. The client sends `{type:"webui_auth_refresh",accessToken}` before
+expiry; the Gateway verifies the same account and acknowledges
+`{type:"webui_auth_ready",expiresAtMs}` without replacing the tunnel. Absent a
+valid renewal, access-token expiry still closes the socket with `4401`.
+
+`webui_http_cancel` carries `tunnelId` and `requestId`, cancels the Plugin's
+upstream request, and frees its Gateway correlation entry. Closing either
+WebSocket closes that Gateway tunnel and cancels upstream requests; the native
+client reconnects behind the same loopback HTTP origin with a new tunnel ID.
+Each instance owns an independent client listener. No in-flight write is replayed.
 
 ## Regeneration
 

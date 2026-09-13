@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:web_socket_channel/io.dart';
@@ -19,6 +20,7 @@ typedef WebUiTunnelFactory = GatewayWebUiTunnel Function(String instanceId);
 final webUiTunnelFactoryProvider = Provider<WebUiTunnelFactory>((ref) {
   final config = ref.watch(appConfigProvider);
   final tokenHolder = ref.watch(accessTokenHolderProvider);
+  final refresher = ref.watch(tokenRefresherProvider);
   return (instanceId) {
     final token = tokenHolder.accessToken;
     if (token == null) throw StateError('No authenticated session');
@@ -26,6 +28,11 @@ final webUiTunnelFactoryProvider = Provider<WebUiTunnelFactory>((ref) {
       gatewayUri: Uri.parse(config.gatewayWebUiWsBase),
       accessToken: token,
       instanceId: instanceId,
+      refreshToken: () async {
+        final token = await refresher.refresh();
+        if (token != null) tokenHolder.accessToken = token;
+        return token;
+      },
     );
   };
 });
@@ -37,10 +44,12 @@ class GatewayWebUiTunnel {
     required this.instanceId,
     WebUiSocketConnector? connector,
     this.initialPath = '/',
+    this.refreshToken,
   }) : _connector = connector ?? _defaultConnector;
 
   final Uri gatewayUri;
-  final String accessToken;
+  String accessToken;
+  final Future<String?> Function()? refreshToken;
   final String instanceId;
   final WebUiSocketConnector _connector;
   String initialPath;
@@ -55,42 +64,38 @@ class GatewayWebUiTunnel {
   Future<void>? _closing;
   var _closed = false;
   var _nextRequest = 0;
+  final _connectionChanges = StreamController<bool>.broadcast();
+  final _random = Random();
+  Timer? _renewal;
+  Timer? _retry;
+  int _attempt = 0;
+  int _generation = 0;
+  bool _connected = false;
+  bool _reconnecting = false;
+
+  Stream<bool> get connectionChanges => _connectionChanges.stream;
 
   Future<void> get done => _done.future;
 
   static WebSocketChannel _defaultConnector(
     Uri uri,
     Map<String, dynamic> headers,
-  ) => IOWebSocketChannel.connect(uri, headers: headers);
+  ) => IOWebSocketChannel.connect(
+    uri,
+    headers: headers,
+    pingInterval: const Duration(seconds: 20),
+  );
 
   Future<Uri> start() async {
     if (_closed) throw StateError('WebUI tunnel is closed');
     if (_channel != null) throw StateError('WebUI tunnel already started');
-    final channel = _connector(gatewayUri, {
-      'Authorization': 'Bearer $accessToken',
-    });
-    _channel = channel;
-    await channel.ready.timeout(const Duration(seconds: 10));
-    if (_closed) throw StateError('WebUI tunnel was closed while opening');
-    final ready = Completer<String>();
-    _ready = ready;
-    _subscription = channel.stream.listen(
-      (raw) => unawaited(_handleFrame(raw)),
-      onError: (Object error, StackTrace stackTrace) {
-        if (!ready.isCompleted) ready.completeError(error, stackTrace);
-        unawaited(close());
-      },
-      onDone: () {
-        if (!ready.isCompleted) {
-          ready.completeError(StateError('WebUI tunnel closed before opening'));
-        }
-        unawaited(close());
-      },
-    );
-    channel.sink.add(
-      jsonEncode({'type': 'webui_tunnel_open', 'instanceId': instanceId}),
-    );
-    _tunnelId = await ready.future.timeout(const Duration(seconds: 10));
+    try {
+      await _connect();
+    } catch (error) {
+      if (!_unauthorized(error) || refreshToken == null) rethrow;
+      await _refreshAccess();
+      await _connect();
+    }
     if (_closed) throw StateError('WebUI tunnel was closed while opening');
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     if (_closed) {
@@ -98,7 +103,18 @@ class GatewayWebUiTunnel {
       throw StateError('WebUI tunnel was closed while opening');
     }
     _server = server;
-    server.listen(_handleRequest);
+    server.listen((request) {
+      unawaited(
+        _handleRequest(request).catchError((Object _) async {
+          try {
+            await request.response.close();
+          } catch (_) {
+            /* Browser disconnected. */
+          }
+        }),
+      );
+    });
+    if (!_connected) _scheduleReconnect();
     final path = initialPath.startsWith('/') ? initialPath : '/$initialPath';
     return Uri(
       scheme: 'http',
@@ -106,6 +122,176 @@ class GatewayWebUiTunnel {
       port: server.port,
       path: path,
     );
+  }
+
+  bool _unauthorized(Object error) {
+    final inner = error is WebSocketChannelException ? error.inner : error;
+    return inner is WebSocketException && inner.httpStatusCode == 401;
+  }
+
+  Future<void> _connect() async {
+    final generation = ++_generation;
+    final channel = _connector(gatewayUri, {
+      'Authorization': 'Bearer $accessToken',
+    });
+    _channel = channel;
+    try {
+      await channel.ready.timeout(const Duration(seconds: 10));
+      if (_closed || generation != _generation) {
+        throw StateError('Tunnel closed');
+      }
+      final ready = Completer<String>();
+      _ready = ready;
+      final waiting = ready.future.timeout(const Duration(seconds: 10));
+      _subscription = channel.stream.listen(
+        (raw) {
+          if (generation != _generation) return;
+          unawaited(_handleFrame(raw).catchError((Object _) => _lost(channel)));
+        },
+        onError: (Object error) {
+          if (!ready.isCompleted) ready.completeError(error);
+          _lost(channel);
+        },
+        onDone: () {
+          if (!ready.isCompleted) {
+            ready.completeError(StateError('Tunnel disconnected'));
+          }
+          _lost(channel);
+        },
+      );
+      try {
+        channel.sink.add(
+          jsonEncode({'type': 'webui_tunnel_open', 'instanceId': instanceId}),
+        );
+      } catch (error) {
+        if (!ready.isCompleted) ready.completeError(error);
+      }
+      _tunnelId = await waiting;
+      if (_closed || generation != _generation) {
+        throw StateError('Tunnel closed');
+      }
+      _connected = true;
+      _attempt = 0;
+      _connectionChanges.add(true);
+    } catch (_) {
+      if (_channel == channel) {
+        _channel = null;
+        _generation++;
+        _renewal?.cancel();
+        await _subscription?.cancel();
+        _subscription = null;
+        unawaited(channel.sink.close());
+      }
+      rethrow;
+    }
+  }
+
+  void _lost(WebSocketChannel channel) {
+    if (_closed || _channel != channel) return;
+    _channel = null;
+    _generation++;
+    _connected = false;
+    _tunnelId = null;
+    _renewal?.cancel();
+    final subscription = _subscription;
+    _subscription = null;
+    unawaited(subscription?.cancel());
+    unawaited(channel.sink.close());
+    final pending = _pending.values.toList();
+    _pending.clear();
+    for (final response in pending) {
+      unawaited(response.fail().catchError((Object _) {}));
+    }
+    if (_server == null) return; // Initial failure is reported by start().
+    _connectionChanges.add(false);
+    _scheduleReconnect(channel.closeCode == 4401);
+  }
+
+  void _scheduleReconnect([bool expired = false]) {
+    if (_closed || _retry != null) return;
+    final ms = min(500 * (1 << min(_attempt++, 6)), 30000);
+    _retry = Timer(
+      Duration(
+        milliseconds: expired && _attempt == 1
+            ? 0
+            : (ms * (0.75 + _random.nextDouble() * 0.5)).round(),
+      ),
+      () {
+        _retry = null;
+        unawaited(_reconnect(expired));
+      },
+    );
+  }
+
+  Future<void> _refreshAccess() async {
+    final token = await refreshToken?.call();
+    if (_closed) throw StateError('Tunnel closed');
+    if (token == null) {
+      await close();
+      throw StateError('Authentication expired');
+    }
+    accessToken = token;
+  }
+
+  Future<void> _reconnect(bool expired) async {
+    if (_closed || _reconnecting) return;
+    _reconnecting = true;
+    try {
+      if (expired) await _refreshAccess();
+      if (_closed) return;
+      await _connect();
+    } catch (error) {
+      if (_closed) return;
+      if (_unauthorized(error)) {
+        try {
+          await _refreshAccess();
+        } catch (_) {
+          _scheduleReconnect(true);
+          return;
+        }
+      }
+      _scheduleReconnect();
+    } finally {
+      _reconnecting = false;
+    }
+  }
+
+  void resume({bool afterSleep = false}) {
+    if (_closed || _server == null || _reconnecting) return;
+    final channel = _channel;
+    if (afterSleep && _connected && channel != null) _lost(channel);
+    if (_connected || _channel != null) return;
+    _retry?.cancel();
+    _retry = null;
+    unawaited(_reconnect(false));
+  }
+
+  void _scheduleRenewal(int expiresAtMs) {
+    if (refreshToken == null || _closed) return;
+    _renewal?.cancel();
+    final delay = max(
+      1000,
+      expiresAtMs - DateTime.now().millisecondsSinceEpoch - 60000,
+    );
+    _renewal = Timer(Duration(milliseconds: delay), () => unawaited(_renew()));
+  }
+
+  Future<void> _renew() async {
+    final channel = _channel;
+    if (_closed || channel == null) return;
+    try {
+      await _refreshAccess();
+      if (_closed || _channel != channel) return;
+      channel.sink.add(
+        jsonEncode({'type': 'webui_auth_refresh', 'accessToken': accessToken}),
+      );
+      // The acknowledged expiry reschedules this timer; missing acknowledgements reconnect.
+      _renewal = Timer(const Duration(seconds: 10), () => _lost(channel));
+    } catch (_) {
+      if (!_closed && _channel == channel) {
+        _renewal = Timer(const Duration(seconds: 5), () => unawaited(_renew()));
+      }
+    }
   }
 
   Future<void> close() => _closing ??= _close();
@@ -116,6 +302,13 @@ class GatewayWebUiTunnel {
       return;
     }
     _closed = true;
+    _generation++;
+    _renewal?.cancel();
+    _retry?.cancel();
+    _retry = null;
+    if (_ready != null && !_ready!.isCompleted) {
+      _ready!.completeError(StateError('Tunnel closed'));
+    }
     final tunnelId = _tunnelId;
     final channel = _channel;
     if (tunnelId != null && channel != null) {
@@ -143,15 +336,17 @@ class GatewayWebUiTunnel {
       } catch (_) {
         // The remote peer may already be unavailable.
       }
-      for (final pending in _pending.values) {
+      final responses = _pending.values.toList();
+      _pending.clear();
+      for (final pending in responses) {
         try {
           await pending.fail();
         } catch (_) {
           // One broken browser response must not prevent the rest from closing.
         }
       }
-      _pending.clear();
     } finally {
+      unawaited(_connectionChanges.close());
       if (!_done.isCompleted) _done.complete();
     }
   }
@@ -159,8 +354,24 @@ class GatewayWebUiTunnel {
   Future<void> _handleRequest(HttpRequest request) async {
     final tunnelId = _tunnelId;
     final channel = _channel;
-    if (_closed || tunnelId == null || channel == null) {
-      request.response.statusCode = HttpStatus.badGateway;
+    // A local browser may only address this listener, never use it as a forward proxy.
+    final origin = request.headers.value('origin');
+    if (request.uri.hasAuthority ||
+        request.headers.value('host') != '127.0.0.1:${_server?.port}' ||
+        (origin != null && origin != 'http://127.0.0.1:${_server?.port}')) {
+      request.response.statusCode = HttpStatus.forbidden;
+      await request.response.close();
+      return;
+    }
+    if (_closed || !_connected || tunnelId == null || channel == null) {
+      request.response.statusCode = HttpStatus.serviceUnavailable;
+      request.response.headers.set('retry-after', '2');
+      if (request.headers.value('accept')?.contains('text/html') ?? false) {
+        request.response.headers.contentType = ContentType.html;
+        request.response.write(
+          '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="2"><title>正在重连</title><p>正在重新连接 OpenCode，请保持 Notify 运行…</p>',
+        );
+      }
       await request.response.close();
       return;
     }
@@ -179,25 +390,67 @@ class GatewayWebUiTunnel {
       await request.response.close();
       return;
     }
+    if (!_connected || _channel != channel || _tunnelId != tunnelId) {
+      request.response.statusCode = HttpStatus.serviceUnavailable;
+      await request.response.close();
+      return;
+    }
     final requestId = _requestId();
     final pending = _PendingResponse(request.response);
     _pending[requestId] = pending;
+    unawaited(
+      request.response.done.then(
+        (_) => _cancelRequest(requestId, pending, tunnelId, channel),
+        onError: (Object _) =>
+            _cancelRequest(requestId, pending, tunnelId, channel),
+      ),
+    );
     final headers = <String, List<String>>{};
     request.headers.forEach((name, values) {
       headers[name] = values;
     });
-    channel.sink.add(
-      jsonEncode({
-        'type': 'webui_http_request',
-        'tunnelId': tunnelId,
-        'requestId': requestId,
-        'method': request.method,
-        'path': request.uri.toString(),
-        'headers': headers,
-        if (body.isNotEmpty) 'body': base64Encode(body),
-      }),
-    );
+    try {
+      channel.sink.add(
+        jsonEncode({
+          'type': 'webui_http_request',
+          'tunnelId': tunnelId,
+          'requestId': requestId,
+          'method': request.method,
+          'path': request.uri.toString(),
+          'headers': headers,
+          if (body.isNotEmpty) 'body': base64Encode(body),
+        }),
+      );
+    } catch (_) {
+      _pending.remove(requestId);
+      await pending.fail();
+      _lost(channel);
+    }
     await pending.done;
+  }
+
+  void _cancelRequest(
+    String id,
+    _PendingResponse response,
+    String tunnelId,
+    WebSocketChannel channel,
+  ) {
+    if (_pending[id] != response) return;
+    _pending.remove(id);
+    if (_channel == channel) {
+      try {
+        channel.sink.add(
+          jsonEncode({
+            'type': 'webui_http_cancel',
+            'tunnelId': tunnelId,
+            'requestId': id,
+          }),
+        );
+      } catch (_) {
+        _lost(channel);
+      }
+    }
+    unawaited(response.fail().catchError((Object _) {}));
   }
 
   Future<void> _handleFrame(Object? raw) async {
@@ -209,6 +462,11 @@ class GatewayWebUiTunnel {
       return;
     }
     if (value is! Map<String, dynamic>) return;
+    if ((value['type'] == 'webui_tunnel_ready' ||
+            value['type'] == 'webui_auth_ready') &&
+        value['expiresAtMs'] is int) {
+      _scheduleRenewal(value['expiresAtMs'] as int);
+    }
     if (value['type'] == 'webui_tunnel_ready' && value['tunnelId'] is String) {
       if (!(_ready?.isCompleted ?? true)) {
         _ready!.complete(value['tunnelId'] as String);
@@ -240,15 +498,22 @@ class GatewayWebUiTunnel {
         if (body is String) {
           try {
             await pending.add(base64Decode(body));
-          } on FormatException {
-            await pending.fail();
-            _pending.remove(requestId);
+          } catch (_) {
+            final channel = _channel;
+            final tunnelId = _tunnelId;
+            if (channel != null && tunnelId != null) {
+              _cancelRequest(requestId, pending, tunnelId, channel);
+            }
           }
         }
         return;
       case 'webui_http_response_end':
         _pending.remove(requestId);
-        await pending.end();
+        try {
+          await pending.end();
+        } catch (_) {
+          /* Browser already disconnected. */
+        }
         return;
     }
   }
@@ -313,9 +578,12 @@ class _PendingResponse {
     if (!_started) response.statusCode = HttpStatus.badGateway;
     try {
       await _writes;
-      await response.close();
     } finally {
-      if (!_done.isCompleted) _done.complete();
+      try {
+        await response.close();
+      } finally {
+        if (!_done.isCompleted) _done.complete();
+      }
     }
   }
 

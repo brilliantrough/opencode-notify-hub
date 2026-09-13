@@ -63,9 +63,12 @@ A Flutter client for Linux, Windows, and Android. It stores refresh credentials
 in the OS secure store, maintains a reconnecting WebSocket while appropriate,
 routes notifications through one dedupe/history path, stores up to 10,000
 rendered history entries in a device-local SQLite database, and uses FCM for
-Android background delivery. For temporary WebUI access it hosts a loopback-only
-HTTP proxy, keeps its authenticated Gateway tunnel alive, and opens that local
-origin in the system browser.
+Android background delivery. It discovers idle/recent main sessions through the
+Plugin, caching bounded metadata and bookmarks per Gateway/account. For WebUI
+access it hosts one loopback-only HTTP listener per opened instance; sessions
+share that origin. Authentication renews on the existing WebSocket and transport
+reconnects do not replace the listener. The client must keep running, including
+in the desktop tray, while its browser URLs are in use.
 
 ### `packages/notify_api`
 

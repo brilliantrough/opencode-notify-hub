@@ -92,6 +92,15 @@ Serializers _$serializers =
           ..add(PluginControlClientMessageOneOf6TypeEnum.serializer)
           ..add(PluginControlClientMessageOneOf7.serializer)
           ..add(PluginControlClientMessageOneOf7TypeEnum.serializer)
+          ..add(PluginControlClientMessageOneOf8.serializer)
+          ..add(PluginControlClientMessageOneOf8Catalog.serializer)
+          ..add(PluginControlClientMessageOneOf8CatalogSessionsInner.serializer)
+          ..add(
+            PluginControlClientMessageOneOf8CatalogSessionsInnerStatusEnum
+                .serializer,
+          )
+          ..add(PluginControlClientMessageOneOf8StatusEnum.serializer)
+          ..add(PluginControlClientMessageOneOf8TypeEnum.serializer)
           ..add(PluginControlClientMessageOneOfTypeEnum.serializer)
           ..add(PluginControlServerMessage.serializer)
           ..add(PluginControlServerMessageOneOf.serializer)
@@ -108,6 +117,11 @@ Serializers _$serializers =
           ..add(PluginControlServerMessageOneOf5TypeEnum.serializer)
           ..add(PluginControlServerMessageOneOf6.serializer)
           ..add(PluginControlServerMessageOneOf6TypeEnum.serializer)
+          ..add(PluginControlServerMessageOneOf7.serializer)
+          ..add(PluginControlServerMessageOneOf7Query.serializer)
+          ..add(PluginControlServerMessageOneOf7TypeEnum.serializer)
+          ..add(PluginControlServerMessageOneOf8.serializer)
+          ..add(PluginControlServerMessageOneOf8TypeEnum.serializer)
           ..add(PluginControlServerMessageOneOfStateEnum.serializer)
           ..add(PluginControlServerMessageOneOfTypeEnum.serializer)
           ..add(RefreshBody.serializer)
@@ -116,6 +130,7 @@ Serializers _$serializers =
           ..add(RegisterDeviceBodyPlatformEnum.serializer)
           ..add(ResetPasswordBody.serializer)
           ..add(SendPromptBody.serializer)
+          ..add(SessionCatalog.serializer)
           ..add(TokenPair.serializer)
           ..add(VerifyEmailBody.serializer)
           ..add(WsServerMessage.serializer)
@@ -185,6 +200,28 @@ Serializers _$serializers =
           ..addBuilderFactory(
             const FullType(BuiltList, const [const FullType(String)]),
             () => ListBuilder<String>(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [
+              const FullType(
+                PluginControlClientMessageOneOf8CatalogSessionsInner,
+              ),
+            ]),
+            () =>
+                ListBuilder<
+                  PluginControlClientMessageOneOf8CatalogSessionsInner
+                >(),
+          )
+          ..addBuilderFactory(
+            const FullType(BuiltList, const [
+              const FullType(
+                PluginControlClientMessageOneOf8CatalogSessionsInner,
+              ),
+            ]),
+            () =>
+                ListBuilder<
+                  PluginControlClientMessageOneOf8CatalogSessionsInner
+                >(),
           )
           ..addBuilderFactory(
             const FullType(BuiltList, const [const FullType(String)]),

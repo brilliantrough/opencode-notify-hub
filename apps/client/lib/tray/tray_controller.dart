@@ -70,12 +70,14 @@ class TrayController with TrayListener, WindowListener {
     required Future<void> Function(bool paused) writePaused,
     Future<void> Function()? showWindow,
     Future<void> Function()? quit,
+    Future<void> Function()? beforeQuit,
     bool Function()? isDesktop,
     bool Function()? isLinux,
   }) : _readPaused = readPaused,
        _writePaused = writePaused,
        _showWindow = showWindow ?? _defaultShowWindow,
        _quit = quit ?? _defaultQuit,
+       _beforeQuit = beforeQuit,
        _isDesktop = isDesktop ?? _defaultIsDesktop,
        _isLinux = isLinux ?? (() => Platform.isLinux);
 
@@ -83,6 +85,7 @@ class TrayController with TrayListener, WindowListener {
   final Future<void> Function(bool paused) _writePaused;
   final Future<void> Function() _showWindow;
   final Future<void> Function() _quit;
+  final Future<void> Function()? _beforeQuit;
   final bool Function() _isDesktop;
   final bool Function() _isLinux;
 
@@ -144,9 +147,17 @@ class TrayController with TrayListener, WindowListener {
         paused: _readPaused(),
         onShowWindow: () => unawaited(_showWindow()),
         onSetPaused: (paused) => unawaited(_writePaused(paused)),
-        onQuit: () => unawaited(_quit()),
+        onQuit: () => unawaited(_exit()),
       ),
     );
+  }
+
+  Future<void> _exit() async {
+    try {
+      await _beforeQuit?.call();
+    } finally {
+      await _quit();
+    }
   }
 
   /// Removes listeners. Call on app shutdown.

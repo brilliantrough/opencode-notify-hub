@@ -1,14 +1,26 @@
 # Windows Development Handoff
 
-Updated: 2026-08-20
+Updated: 2026-09-13
+
+## 2026-09-13 远程会话入口交接（当前任务）
+
+- 本轮代码随本交接文档提交到 `main`；对齐点以维护者转发的 Linux Agent prompt 中完整 SHA 为准，`ac2aba0` 及下文 8 月 SHA 仅为历史。
+- 当前任务：拉取指定 SHA，运行与本轮改动相关的窄范围检查，构建并打包完整 Windows Release 目录；最终 UI/休眠验收由维护者执行。Linux 已通过本轮 60 项针对性检查、Flutter 静态分析、Linux Release 构建及文档链接检查。
+- `docs/project_memory/` 被 Git 忽略，不随 pull 同步；本节和交接 prompt 已包含开工所需信息，不要求先传记忆文件。补充历史时可手动复制 Linux 状态文件，保留 Windows 自己的状态文件；旧记忆不能覆盖本轮指定 SHA 和已确认的任务。
+- idle/历史会话发现、搜索、固定、缓存、会话深链接、多实例独立隧道和续认证都在共享 Dart 与生成 API 中，无需另写 Windows 实现。
+- 后续轻量体验改动也在共享 Dart：本机密钥重复查看/补录、Bash/PowerShell 配置导出与机器名填写、搜索清空、连接重开/复制、设备重命名和 Ctrl+Enter 发送。复用已有 flutter_secure_storage，需 Windows 验证原生密钥持久化和剪贴板。
+- Windows 保持系统浏览器与关闭到托盘；托盘“退出”先关闭全部本地隧道。窄窗口或放大字号时会话操作移到标题下方。
+- `windows/runner/flutter_window.cpp` 新增 `WM_POWERBROADCAST/PBT_APMRESUMEAUTOMATIC` → `dev.opencodenotify.client/power` 的 `resume` 消息；共享代码唤醒后重建远端 socket，保留本地 HTTP 端口，不重放写请求。
+- 新增原生唤醒入口仅完成源码适配；本轮未编译 Windows、未进行 Windows UI 或休眠验收。后续构建完整 Release 目录，由维护者确认 cold start idle 会话、托盘常驻、多会话、多实例、休眠恢复与退出清理。
+- Gateway 已部署 `opencode-notify-gateway:20260913-remote-access`，公网健康检查通过。Plugin 仍需安装本轮 Linux 构建并重启 OpenCode，Gateway 更新本身不会替换各机器上的 Plugin。
 
 This tracked document is the entry point for the Windows development agent.
 Linux and Windows are sequential continuations of one shared branch, not
 separate implementations. The previous `windows/client-parity-20260816` and
 `windows/dev-node` branches are already ancestors of `main` and are retired.
 Resume neither branch. Start only from a clean, fast-forwarded `main` at the
-alignment SHA reported by the Linux agent in the manually synchronized
-`docs/project_memory/linux-current-state.md` memory.
+alignment SHA reported in the current Linux agent handoff prompt. Manually
+synchronized `docs/project_memory/linux-current-state.md` is optional history.
 
 ## Safety Rules
 
@@ -37,7 +49,7 @@ git rev-list --left-right --count main...origin/main
 If the checkout has tracked or untracked work, preserve it first:
 
 ```powershell
-git stash push --include-untracked -m "windows-local-before-2026-08-handoff"
+git stash push --include-untracked -m "windows-local-before-20260913-handoff"
 git status --short
 ```
 
@@ -70,7 +82,7 @@ dropped. For new Windows fixes, start from clean, updated `main`:
 
 ```powershell
 git switch main
-git switch -c windows/client-parity-20260819
+git switch -c windows/client-parity-20260913
 ```
 
 ## Read Before Editing
@@ -123,7 +135,7 @@ separate Windows port:
 - bundled sound catalog, preview/selection persistence, and custom audio import;
 - Windows native initial title `OpenCode Notify`;
 - best-effort native Session prompt composer with no retry/completion promise;
-- system-browser OpenCode WebUI through one client-held localhost tunnel;
+- system-browser OpenCode WebUI through independent client-held localhost tunnels;
 - `url_launcher_windows` with no embedded WebView or WebView2 dependency;
 - notification titles containing machine, directory, session, and status;
 - history rows containing machine context while retaining expanded details;
@@ -143,7 +155,8 @@ separate Windows port:
   automatically migrate the previous JSON value; use the external converter
   under `apps/client/tool/` when legacy rows must be retained.
 
-Production `https://notify.pezayo.com` runs gateway image
+Historical deployment (2026-08-19, superseded by the image at the top of this
+document): production `https://notify.pezayo.com` ran gateway image
 `opencode-notify-gateway:a9a43ac`, built from canonical commit
 `a9a43acaea749bad7610f0f6baeae9ef21151300` and deployed on 2026-08-19. It
 exposes Remote Unblock, session prompt, WebUI tunnel, and
@@ -282,9 +295,9 @@ Record Windows-owned results only in local
 
 ## Current Windows Alignment Request
 
-This pass is a client source-alignment task, not a full Windows acceptance or
-release-certification task. Start from the exact final Linux `main` alignment
-SHA in `docs/project_memory/linux-current-state.md` and carry the shared
+This pass covers source alignment, focused checks, and a Windows verification
+bundle. The public release version has not been prepared yet. Start from the
+exact Linux `main` alignment SHA in the current handoff prompt and carry the shared
 Dart/UI/generated-client changes into the Windows checkout. The shared client
 logic is already implemented and verified on Linux, so do not redesign it or
 spend time recreating Linux integration evidence.
@@ -302,7 +315,8 @@ spend time recreating Linux integration evidence.
   acceptance list for this alignment pass. Skip Windows tests that require an
   unreliable native environment unless they are needed to diagnose a compile or
   packaging failure. The maintainer will perform the runtime checks manually.
-- Required local work is dependency resolution and one Release build. Use the
+- Run the focused checks requested in the current prompt, dependency resolution,
+  and one Release build. Use the
   mirror variables below, then run `flutter pub get` and:
 
   ```powershell
@@ -319,7 +333,7 @@ spend time recreating Linux integration evidence.
 
 ## Next Windows Alignment Branch
 
-After the maintainer pushes the merged Linux `main`, do not continue the old
+After the Linux agent pushes `main`, do not continue the old
 `windows/client-parity-20260818` checkout. Start a fresh branch from the exact
 remote `main` SHA:
 
@@ -327,11 +341,11 @@ remote `main` SHA:
 git fetch origin
 git switch main
 git pull --ff-only origin main
-git switch -c windows/client-parity-20260820
+git switch -c windows/client-parity-20260913
 ```
 
-Read this handoff, `CONTEXT.md`, and both platform memory files before editing.
-The next Windows pass is source alignment and one Release build against the
+Read this handoff, `CONTEXT.md`, and platform memory files when present before editing.
+The current Windows pass is source alignment, focused checks, and one Release build against the
 complete Linux baseline. Do not modify Plugin, Gateway, Contracts, or shared
 protocol behavior on that branch.
 

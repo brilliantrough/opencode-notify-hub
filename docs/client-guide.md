@@ -27,23 +27,41 @@ development servers may use HTTP.
 4. After authentication, the client registers the current device and opens its
    realtime connection.
 5. Open **Keys** and create a key for the machine running OpenCode.
-6. Copy the `keyId.secret` value immediately. The raw secret is shown once and
-   cannot be recovered later.
+6. Open the key's configuration dialog, enter a machine name, and copy the
+   complete server environment commands. Newly created keys are saved locally
+   for repeat viewing and copying.
 7. Follow the in-app **Plugin** page or
    [plugin-install.md](plugin-install.md) to install and configure OpenCode.
 
 Use one ingest key per machine or automation context. Revoke a key that is no
 longer used or may have been exposed.
 
+## 密钥与服务器配置
+
+入口：**密钥页 → 点按密钥条目或终端图标**；插件页也可以直接选择已有密钥。
+
+| 操作 | 行为 |
+| --- | --- |
+| 显示 / 隐藏、复制密钥 | 新建密钥自动保存到本机凭据存储，关闭弹窗、退出登录后仍可在原账号再次查看 |
+| 补录、重新录入 | 老版本创建或另一台设备创建的密钥，可以粘贴已有的完整 `keyId.secret`；只检查格式，不向网关验证归属 |
+| 选择 Shell | Bash/Zsh 输出 `export`，PowerShell 输出 `$env:`，选择的是目标服务器的 Shell |
+| 填写机器名 | 使用实际变量名 `NOTIFY_MACHINE`，留空时输出 `YOUR_MACHINE_NAME` 占位符 |
+| 复制完整配置 | 自动包含当前 `NOTIFY_GATEWAY_URL`、完整 `NOTIFY_INGEST_KEY` 和机器名；预览默认隐藏密钥，复制包含原值 |
+| 撤销 | 确认后撤销服务器密钥，并删除本机保存的对应副本 |
+
+复制到服务器后，在同一终端启动或重启 OpenCode。环境变量只对该终端及其子进程生效；需要持久配置时，将变量放入实际启动 OpenCode 的 Shell 配置或服务环境中。
+
+本机副本按 Gateway 和账号隔离，不跨设备同步。Gateway 仍只保存哈希，不能还原未在本机保存、也没有其他副本的旧密钥；这种情况需要新建密钥。保存失败时弹窗保留本次返回的密钥，并提供重试保存入口。
+
 ## Navigation
 
 | Page | Purpose |
 | --- | --- |
-| Home | OpenCode instances grouped by machine, active sessions, action-required state, text sending, and temporary WebUI access; offline instances can be forgotten and reappear when they reconnect |
+| Home | Searchable idle/recent sessions, fixed session shortcuts, action-required state, text sending, and persistent client-held WebUI connections; instances remain grouped by machine |
 | History | Up to 10,000 local notifications with live updates and 20/30/50/100-row pages; select a row for complete event details |
 | Devices | Registered Linux, Windows, and Android devices; rename, enable, or remove them |
-| Keys | Create, list, and revoke plugin ingest keys |
-| Plugin | Copy the install path and required environment-variable template |
+| Keys | Create, recall/copy local secrets, export server configuration, and revoke keys |
+| Plugin | Select a key to export configuration, or copy the install path and environment template |
 | Settings | Alert sound, pause popups, desktop autostart, and desktop font scale |
 
 ## Notification behavior
@@ -66,23 +84,66 @@ uses FCM instead of replay.
 
 ## Session control
 
-An active or recently completed Session shows two controls when its owning
-Plugin instance is online and uniquely identifiable:
+Home queries each online Plugin for main sessions, including idle sessions, on
+startup and reconnect, and every 30 seconds while foregrounded. It first shows
+the local cache, then verifies the current instance binding. Snapshot failures
+show stale/unknown state rather than an empty list or a fabricated idle status.
+
+- Search by session title, project, machine, or working directory. Title searches
+  also query OpenCode, so older sessions need not first appear in notifications.
+  The clear button resets the search; returning to Home restores its current text.
+- Recent pages start at 50 sessions per instance and can expand to 200; search
+  for older entries. Child/subagent and archived sessions are excluded.
+- Star up to 50 sessions. Bookmarks are looked up even outside the recent page.
+  Missing/deleted/archived bookmarks remain visible but cannot be opened.
+- The local cache holds up to 1,000 metadata records, isolated by Gateway and
+  account; bookmarks and last-opened timestamps survive client restarts.
+- The instance browser icon resumes the last session opened through Notify,
+  otherwise the most recently updated session, then the project's new-session
+  page. A session row's browser icon always opens that exact session.
+
+A verified Session shows two controls when its owning Plugin is online:
 
 - **Send:** opens a native text composer. The Gateway returns as soon as it
   writes the prompt to the Plugin connection; it does not wait for the model
   turn. Failed or uncertain sends are never retried automatically.
+  Enter inserts a newline; Ctrl+Enter (also Cmd+Enter) sends. Empty text and a
+  send already in progress cannot be submitted again.
 - **WebUI:** opens OpenCode's own WebUI in the system browser. The client starts
-  a loopback-only HTTP proxy and relays its HTTP/SSE traffic over a temporary
+  a loopback-only HTTP proxy and relays its HTTP/SSE traffic over a renewable
   authenticated WebSocket through the Gateway and Plugin. The client must stay
   running while the browser uses that localhost URL. Use the Home toolbar's
-  close action to stop the local listener and tunnel.
+  close action to stop all connections, or close one instance in its connection row.
+  Tap a connection row to reopen its latest session, or copy its full local URL
+  using the copy icon. That URL works on the same device while Notify runs.
 
 Neither mode has an offline queue. The controls disappear when the owning
-instance is offline, incompatible, conflicting, or ambiguous. Only one browser
-tunnel is kept at a time; opening another instance closes the previous tunnel.
-Signing out, exiting the client, losing the Plugin connection, or access-token
-expiry also closes it.
+instance is offline, incompatible, conflicting, or not yet verified. Each opened
+instance has an independent loopback origin; switching sessions only changes the
+path, and other instances' browser tabs stay usable. Authentication renews before
+the 900-second token expiry without interrupting SSE. Network failures reconnect
+with backoff behind the same local listener; HTTP writes are never replayed.
+An interrupted page navigation shows a retrying connection page; if the upstream
+WebUI does not recover its own request, refresh the existing browser tab.
+
+Keep Notify running in the desktop tray. Signing out, explicitly closing a
+connection, or exiting the client stops its listener. Ports are stable for that
+listener's lifetime, not across app exits; there is no public browser-only URL.
+An OpenCode process restart creates a new instance identity: bookmarks are
+revalidated against the new online instance before opening a new tunnel.
+
+Session discovery and seamless WebUI renewal require updated Gateway, Plugin,
+and client builds. Restart OpenCode after updating its Plugin. Older Plugins
+may time out on discovery; the client reports this and retains the old metadata.
+
+On narrow screens or with large text, session actions wrap below the session
+details. Android uses the in-app WebView and starts the existing foreground
+service before opening when keep-alive is enabled. Returning to Notify refreshes
+the catalog and retries disconnected tunnels. The Windows source also forwards
+power-resume events to reconnect remote sockets behind the same local listener.
+These platform changes await native acceptance; see
+[Android handoff](android-agent-handoff.md) and
+[Windows handoff](windows-agent-handoff.md).
 
 ## Desktop tray
 

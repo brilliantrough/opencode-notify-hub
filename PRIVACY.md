@@ -18,10 +18,15 @@ The plugin sends validated notification envelopes containing:
 
 Notification delivery does not send user prompts, tool output, or full
 conversation transcripts. When a user explicitly sends text or opens the
-temporary WebUI, the selected prompt or proxied WebUI HTTP/SSE traffic passes
+WebUI, the selected prompt or proxied WebUI HTTP/SSE traffic passes
 through gateway memory to that Plugin instance. Those bodies are not persisted
 or logged. See [docs/plugin-install.md](docs/plugin-install.md#privacy) for
 notification field limits.
+
+While the client is open, session discovery also requests main-session metadata
+(title, id, working directory, update time, and status) through the Gateway.
+This does not fetch conversation messages. Search terms and requested bookmark
+ids pass through the Gateway; the returned catalog is not persisted there.
 
 ## Data stored by the gateway
 
@@ -47,6 +52,21 @@ uploaded for synchronization. Each history entry can include the event time and
 type, machine, project, working directory, session title/id, request id, and
 rendered notification text. A paused notification is still recorded in local
 history.
+
+The client also caches up to 1,000 session metadata entries in local preferences,
+including up to 50 bookmarks and last-opened timestamps. These are separated by
+Gateway and account and retained across logout for that account's next login.
+They are not synchronized to other devices. Clearing the application's local
+data removes this cache and the bookmarks.
+
+Newly created or manually imported Plugin credentials are also saved through
+the existing secure-storage integration, separately from key-list metadata and
+scoped by Gateway and account. They remain available after logout for that
+account's next login and are not synchronized between devices. Revoking a key
+from this client removes its local copy; another device's revocation does not
+erase this device's credential storage. The Gateway still stores only hashes.
+Viewing a credential reveals it in the dialog; copying a key or environment
+configuration places the full credential on the system clipboard.
 
 ## Retention and deletion
 

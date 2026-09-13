@@ -1360,6 +1360,71 @@ components:
             - tunnelId
             - requestId
           type: object
+        - additionalProperties: false
+          properties:
+            catalog:
+              additionalProperties: false
+              properties:
+                hasMore:
+                  type: boolean
+                sessions:
+                  items:
+                    additionalProperties: false
+                    properties:
+                      directory:
+                        maxLength: 4096
+                        minLength: 1
+                        type: string
+                      sessionId:
+                        maxLength: 200
+                        minLength: 1
+                        type: string
+                      status:
+                        enum:
+                          - idle
+                          - busy
+                          - retry
+                          - unknown
+                        type: string
+                      title:
+                        maxLength: 1000
+                        type: string
+                      updatedAt:
+                        format: date-time
+                        type: string
+                    required:
+                      - sessionId
+                      - title
+                      - directory
+                      - updatedAt
+                      - status
+                    type: object
+                  maxItems: 250
+                  type: array
+              required:
+                - sessions
+                - hasMore
+              type: object
+            instanceId:
+              format: uuid
+              type: string
+            requestId:
+              format: uuid
+              type: string
+            status:
+              enum:
+                - ready
+                - error
+                - unsupported
+              type: string
+            type:
+              const: session_catalog_response
+          required:
+            - type
+            - requestId
+            - instanceId
+            - status
+          type: object
     PluginControlServerMessage:
       oneOf:
         - additionalProperties: false
@@ -1512,6 +1577,49 @@ components:
             - type
             - tunnelId
           type: object
+        - additionalProperties: false
+          properties:
+            query:
+              additionalProperties: false
+              properties:
+                limit:
+                  default: 50
+                  maximum: 200
+                  minimum: 1
+                  type: integer
+                search:
+                  maxLength: 200
+                  type: string
+                sessionIds:
+                  maxLength: 4096
+                  pattern: ^[A-Za-z0-9_,.-]*$
+                  type: string
+              type: object
+            requestId:
+              format: uuid
+              type: string
+            type:
+              const: session_catalog_request
+          required:
+            - type
+            - requestId
+            - query
+          type: object
+        - additionalProperties: false
+          properties:
+            requestId:
+              format: uuid
+              type: string
+            tunnelId:
+              format: uuid
+              type: string
+            type:
+              const: webui_http_cancel
+          required:
+            - type
+            - tunnelId
+            - requestId
+          type: object
     RefreshBody:
       additionalProperties: false
       properties:
@@ -1595,6 +1703,49 @@ components:
       required:
         - commandId
         - text
+      type: object
+    SessionCatalog:
+      additionalProperties: false
+      properties:
+        hasMore:
+          type: boolean
+        sessions:
+          items:
+            additionalProperties: false
+            properties:
+              directory:
+                maxLength: 4096
+                minLength: 1
+                type: string
+              sessionId:
+                maxLength: 200
+                minLength: 1
+                type: string
+              status:
+                enum:
+                  - idle
+                  - busy
+                  - retry
+                  - unknown
+                type: string
+              title:
+                maxLength: 1000
+                type: string
+              updatedAt:
+                format: date-time
+                type: string
+            required:
+              - sessionId
+              - title
+              - directory
+              - updatedAt
+              - status
+            type: object
+          maxItems: 250
+          type: array
+      required:
+        - sessions
+        - hasMore
       type: object
     TokenPair:
       additionalProperties: false
@@ -2656,6 +2807,77 @@ paths:
       summary: Forget one offline OpenCode instance.
       tags:
         - instances
+  /v1/instances/{instanceId}/sessions:
+    get:
+      operationId: getSessionCatalog
+      parameters:
+        - description: OpenCode instance identifier.
+          in: path
+          name: instanceId
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: query
+          name: search
+          schema:
+            maxLength: 200
+            type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - in: query
+          name: sessionIds
+          schema:
+            maxLength: 4096
+            pattern: ^[A-Za-z0-9_,.-]*$
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionCatalog"
+          description: Current session metadata
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Unauthenticated
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Instance unavailable
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Plugin does not support session discovery
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: OpenCode session query failed
+        "504":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Plugin query timed out
+      security:
+        - bearerAuth: []
+      summary: List recent and bookmarked main sessions, including idle sessions
+      tags:
+        - sessions
   /v1/instances/{instanceId}/sessions/{sessionId}/prompt:
     post:
       description: Routes one text prompt to the authenticated user's exact online Plugin instance. The 202 response acknowledges that the Gateway wrote the command to the Plugin control connection; it does not wait for OpenCode to admit or execute the prompt. Prompts are never queued or retried.
@@ -2917,7 +3139,7 @@ paths:
         - realtime
   /v1/webui/ws:
     get:
-      description: The client sends one webui_tunnel_open frame naming an online instance, then proxies HTTP and SSE requests through the authenticated tunnel. The tunnel is memory-only and ends when either WebSocket closes.
+      description: The client sends one webui_tunnel_open frame naming an online instance, then proxies HTTP and SSE requests through the authenticated tunnel. A webui_auth_refresh frame with a fresh accessToken renews authentication; webui_auth_ready acknowledges expiresAtMs without interrupting HTTP/SSE. The Gateway tunnel is memory-only; the client reconnects behind the same local origin.
       operationId: connectWebUiTunnel
       responses:
         "101":
@@ -2936,7 +3158,7 @@ paths:
           description: Origin is not allowed.
       security:
         - bearerAuth: []
-      summary: Upgrade a temporary WebUI tunnel.
+      summary: Upgrade a renewable WebUI tunnel.
       tags:
         - sessions
   /v1/ws:

@@ -72,6 +72,9 @@ export 'package:notify_api/src/model/plugin_control_client_message_one_of4.dart'
 export 'package:notify_api/src/model/plugin_control_client_message_one_of5.dart';
 export 'package:notify_api/src/model/plugin_control_client_message_one_of6.dart';
 export 'package:notify_api/src/model/plugin_control_client_message_one_of7.dart';
+export 'package:notify_api/src/model/plugin_control_client_message_one_of8.dart';
+export 'package:notify_api/src/model/plugin_control_client_message_one_of8_catalog.dart';
+export 'package:notify_api/src/model/plugin_control_client_message_one_of8_catalog_sessions_inner.dart';
 export 'package:notify_api/src/model/plugin_control_server_message.dart';
 export 'package:notify_api/src/model/plugin_control_server_message_one_of.dart';
 export 'package:notify_api/src/model/plugin_control_server_message_one_of1.dart';
@@ -80,11 +83,15 @@ export 'package:notify_api/src/model/plugin_control_server_message_one_of3.dart'
 export 'package:notify_api/src/model/plugin_control_server_message_one_of4.dart';
 export 'package:notify_api/src/model/plugin_control_server_message_one_of5.dart';
 export 'package:notify_api/src/model/plugin_control_server_message_one_of6.dart';
+export 'package:notify_api/src/model/plugin_control_server_message_one_of7.dart';
+export 'package:notify_api/src/model/plugin_control_server_message_one_of7_query.dart';
+export 'package:notify_api/src/model/plugin_control_server_message_one_of8.dart';
 export 'package:notify_api/src/model/refresh_body.dart';
 export 'package:notify_api/src/model/register_body.dart';
 export 'package:notify_api/src/model/register_device_body.dart';
 export 'package:notify_api/src/model/reset_password_body.dart';
 export 'package:notify_api/src/model/send_prompt_body.dart';
+export 'package:notify_api/src/model/session_catalog.dart';
 export 'package:notify_api/src/model/token_pair.dart';
 export 'package:notify_api/src/model/verify_email_body.dart';
 export 'package:notify_api/src/model/ws_server_message.dart';

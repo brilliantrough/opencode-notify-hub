@@ -3,6 +3,9 @@ import {
   sendPromptBodySchema,
   type CommandAccepted,
   type SendPromptBody,
+  sessionCatalogSchema,
+  sessionCatalogQuerySchema,
+  type SessionCatalogQuery,
 } from "@notify/contracts";
 import type { FastifyPluginAsync } from "fastify";
 
@@ -12,6 +15,26 @@ import type { InstanceRegistry } from "./instance-registry.js";
 /** Owner-scoped, online-only Session commands. */
 export function sessionControlRoutes(registry: InstanceRegistry): FastifyPluginAsync {
   return async (app) => {
+    app.get<{ Params: { instanceId: string }; Querystring: SessionCatalogQuery }>(
+      "/v1/instances/:instanceId/sessions",
+      {
+        preHandler: app.authenticate,
+        schema: {
+          params: { type: "object", required: ["instanceId"], properties: { instanceId: { type: "string", format: "uuid" } } },
+          querystring: sessionCatalogQuerySchema,
+          response: { 200: sessionCatalogSchema },
+        },
+      },
+      async (request, reply) => {
+        const result = await registry.collectSessions(request.userId as string, request.params.instanceId, request.query);
+        if (result.status === "ready") return result.catalog;
+        const status = { not_found: 404, timeout: 504, unsupported: 501, error: 502 }[result.status];
+        return reply.status(status).send(errorBody(
+          result.status === "not_found" ? ErrorCodes.NOT_FOUND : ErrorCodes.SERVICE_UNAVAILABLE,
+          `Session catalog ${result.status}`,
+        ));
+      },
+    );
     app.post<{ Params: { instanceId: string; sessionId: string } }>(
       "/v1/instances/:instanceId/sessions/:sessionId/prompt",
       {

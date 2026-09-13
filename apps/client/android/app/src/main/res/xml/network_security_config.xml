@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Loopback-only cleartext permission for the temporary OpenCode WebUI tunnel.
+<!-- Loopback-only cleartext permission for client-held OpenCode WebUI tunnels.
      The in-app WebView loads the local bridge over http://127.0.0.1; everything
      else keeps the platform default (cleartext disabled). -->
 <network-security-config>

@@ -99,8 +99,9 @@ void main() {
     await tester.pumpAndSettle();
 
     final text = lastClipboardText();
-    expect(text, contains('NOTIFY_GATEWAY_URL=https://gw.example.com'));
+    expect(text, contains("NOTIFY_GATEWAY_URL='https://gw.example.com'"));
     expect(text, contains('NOTIFY_INGEST_KEY='));
+    expect(text, contains("NOTIFY_MACHINE='YOUR_MACHINE_NAME'"));
     expect(find.text('已复制'), findsOneWidget);
   });
 }

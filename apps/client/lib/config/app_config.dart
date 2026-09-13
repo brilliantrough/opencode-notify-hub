@@ -15,7 +15,7 @@ class AppConfig {
     return _webSocketEndpoint('/v1/ws');
   }
 
-  /// Temporary OpenCode WebUI tunnel endpoint.
+  /// Authenticated, renewable OpenCode WebUI tunnel endpoint.
   String get gatewayWebUiWsBase => _webSocketEndpoint('/v1/webui/ws');
 
   String _webSocketEndpoint(String path) {

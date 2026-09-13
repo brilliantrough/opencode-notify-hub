@@ -46,6 +46,7 @@ import { pendingInteractionSchema, pendingSnapshotSchema } from "./schemas/pendi
 import { decidePermissionBodySchema } from "./schemas/permissions.js";
 import { answerQuestionBodySchema } from "./schemas/questions.js";
 import { wsServerMessageSchema } from "./schemas/ws.js";
+import { sessionCatalogSchema, sessionCatalogQuerySchema } from "./schemas/sessions.js";
 
 // ajv-formats is CJS whose types declare `export default`; under NodeNext the
 // default import types as the module namespace. At runtime the package sets
@@ -105,6 +106,8 @@ export const validateDecidePermissionBody = ajv.compile(decidePermissionBodySche
 export const validateCommandOutcome = ajv.compile(commandOutcomeSchema);
 export const validateCommandAccepted = ajv.compile(commandAcceptedSchema);
 export const validateSendPromptBody = ajv.compile(sendPromptBodySchema);
+export const validateSessionCatalog = ajv.compile(sessionCatalogSchema);
+export const validateSessionCatalogQuery = ajv.compile(sessionCatalogQuerySchema);
 
 export * from "./schemas/admin.js";
 export * from "./schemas/auth.js";
@@ -118,4 +121,5 @@ export * from "./schemas/pending.js";
 export * from "./schemas/permissions.js";
 export * from "./schemas/questions.js";
 export * from "./schemas/ws.js";
+export * from "./schemas/sessions.js";
 export * from "./types.js";

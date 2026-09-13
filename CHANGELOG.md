@@ -5,6 +5,29 @@ All notable changes will be documented in this file. The project intends to use
 
 ## [Unreleased]
 
+### Added
+
+- Repeat viewing/copying of locally saved Plugin keys, import of existing keys,
+  and Bash/Zsh or PowerShell environment export with a machine-name field.
+- Direct key selection on the Plugin setup page, device renaming, session-search
+  clearing, reopening/copying connected WebUI session links, and Ctrl+Enter prompt
+  submission with empty/duplicate submission controls.
+
+- Cold-start discovery of idle and recent main sessions, title/project/machine
+  search, 50 local bookmarks, and last-opened session shortcuts per instance.
+- Renewable WebUI authentication and automatic reconnect behind a stable local
+  origin while Notify runs, with independent tunnels for multiple instances.
+
+### Fixed
+
+- Switching sessions within one instance no longer replaces its loopback port
+  or closes existing browser tabs; token renewal keeps ongoing SSE streams open.
+- Browser request cancellation and Plugin disconnect now clean up upstream
+  WebUI requests; disconnected writes are never replayed automatically.
+- Source-level Android/Windows alignment: responsive session actions, foreground
+  resume refresh/reconnect, Android keep-alive before WebUI launch, and a Windows
+  power-resume bridge. Native platform acceptance is pending.
+
 ## [0.2.0-beta.1] - 2026-08-21
 
 ### Added

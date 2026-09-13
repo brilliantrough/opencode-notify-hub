@@ -36,6 +36,10 @@ export class WebUiProxy {
     emit: (frame: WebUiResponseFrame) => void,
   ): Promise<void> {
     const url = new URL(request.path, this.baseUrl);
+    if (!request.path.startsWith("/") || request.path.startsWith("//") ||
+        request.path.includes("\\") || url.origin !== this.baseUrl.origin) {
+      throw new Error("WebUI requests must stay on the local OpenCode origin");
+    }
     if (!url.searchParams.has("directory") && this.directory !== "unknown") {
       url.searchParams.set("directory", this.directory);
     }

@@ -14,6 +14,8 @@ import {
   type PluginControlServerMessage,
   type QuestionAnswers,
   type WsServerMessage,
+  type SessionCatalog,
+  type SessionCatalogQuery,
 } from "@notify/contracts";
 
 import type { Clock } from "../../lib/clock.js";
@@ -161,6 +163,15 @@ interface WebUiTunnel {
   readonly pendingRequests: Set<string>;
 }
 
+type CatalogResult = { status: "ready"; catalog: SessionCatalog } |
+  { status: "not_found" | "timeout" | "error" | "unsupported" };
+
+interface CatalogRequest {
+  connection: ControlConnection;
+  timer: NodeJS.Timeout;
+  resolve: (result: CatalogResult) => void;
+}
+
 type PermissionDecideResultMessage = Extract<
   PluginControlClientMessage,
   { type: "permission_decide_result" }
@@ -292,6 +303,7 @@ export class InstanceRegistry {
   private readonly pendingDecideCommands = new Map<string, PendingDecideCommand>();
   private readonly pendingPromptCommands = new Map<string, PendingPromptCommand>();
   private readonly webUiTunnels = new Map<string, WebUiTunnel>();
+  private readonly catalogRequests = new Map<string, CatalogRequest>();
   private readonly commandOutcomes = new Map<string, CommandOutcomeEntry>();
   private readonly clock: Clock;
   private readonly publish: InstanceRegistryDeps["publish"];
@@ -345,20 +357,46 @@ export class InstanceRegistry {
     this.connections.add(connection);
   }
 
-  /** Attach one short-lived authenticated client WebSocket to an instance. */
+  /** The socket can renew its authentication without interrupting HTTP/SSE. */
   addWebUiClient(
     userId: string,
     socket: RealtimeSocket,
-    options: { expiresAtMs: number },
+    options: {
+      expiresAtMs: number;
+      verifyToken?: (token: string) => { sub: string; exp: number } | null;
+    },
   ): void {
     let tunnel: WebUiTunnel | undefined;
-    const expiry = setTimeout(
+    let expiresAtMs = options.expiresAtMs;
+    const expire = () => setTimeout(
       () => socket.close(4401, "access token expired"),
-      Math.min(Math.max(0, options.expiresAtMs - this.clock.nowMs()), 2_147_483_647),
+      Math.min(Math.max(0, expiresAtMs - this.clock.nowMs()), 2_147_483_647),
     );
+    let expiry = expire();
+    let alive = true;
+    const heartbeat = setInterval(() => {
+      if (!alive) { socket.terminate(); return; }
+      alive = false;
+      socket.ping();
+    }, this.pingIntervalMs);
+    socket.on("pong", () => { alive = true; });
     socket.on("message", (...args: unknown[]) => {
       const frame = this.decodeWebUi(args[0]);
       if (frame === null) {
+        return;
+      }
+      alive = true;
+      if (frame.type === "webui_auth_refresh") {
+        const payload = typeof frame.accessToken === "string"
+          ? options.verifyToken?.(frame.accessToken) : null;
+        if (!payload || payload.sub !== userId || payload.exp * 1000 <= this.clock.nowMs()) {
+          socket.close(4401, "invalid renewed authentication");
+          return;
+        }
+        expiresAtMs = payload.exp * 1000;
+        clearTimeout(expiry);
+        expiry = expire();
+        socket.send(JSON.stringify({ type: "webui_auth_ready", expiresAtMs }));
         return;
       }
       if (tunnel === undefined) {
@@ -385,17 +423,19 @@ export class InstanceRegistry {
           pendingRequests: new Set(),
         };
         this.webUiTunnels.set(tunnel.tunnelId, tunnel);
-        socket.send(JSON.stringify({ type: "webui_tunnel_ready", tunnelId: tunnel.tunnelId }));
+        socket.send(JSON.stringify({ type: "webui_tunnel_ready", tunnelId: tunnel.tunnelId, expiresAtMs }));
         return;
       }
       this.receiveWebUiRequest(tunnel, frame);
     });
     socket.on("close", () => {
       clearTimeout(expiry);
+      clearInterval(heartbeat);
       if (tunnel !== undefined) this.closeWebUiTunnel(tunnel);
     });
     socket.on("error", () => {
       clearTimeout(expiry);
+      clearInterval(heartbeat);
       if (tunnel !== undefined) this.closeWebUiTunnel(tunnel);
     });
   }
@@ -408,6 +448,26 @@ export class InstanceRegistry {
     if (instances.length > 0) {
       this.publish(userId, { type: "instance_presence", instances });
     }
+  }
+
+  async collectSessions(userId: string, instanceId: string, query: SessionCatalogQuery): Promise<CatalogResult> {
+    const record = this.records.get(this.recordKey(userId, instanceId));
+    const connection = record?.connection;
+    if (record?.state !== "controllable" || !connection || connection.socket.readyState !== READY_OPEN) {
+      return { status: "not_found" };
+    }
+    const requestId = randomUUID();
+    return new Promise(resolve => {
+      this.catalogRequests.set(requestId, {
+        connection,
+        resolve,
+        timer: setTimeout(() => {
+          this.catalogRequests.delete(requestId);
+          resolve({ status: "timeout" });
+        }, 10_000),
+      });
+      this.send(connection, { type: "session_catalog_request", requestId, query });
+    });
   }
 
   /** Forget one owner-scoped offline record and publish the resulting snapshot. */
@@ -727,6 +787,16 @@ export class InstanceRegistry {
       return;
     }
     const message = value as PluginControlClientMessage;
+    if (message.type === "session_catalog_response") {
+      const pending = this.catalogRequests.get(message.requestId);
+      if (!pending || pending.connection !== connection || message.instanceId !== connection.instanceId) return;
+      clearTimeout(pending.timer);
+      this.catalogRequests.delete(message.requestId);
+      pending.resolve(message.status === "ready" && message.catalog
+        ? { status: "ready", catalog: message.catalog }
+        : { status: message.status === "unsupported" ? "unsupported" : "error" });
+      return;
+    }
     if (message.type === "pending_snapshot_response") {
       // Validated snapshot answers are not registration traffic: unknown,
       // late, or foreign responses are ignored, never a connection error.
@@ -875,13 +945,18 @@ export class InstanceRegistry {
     message: WebUiResponseMessage,
   ): void {
     const tunnel = this.webUiTunnels.get(message.tunnelId);
-    if (tunnel === undefined || tunnel.connection !== connection) {
+    if (tunnel === undefined || tunnel.connection !== connection || !tunnel.pendingRequests.has(message.requestId)) {
       return;
     }
     if (message.type === "webui_http_response_end") {
       tunnel.pendingRequests.delete(message.requestId);
     }
     try {
+      if (tunnel.client.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
+        this.closeWebUiTunnel(tunnel);
+        tunnel.client.terminate();
+        return;
+      }
       tunnel.client.send(JSON.stringify(message));
     } catch {
       this.closeWebUiTunnel(tunnel);
@@ -1116,6 +1191,12 @@ export class InstanceRegistry {
       return;
     }
     clearInterval(connection.heartbeat);
+    for (const [id, pending] of this.catalogRequests) {
+      if (pending.connection !== connection) continue;
+      clearTimeout(pending.timer);
+      this.catalogRequests.delete(id);
+      pending.resolve({ status: "not_found" });
+    }
     for (const [key, pending] of this.pendingRequests) {
       if (pending.connection === connection) {
         this.pendingRequests.delete(key);
@@ -1230,6 +1311,11 @@ export class InstanceRegistry {
   }
 
   private receiveWebUiRequest(tunnel: WebUiTunnel, frame: Record<string, unknown>): void {
+    if (frame.type === "webui_http_cancel" && frame.tunnelId === tunnel.tunnelId &&
+        isUuid(frame.requestId) && tunnel.pendingRequests.delete(frame.requestId)) {
+      this.send(tunnel.connection, { type: "webui_http_cancel", tunnelId: tunnel.tunnelId, requestId: frame.requestId });
+      return;
+    }
     if (frame.type === "webui_tunnel_close" && frame.tunnelId === tunnel.tunnelId) {
       this.closeWebUiTunnel(tunnel);
       return;
