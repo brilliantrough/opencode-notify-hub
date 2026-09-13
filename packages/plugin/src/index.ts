@@ -354,15 +354,58 @@ export function createSessionNotifyHooks(
       emit(() => envelopes.actionResolved(sessionOf(resolution.sessionID), resolution)),
   });
   let disposed = false;
-  const controlStart = setImmediate(() => {
-    if (disposed) {
-      return;
-    }
+  let controlStarted = false;
+  const discoveryAbort = new AbortController();
+
+  function startControl(): void {
+    if (disposed || controlStarted || !control) return;
     try {
-      control?.start();
+      control.start();
+      controlStarted = true;
     } catch {
       logger.error("notify: control channel failed to start");
     }
+  }
+
+  async function discoverRemoteEntry(): Promise<void> {
+    if (disposed || controlStarted || !control) return;
+    const path = directory.includes("\\") ? win32 : posix;
+    if (config.remoteDirectories?.includes(path.normalize(directory))) {
+      startControl();
+      return;
+    }
+    try {
+      // Use the host client: it retains OpenCode's authentication/in-process fetch.
+      // Defer this until hooks are returned so directory bootstrap cannot deadlock.
+      const signal = AbortSignal.any([discoveryAbort.signal, AbortSignal.timeout(config.httpTimeoutMs)]);
+      for (const limit of [1, 50, 200]) {
+        const query = { directory, roots: true, limit };
+        const result = await input.client.session.list({ query, signal, throwOnError: true });
+        if (disposed || controlStarted) return;
+        if (!Array.isArray(result.data) || result.data.some(s =>
+          !s || typeof s.id !== "string" || s.directory !== directory || !s.time,
+        )) throw new Error("Invalid directory session list");
+        if (result.data.some(s => !s.parentID && !("archived" in s.time && s.time.archived))) {
+          startControl();
+          return;
+        }
+        if (result.data.length < limit) {
+          logger.info("notify: empty directory; remote registration deferred until a main session exists");
+          return;
+        }
+      }
+      // ponytail: cap archived-history scans at 200; keep unknown entries rather than hide older sessions.
+      throw new Error("Session discovery page exhausted");
+    } catch {
+      if (disposed || controlStarted) return;
+      // Unknown is not empty: preserve access on API/auth/transport failure.
+      logger.warn("notify: session discovery failed; retaining remote entry (directory state unknown)");
+      startControl();
+    }
+  }
+
+  const controlStart = setImmediate(() => {
+    void discoverRemoteEntry();
   });
   logger.info("opencode-notify enabled", {
     machine: source.machine,
@@ -453,8 +496,10 @@ export function createSessionNotifyHooks(
     // Session info is authoritative ancestry/title data; it updates the
     // registry directly and never passes through the main-session gate.
     if (normalized.kind === "session.upsert") {
+      if (normalized.directory !== undefined && normalized.directory !== directory) return;
       try {
         registry.update(normalized.sessionID, normalized.parentID ?? null, normalized.title);
+        if (!normalized.parentID && !normalized.archived) startControl();
       } catch {
         logger.error("notify: failed to record session info", {
           sessionID: normalized.sessionID,
@@ -487,6 +532,7 @@ export function createSessionNotifyHooks(
     if (disposed) {
       return; // an ancestry lookup may have completed while disposal began
     }
+    startControl();
     dispatch(normalized);
   }
 
@@ -502,6 +548,7 @@ export function createSessionNotifyHooks(
     dispose: async () => {
       disposed = true;
       clearImmediate(controlStart);
+      discoveryAbort.abort();
       try {
         await control?.stop();
       } catch {

@@ -50,7 +50,10 @@ interface FakeClient {
   client: {
     app: { log: (options: { body: LogBody }) => unknown };
     global: { health: () => Promise<{ data: { version: string } }> };
-    session: { get: (options: { path: { id: string } }) => Promise<unknown> };
+    session: {
+      get: (options: { path: { id: string } }) => Promise<unknown>;
+      list: () => Promise<unknown>;
+    };
   };
   logBodies: LogBody[];
   getCalls: string[];
@@ -81,6 +84,7 @@ function makeClient(options: FakeClientOptions = {}): FakeClient {
         health: async () => ({ data: { version: "1.18.18" } }),
       },
       session: {
+        list: async () => ({ data: [{ id: SESSION_ID, directory: "/home/dev/project", time: { updated: 1 } }] }),
         get: ({ path }: { path: { id: string } }) => {
           getCalls.push(path.id);
           if (options.getImpl !== undefined) {

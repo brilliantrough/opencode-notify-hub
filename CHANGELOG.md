@@ -13,6 +13,10 @@ All notable changes will be documented in this file. The project intends to use
 
 ### Added
 
+- Plugin remote registration now skips confirmed empty directories, discovers
+  idle history after initialization, and starts on the first main-session event.
+  `NOTIFY_REMOTE_DIRECTORIES` allows exact empty-directory overrides; failed or
+  inconclusive discovery preserves access with an explicit diagnostic.
 - Repeat viewing/copying of locally saved Plugin keys, import of existing keys,
   and Bash/Zsh or PowerShell environment export with a machine-name field.
 - Direct key selection on the Plugin setup page, device renaming, session-search

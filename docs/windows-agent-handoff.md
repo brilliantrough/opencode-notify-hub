@@ -2,7 +2,15 @@
 
 Updated: 2026-09-13
 
-## 首页修正交接（本轮提交）
+## 统一交接：新首页与目录按需注册（当前任务）
+
+- 使用维护者最新 prompt 的完整 SHA，一次拉取即可包含 `799d9b2` 的客户端体验改动、`1d6fc41` 的首页重做/平台适配/Gateway 修复，以及本轮 Plugin 目录按需注册。上次 Windows 已验证的是 `799d9b2`；不要再以它或 `1d6fc41` 作为本轮最终对齐点。
+- 最新改动在 OpenCode 主机运行的 `session-notify.js`：确认空目录不注册，有非归档历史主会话（含 idle）或后续主会话事件则注册；查询失败保留入口，`NOTIFY_REMOTE_DIRECTORIES` 可精确指定空目录入口。详见 [plugin-install.md](plugin-install.md#目录按需注册)。不涉及新的 Windows 原生依赖或客户端/Gateway 协议变动。
+- Windows 本轮执行下节的客户端轻量检查和完整 Release ZIP 打包即可。Plugin 已通过 Linux 121 项针对性检查、类型检查、Node/Bun 加载检查及真实认证接口查询；仅测试 Notify 客户端不要求在 Windows 安装或重启 OpenCode。
+- 真实联调时，目标 OpenCode 主机必须更新 Plugin 并重启实际服务进程，再清理 Notify 旧离线实例；仅更新客户端、拉取 Git 或重连 attach 不会卸载服务中已加载的旧 Plugin。`packages/plugin/dist/` 是构建产物，不随 Git 拉取生成。
+- 当前版本仍 `0.2.0-beta.1+3`，按最终 SHA 命名验证包；不发布、不打标签、不触发 CI，UI 由维护者验收。Windows 结果不能替代 Android 原生验收。
+
+## 首页修正与轻量验证流程
 
 - 首页改动随本文提交到 `main`；使用维护者交接 prompt 中的新完整 SHA，`799d9b2` 仅是上次验证基线。本轮只需 `flutter analyze --no-pub`、`test/ui/home_page_test.dart` 与 `test/sessions/session_catalog_test.dart` 两组测试，以及 `flutter build windows --release`；交付完整 Release 目录与 ZIP，桌面交互由维护者验收。
 

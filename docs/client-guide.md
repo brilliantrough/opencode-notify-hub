@@ -150,6 +150,8 @@ Session discovery and seamless WebUI renewal require updated Gateway, Plugin,
 and client builds. Restart OpenCode after updating its Plugin. Older Plugins
 may time out on discovery; the client reports this and retains the old metadata.
 
+实例是目录级远程入口，不是系统进程数。新版 Plugin 默认跳过没有主会话的目录，有历史 idle 会话则继续自动注册；需要提前保留空项目入口可设置 [NOTIFY_REMOTE_DIRECTORIES](plugin-install.md#目录按需注册)。客户端“隐藏”只改变展示和查询，不关闭 Plugin 控制连接；更新 Plugin 并重启 OpenCode 后，再清理旧离线记录。
+
 On narrow screens or with large text, session actions wrap below the session
 details. Android uses the in-app WebView and starts the existing foreground
 service before opening when keep-alive is enabled. Returning to Notify refreshes

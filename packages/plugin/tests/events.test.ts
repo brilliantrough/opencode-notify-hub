@@ -29,6 +29,7 @@ describe("normalizeEvent — session lifecycle", () => {
       kind: "session.upsert",
       sessionID: "ses_abc123",
       parentID: "ses_parent9",
+      directory: "/home/dev/project",
       title: "Fix login redirect",
     });
   });
@@ -38,6 +39,7 @@ describe("normalizeEvent — session lifecycle", () => {
       kind: "session.upsert",
       sessionID: "ses_abc123",
       title: "Renamed session",
+      directory: "/home/dev/project",
     });
   });
 
@@ -47,6 +49,7 @@ describe("normalizeEvent — session lifecycle", () => {
       kind: "session.upsert",
       sessionID: "ses_abc123",
       title: "Fix login redirect",
+      directory: "/home/dev/project",
     });
     expect(result).not.toHaveProperty("parentID");
   });

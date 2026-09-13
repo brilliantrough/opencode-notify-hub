@@ -5,6 +5,7 @@
 - 后续首页改为常用/会话/实例，默认限量预览、折叠机器分组，支持关注/隐藏/恢复及离线清理，错误只显示汇总；共享 Dart 的 360px 页面检查通过，Android 原生仍待验证。这批改动随本文提交到 `main`，使用维护者交接 prompt 中的新完整 SHA，`799d9b2` 仅是上轮基线。
 - 已核对 Android 底部导航直接使用共享 `HomePage`，关注/隐藏复用现有 SharedPreferences，无需新增 Kotlin 代码或插件。搜索键盘显示“搜索”，提交及切换首页分栏时收起；同步详情可滚动适配横屏/大字号。
 - 维护者确认上次 Windows 在 `799d9b2` 上无需改码、直接测试通过；本轮新首页尚待 Windows 复测，Android 仍没有原生验证结论。
+- 后续 Plugin 目录按需注册与首页一并包含在最新交接 SHA 中；这是 OpenCode 主机端改动，不新增 Android 依赖或协议。仅更新客户端不会减少旧 Plugin 连接，目标主机需更新 `session-notify.js` 并重启实际服务，再清理旧离线入口。具体配置见 [plugin-install.md](plugin-install.md#目录按需注册)。
 
 ## 本轮已写好的代码
 

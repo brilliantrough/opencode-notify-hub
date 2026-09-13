@@ -44,6 +44,13 @@ describe("parseIngestKey", () => {
 });
 
 describe("loadConfig", () => {
+  it("accepts only a JSON array of absolute remote-entry directories", () => {
+    expect(loadConfig(baseEnv())?.remoteDirectories).toEqual([]);
+    expect(loadConfig({ ...baseEnv(), NOTIFY_REMOTE_DIRECTORIES: '["/work/project"]' })?.remoteDirectories).toEqual(["/work/project"]);
+    for (const value of ['"/work/project"', '["relative"]', '[1]', 'null', 'not json']) {
+      expect(loadConfig({ ...baseEnv(), NOTIFY_REMOTE_DIRECTORIES: value })).toBeNull();
+    }
+  });
   it("returns null when NOTIFY_GATEWAY_URL is missing", () => {
     const env = baseEnv();
     delete env.NOTIFY_GATEWAY_URL;
@@ -145,6 +152,7 @@ describe("loadConfig", () => {
       gatewayUrl: "https://gateway.example.com",
       ingestKey: { keyId: "abcDEF123_-0", secret: "c2VjcmV0X3dpdGgtYmFzZTY0dXJs" },
       machine: hostname(),
+      remoteDirectories: [],
       includeSummary: false,
       queueCapacity: 100,
       heartbeatMs: 60000,

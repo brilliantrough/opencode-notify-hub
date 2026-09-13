@@ -18,8 +18,8 @@ An unanswered question or permission request currently held by an online OpenCod
 _Avoid_: Pending notification, notification history item
 
 **OpenCode instance**:
-One running `opencode serve` or `opencode web` process and its Plugin control connection. A machine may host multiple concurrent instances using the same global Plugin configuration.
-_Avoid_: Machine, project, server port
+一个目录上下文对应的 Notify 远程控制入口。同一个 OpenCode 服务进程可以承载多个目录实例；实例在线表示入口可达，不表示会话正在生成。
+_Avoid_: Machine, OS process, server port
 
 **Last-known interaction**:
 A read-only client projection of an interaction whose OpenCode instance is offline, so its pending status cannot currently be verified.

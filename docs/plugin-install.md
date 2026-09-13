@@ -141,12 +141,37 @@ Never commit the ingest key or paste it into OpenCode itself.
 | Variable | Default | Bounds / values |
 | --- | --- | --- |
 | `NOTIFY_MACHINE` | OS hostname | Any nonempty string; stamped as the event source machine. |
+| `NOTIFY_REMOTE_DIRECTORIES` | `[]` | JSON array of exact absolute paths on the OpenCode host. These directories register even with no sessions; child directories are not included. |
 | `NOTIFY_INCLUDE_SUMMARY` | `false` | `true` / `false` only. When `true`, terminal events (completed/failed/stopped) include an assistant-only text summary, capped at 500 characters. See *Privacy* before enabling. |
 | `NOTIFY_QUEUE_CAPACITY` | `100` | Integer 1–10 000. Bounded offline queue; overflow drops lowest-priority events. |
 | `NOTIFY_HEARTBEAT_MS` | `60000` | Integer 1–3 600 000. Progress heartbeat interval while a round runs. |
 | `NOTIFY_IDLE_DEBOUNCE_MS` | `15000` | Integer 1–600 000. Stable-idle delay before a round is declared completed. |
-| `NOTIFY_HTTP_TIMEOUT_MS` | `5000` | Integer 1–300 000. Per-attempt gateway POST timeout. |
+| `NOTIFY_HTTP_TIMEOUT_MS` | `5000` | Integer 1–300 000. Per-attempt gateway POST timeout; also the total startup session-discovery deadline. |
 | `NOTIFY_MAX_RETRIES` | `3` | Integer 1–100. Delivery retries with backoff before an event is dropped. |
+
+### 目录按需注册
+
+- 同一个 `opencode serve` 可以加载许多目录，Notify 的实例并不等于系统进程。
+- Plugin 返回初始化 hooks 后，通过宿主 SDK 查询本目录的主会话元数据，保留宿主认证；有未归档的历史会话（含 idle）才自动建立控制连接。通常只查最近 1 条，若被归档记录占据则扩大到 50/200 条，总超时默认 5 秒，不查询消息正文或运行状态。
+- 没有主会话、或已完整确认只有归档记录的目录只保留事件 hooks；首次创建或收到可确认的主会话事件时自动注册。仅浏览 `.cache`、`node_modules` 等空目录不会再创建 Notify 连接。
+- 查询失败、返回格式/目录不兼容或达到 200 条仍不能确认时，记录 `directory state unknown` 并保留远程入口，避免把故障或更早历史误判为空。连接建立后不会因 idle 或最后一个会话归档而自动断开，已有 WebUI 可继续使用。
+- 从其他 OpenCode 进程创建会话不会触发当前空目录的事件 hooks；该创建进程的 Notify 会自行注册，当前目录在重新加载或收到后续主会话事件时再次接入。
+
+确实需要在创建会话前保留某个空目录入口时，在启动 **server 的环境**中配置（不要只在 attach 终端设置）：
+
+```bash
+export NOTIFY_REMOTE_DIRECTORIES='["/home/me/work/project"]'
+```
+
+Windows OpenCode 主机示例：
+
+```powershell
+$env:NOTIFY_REMOTE_DIRECTORIES = '["C:/work/project"]'
+```
+
+路径是精确目录，不是递归白名单；未列出的目录仍按会话自动发现。不要把这段可选配置加到所有导出命令里。
+
+更新 `session-notify.js` 后需重启实际 OpenCode 服务进程，重连 `attach` 本身不会卸载旧 Plugin。旧空目录入口会转为离线，可在 Notify 的“实例 → 清理全部离线”移除。无需删除 OpenCode 会话数据库，也无需更新 Gateway/客户端协议。
 
 ### Validation behavior (fail closed)
 

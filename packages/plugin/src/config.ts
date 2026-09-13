@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import { isAbsolute, normalize } from "node:path";
 
 /** Parsed `keyId.secret` ingest credential issued by the gateway. */
 export interface IngestKey {
@@ -16,6 +17,8 @@ export interface PluginConfig {
   gatewayUrl: string;
   ingestKey: IngestKey;
   machine: string;
+  /** Exact directories to register even before they have a session. */
+  remoteDirectories?: string[];
   includeSummary: boolean;
   queueCapacity: number;
   heartbeatMs: number;
@@ -176,6 +179,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): PluginConfig |
     const machineRaw = env.NOTIFY_MACHINE?.trim();
     const machine = machineRaw === undefined || machineRaw === "" ? hostname() : machineRaw;
 
+    const remoteDirectories: unknown = JSON.parse(env.NOTIFY_REMOTE_DIRECTORIES?.trim() || "[]");
+    if (!Array.isArray(remoteDirectories) || remoteDirectories.some(
+      (directory) => typeof directory !== "string" || directory.includes("\0") || !isAbsolute(directory),
+    )) return null;
+
     const includeSummaryRaw = env.NOTIFY_INCLUDE_SUMMARY?.trim();
     let includeSummary = false;
     if (includeSummaryRaw !== undefined && includeSummaryRaw !== "") {
@@ -205,6 +213,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): PluginConfig |
       gatewayUrl,
       ingestKey,
       machine,
+      remoteDirectories: remoteDirectories.map(directory => normalize(directory)),
       includeSummary,
       queueCapacity,
       heartbeatMs,

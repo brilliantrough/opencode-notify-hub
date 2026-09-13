@@ -64,6 +64,8 @@ export type NormalizedEvent =
       sessionID: string;
       parentID?: string;
       title: string;
+      directory?: string;
+      archived?: boolean;
     }
   | {
       kind: "session.status";
@@ -200,9 +202,12 @@ function normalizeSessionUpsert(properties: Record<string, unknown>): Normalized
   }
   const title = typeof info.title === "string" ? info.title : "";
   const parentID = asNonEmptyString(info.parentID);
-  return parentID === null
-    ? { kind: "session.upsert", sessionID, title }
-    : { kind: "session.upsert", sessionID, parentID, title };
+  return {
+    kind: "session.upsert", sessionID, title,
+    ...(parentID === null ? {} : { parentID }),
+    ...(typeof info.directory === "string" ? { directory: info.directory } : {}),
+    ...(isRecord(info.time) && typeof info.time.archived === "number" ? { archived: true } : {}),
+  };
 }
 
 /**
