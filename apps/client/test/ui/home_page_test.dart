@@ -30,8 +30,10 @@ class FakeActiveSessions extends ActiveSessions {
 }
 
 class FakeSessionCatalog extends SessionCatalogController {
+  FakeSessionCatalog([this.initial = const SessionCatalogState()]);
+  final SessionCatalogState initial;
   @override
-  SessionCatalogState build() => const SessionCatalogState();
+  SessionCatalogState build() => initial;
 }
 
 class FakeInstancePresences extends InstancePresences {
@@ -205,6 +207,18 @@ Future<void> answerAndSubmit(WidgetTester tester) async {
 }
 
 void main() {
+  Future<void> browseInstances(WidgetTester tester) async {
+    await tester.tap(find.text('实例'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, '全部'));
+    await tester.pumpAndSettle();
+    while (find.byTooltip('展开机器实例').evaluate().isNotEmpty) {
+      await tester.ensureVisible(find.byTooltip('展开机器实例').first);
+      await tester.tap(find.byTooltip('展开机器实例').first);
+      await tester.pumpAndSettle();
+    }
+  }
+
   Future<void> pumpHome(
     WidgetTester tester, {
     WsStatus status = WsStatus.connected,
@@ -213,11 +227,14 @@ void main() {
     List<PendingInteraction> interactions = const [],
     FakeWebUiBrowserController? webUiController,
     FakeInstancePresences? instanceController,
+    SessionCatalogState catalog = const SessionCatalogState(),
   }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          sessionCatalogProvider.overrideWith(FakeSessionCatalog.new),
+          sessionCatalogProvider.overrideWith(
+            () => FakeSessionCatalog(catalog),
+          ),
           wsStatusProvider.overrideWith((ref) => Stream.value(status)),
           activeSessionsProvider.overrideWith(
             () => FakeActiveSessions(sessions),
@@ -356,10 +373,94 @@ void main() {
     expect(find.text('已连接'), findsOneWidget);
   });
 
+  testWidgets(
+    'home stays compact with many failed instances and cached sessions',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 20000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final cached = [
+        for (var i = 0; i < 40; i++)
+          RemoteSession(
+            session: session(id: 'cached-$i'),
+            instanceId: 'instance-$i',
+          ),
+      ];
+      await pumpHome(
+        tester,
+        instances: {
+          for (var i = 0; i < 40; i++)
+            'instance-$i': instance(
+              'instance-$i',
+              InstancePresenceState.controllable,
+            ),
+        },
+        catalog: SessionCatalogState(
+          sessions: {for (final item in cached) item.key: item},
+          errors: {for (var i = 0; i < 40; i++) 'instance-$i': '会话同步失败，显示上次记录'},
+        ),
+      );
+      expect(find.text('会话同步失败，显示上次记录'), findsNothing);
+      expect(find.text('实时会话'), findsNothing);
+      expect(find.byKey(const ValueKey('instance-instance-0')), findsNothing);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is ListTile && w.key.toString().contains('session-cached-'),
+        ),
+        findsNWidgets(6),
+      );
+      expect(find.text('管理实例'), findsOneWidget);
+    },
+  );
+
   testWidgets('shows 连接中 while connecting', (tester) async {
     await pumpHome(tester, status: WsStatus.connecting);
     expect(find.text('连接中'), findsOneWidget);
   });
+
+  testWidgets(
+    'narrow home exposes source management and one error detail entry',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final target = instance('one', InstancePresenceState.controllable);
+      await pumpHome(
+        tester,
+        instances: {'one': target},
+        catalog: SessionCatalogState(
+          followedSources: {sessionSourceKey(target.machine, target.directory)},
+          errors: {'one': '会话查询超时，请确认 Plugin 已更新且在线'},
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('hide-instance-one')),
+      );
+      expect(find.byTooltip('隐藏此项目实例'), findsOneWidget);
+      expect(find.byTooltip('取消关注'), findsOneWidget);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('catalog-error-summary')),
+      );
+      await tester.tap(find.byKey(const ValueKey('catalog-error-summary')));
+      await tester.pumpAndSettle();
+      expect(find.text('会话查询超时，请确认 Plugin 已更新且在线'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('实例'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('instance-one')), findsNothing);
+      await tester.tap(find.byTooltip('展开机器实例'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('hide-instance-one')),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('shows 未连接 when disconnected', (tester) async {
     await pumpHome(tester, status: WsStatus.disconnected);
@@ -386,7 +487,7 @@ void main() {
       );
 
       final pendingHeader = tester.getTopLeft(find.text('待处理请求')).dy;
-      final sessionHeader = tester.getTopLeft(find.text('实时会话')).dy;
+      final sessionHeader = tester.getTopLeft(find.text('最近会话')).dy;
       expect(pendingHeader, lessThan(sessionHeader));
       expect(find.text('待回答'), findsOneWidget);
       expect(find.byKey(const ValueKey('pending-refresh')), findsOneWidget);
@@ -411,7 +512,7 @@ void main() {
   ) async {
     await pumpHome(tester, sessions: {'s1': session(id: 's1')});
 
-    expect(find.text('dev-box · shop-api'), findsOneWidget);
+    expect(find.textContaining('dev-box · shop-api'), findsOneWidget);
     expect(find.textContaining('Fix checkout bug'), findsOneWidget);
     expect(find.textContaining('5分钟前'), findsOneWidget);
   });
@@ -503,6 +604,7 @@ void main() {
       webUiController: webUi,
     );
 
+    await browseInstances(tester);
     expect(find.textContaining('/work/shop-api'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('webui-instance-one')));
     await tester.pump();
@@ -523,11 +625,11 @@ void main() {
       },
     );
 
-    expect(find.text('OpenCode 实例'), findsOneWidget);
-    expect(find.text('可远程操作'), findsOneWidget);
-    expect(find.text('项目冲突'), findsOneWidget);
-    expect(find.text('版本不兼容'), findsOneWidget);
-    expect(find.text('离线'), findsOneWidget);
+    await browseInstances(tester);
+    expect(find.textContaining('可远程操作'), findsOneWidget);
+    expect(find.textContaining('项目冲突'), findsOneWidget);
+    expect(find.textContaining('版本不兼容'), findsOneWidget);
+    expect(find.textContaining('· 离线 ·'), findsOneWidget);
     expect(find.byKey(const ValueKey('instance-one')), findsOneWidget);
   });
 
@@ -558,6 +660,7 @@ void main() {
       },
     );
 
+    await browseInstances(tester);
     expect(find.byKey(const ValueKey('machine-workstation')), findsOneWidget);
     expect(find.byKey(const ValueKey('machine-laptop')), findsOneWidget);
     expect(find.text('1 在线 / 2 个实例'), findsOneWidget);
@@ -577,6 +680,7 @@ void main() {
     );
     final controller = FakeInstancePresences({first.instanceId: first});
     await pumpHome(tester, instanceController: controller);
+    await browseInstances(tester);
     await tester.tap(find.byTooltip('折叠机器实例'));
     await tester.pumpAndSettle();
 
@@ -593,6 +697,9 @@ void main() {
       find.byKey(const ValueKey('machine-second-machine')),
       findsOneWidget,
     );
+    expect(find.byKey(const ValueKey('instance-second')), findsNothing);
+    await tester.tap(find.byTooltip('展开机器实例'));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('instance-second')), findsOneWidget);
   });
 
@@ -607,7 +714,11 @@ void main() {
     });
     await pumpHome(tester, instanceController: controller);
 
+    await browseInstances(tester);
     expect(find.byKey(const ValueKey('delete-instance-active')), findsNothing);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('delete-instance-offline')),
+    );
     await tester.tap(find.byKey(const ValueKey('delete-instance-offline')));
     await tester.pumpAndSettle();
 
@@ -637,6 +748,7 @@ void main() {
     );
     await pumpHome(tester, instanceController: controller);
 
+    await browseInstances(tester);
     await tester.tap(find.byKey(const ValueKey('delete-instance-offline')));
     await tester.pumpAndSettle();
 
@@ -657,6 +769,10 @@ void main() {
       });
       await pumpHome(tester, instanceController: controller);
 
+      await browseInstances(tester);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('clear-offline-dev-box')),
+      );
       await tester.tap(find.byKey(const ValueKey('clear-offline-dev-box')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
@@ -693,12 +809,14 @@ void main() {
         instances: {offlineId: offlinePresence(offlineId)},
       );
 
-      expect(find.text('离线请求（只读）'), findsOneWidget);
+      expect(find.textContaining('离线请求（只读）'), findsOneWidget);
       final pendingY = tester.getTopLeft(find.text('待处理请求')).dy;
-      final offlineY = tester.getTopLeft(find.text('离线请求（只读）')).dy;
-      final instancesY = tester.getTopLeft(find.text('OpenCode 实例')).dy;
+      final offlineY = tester.getTopLeft(find.textContaining('离线请求（只读）')).dy;
+      final instancesY = tester.getTopLeft(find.text('关注的实例')).dy;
       expect(pendingY, lessThan(offlineY));
       expect(offlineY, lessThan(instancesY));
+      await tester.tap(find.textContaining('离线请求（只读）'));
+      await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('offline-off-1-req-offline')),
         findsOneWidget,
@@ -727,7 +845,9 @@ void main() {
     );
 
     expect(find.text('暂无会话'), findsNothing);
-    expect(find.text('离线请求（只读）'), findsOneWidget);
+    expect(find.textContaining('离线请求（只读）'), findsOneWidget);
+    await tester.tap(find.textContaining('离线请求（只读）'));
+    await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('offline-off-1-req-offline')),
       findsOneWidget,

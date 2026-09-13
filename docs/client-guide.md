@@ -84,7 +84,21 @@ uses FCM instead of replay.
 
 ## Session control
 
-Home queries each online Plugin for main sessions, including idle sessions, on
+### 首页：默认少量入口
+
+| 入口 | 展示与管理 |
+| --- | --- |
+| 常用（默认） | 待处理请求、最多 4 个关注项目实例、6 个固定会话、6 个最近会话；离线请求和浏览器连接默认折叠 |
+| 会话 | 合并主动发现与通知中的会话，不再额外列“实时会话”；每次显示 20 条，支持搜索、固定、隐藏及恢复隐藏会话 |
+| 实例 | 默认仅在线，按机器折叠，每次最多 20 条；可切到“全部”查看离线记录或“已隐藏”恢复项目 |
+| 星标实例 | 按机器与项目目录保存关注，新进程 UUID 不影响关注；已有关注时，常用页最近会话优先来自关注项目或自己打开过的会话 |
+| 隐藏实例 | 对该机器、目录生效，同时隐藏相关会话并停止自动查询；不停止 OpenCode、不关闭已有浏览器连接，也不屏蔽待处理请求 |
+| 删除 / 清理离线 | 删除 Gateway 的离线记录并清理其未固定会话缓存；支持按机器和一键清理全部离线。在线实例使用隐藏，不做远程关闭 |
+| 同步失败 | 首页只有一条数量汇总，点开查看具体原因；不再为每个失败实例铺一行，不把查询失败当作 idle |
+
+关注与隐藏设置按本机 Gateway/账号隔离，客户端或 OpenCode 重启后保留，可随时恢复。首页没有展示的完整会话和实例仍可在对应入口找到。
+
+Home queries each non-hidden online Plugin for main sessions, including idle sessions, on
 startup and reconnect, and every 30 seconds while foregrounded. It first shows
 the local cache, then verifies the current instance binding. Snapshot failures
 show stale/unknown state rather than an empty list or a fabricated idle status.

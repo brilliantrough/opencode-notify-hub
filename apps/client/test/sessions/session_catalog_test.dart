@@ -42,6 +42,9 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
       var failing = false;
+      var stallOther = false;
+      RequestInterceptorHandler? blockedHandler;
+      RequestOptions? blockedRequest;
       final queries = <Map<String, dynamic>>[];
       ProviderContainer create(String email) {
         final dio = Dio();
@@ -49,6 +52,11 @@ void main() {
           InterceptorsWrapper(
             onRequest: (options, handler) {
               queries.add(options.queryParameters);
+              if (stallOther && options.path.contains('/other/')) {
+                blockedHandler = handler;
+                blockedRequest = options;
+                return;
+              }
               if (failing) {
                 handler.reject(
                   DioException(
@@ -137,12 +145,65 @@ void main() {
       expect(item.verified, isTrue);
       expect(item.openedAt, isNotNull);
       expect(queries.last['sessionIds'], 'ses_idle');
+      expect(await controller.toggleFollow(_instance('two')), isNull);
+      expect(await controller.hideSession(item), isNull);
+      expect(await controller.setSourceHidden(_instance('two'), true), isNull);
+      final queriesBeforeHiddenRefresh = queries.length;
+      await controller.refresh();
+      expect(queries.length, queriesBeforeHiddenRefresh);
+      expect(container.read(sessionCatalogProvider).visible, isEmpty);
+      expect(container.read(sessionCatalogProvider).errors, isEmpty);
+      container.dispose();
+
+      container = create('alice@example.com');
+      await _waitFor(() => !container.read(sessionCatalogProvider).loading);
+      controller = container.read(sessionCatalogProvider.notifier);
+      expect(queries.length, queriesBeforeHiddenRefresh);
+      expect(
+        container
+            .read(sessionCatalogProvider)
+            .isFollowed(_instance('restarted')),
+        isTrue,
+      );
+      expect(
+        container.read(sessionCatalogProvider).hiddenSessions,
+        contains(item.key),
+      );
+      expect(await controller.setSourceHidden(_instance('one'), false), isNull);
+      await controller.refresh();
+      expect(queries.length, greaterThan(queriesBeforeHiddenRefresh));
+      expect(container.read(sessionCatalogProvider).visible, isEmpty);
+      expect(await controller.restoreHiddenSessions(), isNull);
+      expect(container.read(sessionCatalogProvider).visible, hasLength(1));
+
+      stallOther = true;
+      container.read(instancePresencesProvider.notifier).replaceAll([
+        _instance('one'),
+        _instance('other'),
+      ]);
+      final backgroundRefresh = controller.refresh();
+      await _waitFor(() => blockedHandler != null);
+      final beforeDirectOpen = queries.length;
+      await controller
+          .refresh(instanceId: 'one')
+          .timeout(const Duration(seconds: 1));
+      expect(queries.length, beforeDirectOpen + 1);
+      blockedHandler!.reject(
+        DioException(
+          requestOptions: blockedRequest!,
+          type: DioExceptionType.connectionError,
+        ),
+      );
+      await backgroundRefresh;
       container.dispose();
 
       failing = true;
       container = create('bob@example.com');
       await _waitFor(() => !container.read(sessionCatalogProvider).loading);
       expect(container.read(sessionCatalogProvider).sessions, isEmpty);
+      expect(container.read(sessionCatalogProvider).followedSources, isEmpty);
+      expect(container.read(sessionCatalogProvider).hiddenSources, isEmpty);
+      expect(container.read(sessionCatalogProvider).hiddenSessions, isEmpty);
       container.dispose();
     },
   );

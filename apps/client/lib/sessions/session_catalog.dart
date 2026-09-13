@@ -13,6 +13,10 @@ import '../realtime/active_sessions.dart';
 import '../realtime/instance_presence.dart';
 import '../realtime/realtime_controller.dart';
 
+// Project identity survives an OpenCode process restart (instance UUID does not).
+String sessionSourceKey(String machine, String directory) =>
+    jsonEncode([machine, directory]);
+
 class RemoteSession {
   const RemoteSession({
     required this.session,
@@ -86,6 +90,9 @@ class SessionCatalogState {
     this.hasMore = false,
     this.search = '',
     this.limit = 50,
+    this.followedSources = const {},
+    this.hiddenSources = const {},
+    this.hiddenSessions = const {},
   });
   final Map<String, RemoteSession> sessions;
   final Map<String, String> errors;
@@ -93,6 +100,14 @@ class SessionCatalogState {
   final bool hasMore;
   final String search;
   final int limit;
+  final Set<String> followedSources;
+  final Set<String> hiddenSources;
+  final Set<String> hiddenSessions;
+
+  bool isHidden(String machine, String directory) =>
+      hiddenSources.contains(sessionSourceKey(machine, directory));
+  bool isFollowed(OpenCodeInstancePresence instance) => followedSources
+      .contains(sessionSourceKey(instance.machine, instance.directory));
 
   SessionCatalogState copyWith({
     Map<String, RemoteSession>? sessions,
@@ -101,6 +116,9 @@ class SessionCatalogState {
     bool? hasMore,
     String? search,
     int? limit,
+    Set<String>? followedSources,
+    Set<String>? hiddenSources,
+    Set<String>? hiddenSessions,
   }) => SessionCatalogState(
     sessions: sessions ?? this.sessions,
     errors: errors ?? this.errors,
@@ -108,6 +126,9 @@ class SessionCatalogState {
     hasMore: hasMore ?? this.hasMore,
     search: search ?? this.search,
     limit: limit ?? this.limit,
+    followedSources: followedSources ?? this.followedSources,
+    hiddenSources: hiddenSources ?? this.hiddenSources,
+    hiddenSessions: hiddenSessions ?? this.hiddenSessions,
   );
 
   List<RemoteSession> get visible {
@@ -115,6 +136,8 @@ class SessionCatalogState {
     final result = sessions.values
         .where(
           (s) =>
+              !isHidden(s.session.machine, s.session.directory) &&
+              !hiddenSessions.contains(s.key) &&
               '${s.session.title} ${s.session.machine} ${s.session.project} ${s.session.directory}'
                   .toLowerCase()
                   .contains(query),
@@ -163,6 +186,10 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
     ref.listen(instancePresencesProvider, (_, next) {
       // Mark old bindings stale immediately; a new instance must answer first.
       state = state.copyWith(
+        errors: Map.of(state.errors)
+          ..removeWhere(
+            (id, _) => next[id]?.state != InstancePresenceState.controllable,
+          ),
         sessions: state.sessions.map(
           (key, value) => MapEntry(
             key,
@@ -202,6 +229,19 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
         }
       }
       state = state.copyWith(sessions: sessions);
+      final preferences = prefs.getString('$_storageKey:preferences');
+      if (preferences != null) {
+        final values = jsonDecode(preferences) as Map<String, dynamic>;
+        state = state.copyWith(
+          followedSources: Set<String>.from(values['followed'] as List? ?? []),
+          hiddenSources: Set<String>.from(
+            values['hiddenSources'] as List? ?? [],
+          ),
+          hiddenSessions: Set<String>.from(
+            values['hiddenSessions'] as List? ?? [],
+          ),
+        );
+      }
     } catch (_) {
       /* A damaged cache must not prevent live discovery. */
     }
@@ -230,8 +270,13 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
     await refresh();
   }
 
-  Future<void> refresh() async {
+  Future<void> refresh({String? instanceId}) async {
     if (!_loaded || !ref.mounted || _storageKey == null) return;
+    // A direct click must not wait behind unrelated, possibly outdated Plugins.
+    if (instanceId != null) {
+      await _refresh(_epoch, instanceId: instanceId);
+      return;
+    }
     if (_refreshing != null) {
       await _refreshing;
       if (ref.mounted) _schedule();
@@ -247,19 +292,31 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
     }
   }
 
-  Future<void> _refresh(int epoch) async {
+  Future<void> _refresh(int epoch, {String? instanceId}) async {
     final version = _queryVersion;
     final query = state.search;
     final limit = state.limit;
-    final instances = ref
-        .read(instancePresencesProvider)
-        .values
-        .where((i) => i.state == InstancePresenceState.controllable)
-        .toList();
+    final instances =
+        ref
+            .read(instancePresencesProvider)
+            .values
+            .where(
+              (i) =>
+                  i.state == InstancePresenceState.controllable &&
+                  !state.isHidden(i.machine, i.directory) &&
+                  (instanceId == null || i.instanceId == instanceId),
+            )
+            .toList()
+          ..sort(
+            (a, b) => (state.isFollowed(b) ? 1 : 0).compareTo(
+              state.isFollowed(a) ? 1 : 0,
+            ),
+          );
     final api = ref.read(apiClientProvider).notifyApi.getSessionsApi();
     state = state.copyWith(loading: true);
-    final errors = <String, String>{};
-    var hasMore = false;
+    final errors = <String, String>{if (instanceId != null) ...state.errors}
+      ..remove(instanceId);
+    var hasMore = instanceId != null && state.hasMore;
     // Four in-flight queries keep a large instance list from flooding the Plugin.
     for (var offset = 0; offset < instances.length; offset += 4) {
       await Future.wait(
@@ -301,12 +358,20 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
                 InstancePresenceState.controllable) {
               return;
             }
+            if (state.isHidden(instance.machine, instance.directory)) return;
             final snapshot = response.data;
             if (snapshot == null) throw StateError('Empty session catalog');
             hasMore |= snapshot.hasMore;
             _apply(instance, snapshot);
           } catch (error) {
             if (!ref.mounted || epoch != _epoch || version != _queryVersion) {
+              return;
+            }
+            if (state.isHidden(instance.machine, instance.directory) ||
+                ref
+                        .read(instancePresencesProvider)[instance.instanceId]
+                        ?.state !=
+                    InstancePresenceState.controllable) {
               return;
             }
             errors[instance.instanceId] = _errorMessage(error);
@@ -328,7 +393,14 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
     if (!ref.mounted || epoch != _epoch) return;
     state = state.copyWith(
       loading: false,
-      errors: version == _queryVersion ? errors : null,
+      errors: version == _queryVersion
+          ? (errors..removeWhere((id, _) {
+              final instance = ref.read(instancePresencesProvider)[id];
+              return instance == null ||
+                  instance.state != InstancePresenceState.controllable ||
+                  state.isHidden(instance.machine, instance.directory);
+            }))
+          : null,
       hasMore: version == _queryVersion ? hasMore : null,
     );
     if (version != _queryVersion) {
@@ -398,6 +470,57 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
     return await _save() ? null : '无法保存固定会话，请重试';
   }
 
+  Future<String?> toggleFollow(OpenCodeInstancePresence instance) async {
+    final key = sessionSourceKey(instance.machine, instance.directory);
+    final followed = Set<String>.of(state.followedSources);
+    if (!followed.remove(key)) followed.add(key);
+    state = state.copyWith(followedSources: followed);
+    return await _save() ? null : '无法保存关注设置，请重试';
+  }
+
+  Future<String?> setSourceHidden(
+    OpenCodeInstancePresence instance,
+    bool hidden,
+  ) async {
+    final key = sessionSourceKey(instance.machine, instance.directory);
+    final sources = Set<String>.of(state.hiddenSources);
+    hidden ? sources.add(key) : sources.remove(key);
+    state = state.copyWith(
+      hiddenSources: sources,
+      errors: Map.of(state.errors)
+        ..removeWhere((id, _) {
+          final source = ref.read(instancePresencesProvider)[id];
+          return source != null &&
+                  state.isHidden(source.machine, source.directory) ||
+              (hidden &&
+                  source?.machine == instance.machine &&
+                  source?.directory == instance.directory);
+        }),
+    );
+    final saved = await _save();
+    if (!hidden) _schedule();
+    return saved ? null : '无法保存隐藏设置，请重试';
+  }
+
+  Future<String?> hideSession(RemoteSession item) async {
+    state = state.copyWith(hiddenSessions: {...state.hiddenSessions, item.key});
+    return await _save() ? null : '无法保存隐藏设置，请重试';
+  }
+
+  Future<String?> restoreHiddenSessions() async {
+    state = state.copyWith(hiddenSessions: {});
+    return await _save() ? null : '无法保存设置，请重试';
+  }
+
+  Future<void> forgetInstance(String instanceId) async {
+    state = state.copyWith(
+      errors: Map.of(state.errors)..remove(instanceId),
+      sessions: Map.of(state.sessions)
+        ..removeWhere((_, s) => s.instanceId == instanceId && !s.pinned),
+    );
+    await _save();
+  }
+
   Future<void> markOpened(String instanceId, String sessionId) async {
     state = state.copyWith(
       sessions: state.sessions.map(
@@ -415,7 +538,12 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
   RemoteSession? preferred(OpenCodeInstancePresence instance) {
     final choices =
         state.sessions.values
-            .where((s) => s.instanceId == instance.instanceId && s.verified)
+            .where(
+              (s) =>
+                  s.instanceId == instance.instanceId &&
+                  s.verified &&
+                  !state.hiddenSessions.contains(s.key),
+            )
             .toList()
           ..sort((a, b) {
             if ((a.openedAt != null) != (b.openedAt != null)) {
@@ -434,11 +562,22 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
     final raw = jsonEncode(
       state.sessions.values.map((s) => s.toJson()).toList(),
     );
+    final preferences = jsonEncode({
+      'followed': state.followedSources.toList(),
+      'hiddenSources': state.hiddenSources.toList(),
+      'hiddenSessions': state.hiddenSessions.toList(),
+    });
     var saved = false;
     final prefs = ref.read(sharedPreferencesProvider);
     _writes = _writes.then((_) async {
       try {
-        saved = await (await prefs).setString(key, raw);
+        final storage = await prefs;
+        final sessionsSaved = await storage.setString(key, raw);
+        final preferencesSaved = await storage.setString(
+          '$key:preferences',
+          preferences,
+        );
+        saved = sessionsSaved && preferencesSaved;
       } catch (_) {
         /* Report bookmark write failure to the caller. */
       }
@@ -449,13 +588,26 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
 
   String _errorMessage(Object error) {
     if (error is DioException) {
+      if (error.response?.statusCode == 200) return '会话响应格式不兼容，请更新客户端与 Plugin';
+      if (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.sendTimeout) {
+        return '网络请求超时，请检查连接后重试';
+      }
+      if (error.type == DioExceptionType.connectionError) {
+        return '无法连接 Gateway，请检查网络';
+      }
       return switch (error.response?.statusCode) {
         404 => '实例不可用，或 Gateway 尚未支持会话列表',
         501 => '请更新此实例的 Notify Plugin',
         504 => '会话查询超时，请确认 Plugin 已更新且在线',
-        _ => '会话同步失败，显示上次记录',
+        502 => 'Plugin 读取 OpenCode 会话失败，请检查 OpenCode 服务与认证',
+        401 || 403 => '会话查询未获授权，请重新登录',
+        429 => '请求过于频繁，请稍后刷新',
+        final code? => '会话查询失败（HTTP $code），请重试',
+        _ => '会话连接失败，请检查网络后重试',
       };
     }
-    return '会话同步失败，显示上次记录';
+    return '会话响应无法读取，请更新客户端与 Plugin';
   }
 }

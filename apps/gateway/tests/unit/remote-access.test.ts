@@ -2,6 +2,24 @@ import { EventEmitter } from "node:events";
 import { expect, it, vi } from "vitest";
 import { InstanceRegistry } from "../../src/modules/control/instance-registry.js";
 import { createAccessTokens } from "../../src/plugins/jwt.js";
+import Fastify from "fastify";
+import { sessionControlRoutes } from "../../src/modules/control/session-control.routes.js";
+
+it("accepts the client's HTTP query limit without weakening body validation", async () => {
+  const app = Fastify({ ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
+  const collectSessions = vi.fn<InstanceRegistry["collectSessions"]>(async () => ({ status: "ready", catalog: { sessions: [], hasMore: false } }));
+  app.decorate("authenticate", async (request) => { request.userId = "owner"; });
+  await app.register(sessionControlRoutes({ collectSessions } as unknown as InstanceRegistry));
+  try {
+    const path = "/v1/instances/10000000-0000-4000-8000-000000000001/sessions";
+    const response = await app.inject(`${path}?search=&limit=50&sessionIds=`);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(collectSessions.mock.calls[0]?.[2]).toEqual({ search: "", limit: 50, sessionIds: "" });
+    for (const limit of ["0", "201", "1.5", "nope"]) {
+      expect((await app.inject(`${path}?limit=${limit}`)).statusCode).toBe(400);
+    }
+  } finally { await app.close(); }
+});
 
 class Socket extends EventEmitter {
   readyState = 1;

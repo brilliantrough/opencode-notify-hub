@@ -5,6 +5,12 @@ All notable changes will be documented in this file. The project intends to use
 
 ## [Unreleased]
 
+- Home now defaults to bounded favorite/recent shortcuts, with separate session
+  and instance browsers, collapsed machine groups, persistent follow/hide/restore,
+  offline cleanup, and one expandable synchronization error summary.
+- Fixed session catalog requests returning HTTP 400: parse the HTTP query's
+  `limit` as a number before strict range validation.
+
 ### Added
 
 - Repeat viewing/copying of locally saved Plugin keys, import of existing keys,

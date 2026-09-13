@@ -2,7 +2,18 @@
 
 Updated: 2026-09-13
 
-## 2026-09-13 远程会话入口交接（当前任务）
+## 首页修正交接（本轮提交）
+
+- 首页改动随本文提交到 `main`；使用维护者交接 prompt 中的新完整 SHA，`799d9b2` 仅是上次验证基线。本轮只需 `flutter analyze --no-pub`、`test/ui/home_page_test.dart` 与 `test/sessions/session_catalog_test.dart` 两组测试，以及 `flutter build windows --release`；交付完整 Release 目录与 ZIP，桌面交互由维护者验收。
+
+- 维护者已澄清：上次 Windows 在 `799d9b2` 上没有改码，直接测试通过，因此没有额外 Windows 提交是正常结果。此为维护者反馈；本次首页重做仍待 Windows 复测。
+- 新首页为常用/会话/实例，默认限量预览；实例在线/全部/已隐藏筛选、折叠分组、关注、持久化隐藏/恢复和离线清理；去掉独立实时会话栏，错误汇总到详情。都是共享 Dart，Windows 后续应拉取包含这批改动的新 SHA 再构建。
+- Linux 本轮 31 项客户端检查（含 360px 布局、隐藏持久化/恢复与账号隔离）、2 项 Gateway 检查、分析与 Linux Release 已通过；没有本轮 Windows 原生构建结论。
+- Gateway 查询参数 `limit` 的字符串/整数不匹配已修复并部署 `20260913-catalog-query`；HTTP 400 根因消除。部分目标仍有 502/504，需要检查目标 OpenCode 的 Plugin 更新/重启及服务状态。
+- 本次平台对齐已核对 `app.dart`：Windows 导航栏与 Android 底部导航均使用同一 `HomePage`，关注/隐藏使用已有跨平台 SharedPreferences，无新增原生依赖。搜索按 Enter 收起输入焦点，切换首页分栏同样收起键盘；同步详情可滚动以适配短窗口与大字号。
+- 后续 Windows 重点复测：缩窄窗口/放大字号、关注和隐藏后重启恢复、离线清理、搜索后切换分栏，以及托盘恢复后直达会话；拉取本轮新 SHA 后构建完整 Release。此次只做源码对齐及轻量静态检查，不提前构建 Windows/Android 包。
+
+## 2026-09-13 远程会话入口交接（上轮背景）
 
 - 本轮代码随本交接文档提交到 `main`；对齐点以维护者转发的 Linux Agent prompt 中完整 SHA 为准，`ac2aba0` 及下文 8 月 SHA 仅为历史。
 - 当前任务：拉取指定 SHA，运行与本轮改动相关的窄范围检查，构建并打包完整 Windows Release 目录；最终 UI/休眠验收由维护者执行。Linux 已通过本轮 60 项针对性检查、Flutter 静态分析、Linux Release 构建及文档链接检查。

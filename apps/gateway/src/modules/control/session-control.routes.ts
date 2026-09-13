@@ -19,6 +19,13 @@ export function sessionControlRoutes(registry: InstanceRegistry): FastifyPluginA
       "/v1/instances/:instanceId/sessions",
       {
         preHandler: app.authenticate,
+        preValidation: async (request) => {
+          // HTTP query values are strings; keep strict validation for bodies.
+          const query = request.query as { limit?: unknown };
+          if (typeof query.limit === "string" && /^\d+$/.test(query.limit)) {
+            query.limit = Number(query.limit);
+          }
+        },
         schema: {
           params: { type: "object", required: ["instanceId"], properties: { instanceId: { type: "string", format: "uuid" } } },
           querystring: sessionCatalogQuerySchema,
