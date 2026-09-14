@@ -44,6 +44,13 @@ interface CacheEntry {
   /** `undefined` = ancestry not yet known. */
   parentID?: string | null;
   title?: string;
+  excluded?: boolean;
+}
+
+export function isInternalSession(title?: string): boolean {
+  // ponytail: Magic Context currently identifies workers by this title prefix;
+  // replace with an upstream internal-session marker when one is available.
+  return title?.startsWith("magic-context-") === true;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -61,12 +68,13 @@ export class SessionRegistry {
    * Events are authoritative: this overwrites any previously cached or
    * in-flight ancestry for the session.
    */
-  update(sessionID: string, parentID: string | null, title?: string): void {
+  update(sessionID: string, parentID: string | null, title?: string, archived = false): void {
     const entry = this.entries.get(sessionID) ?? {};
     entry.parentID = parentID;
     if (title !== undefined) {
       entry.title = title;
     }
+    entry.excluded = archived || isInternalSession(entry.title);
     this.entries.set(sessionID, entry);
   }
 
@@ -75,15 +83,26 @@ export class SessionRegistry {
     return this.entries.get(sessionID)?.title;
   }
 
+  excluded(sessionID: string): boolean {
+    const entry = this.entries.get(sessionID);
+    return entry?.excluded === true || typeof entry?.parentID === "string";
+  }
+
+  /** A lifecycle event always wins over an older in-flight SDK snapshot. */
+  updateFromLookup(...info: Parameters<SessionRegistry["update"]>): void {
+    if (!this.entries.has(info[0])) this.update(...info);
+  }
+
   /**
-   * Whether the session is top-level. Returns `null` when ancestry is
+   * Whether the session is an eligible top-level user session (not an
+   * internal worker, archived or deleted session). Returns `null` when ancestry is
    * unknown (failed/malformed lookup). Never throws, never rejects.
    */
   async isMain(sessionID: string): Promise<boolean | null> {
     try {
       const entry = this.entries.get(sessionID);
       if (entry?.parentID !== undefined) {
-        return entry.parentID === null;
+        return entry.parentID === null && !entry.excluded;
       }
       const pending = this.inflight.get(sessionID);
       if (pending !== undefined) {
@@ -117,7 +136,7 @@ export class SessionRegistry {
     // ancestry) wins over the SDK answer — and over its failure.
     const entry = this.entries.get(sessionID);
     if (entry?.parentID !== undefined) {
-      return entry.parentID === null;
+      return entry.parentID === null && !entry.excluded;
     }
     if (parentID === undefined) {
       return null;
@@ -144,7 +163,10 @@ export class SessionRegistry {
  * Anything else — rejection, non-record payload, missing `id`, or a
  * non-string/non-null `parentID` — is unknown (`undefined`), never main.
  */
-export function createSdkLookup(sessionClient: SessionGetClient): SessionLookup {
+export function createSdkLookup(
+  sessionClient: SessionGetClient,
+  onSession?: SessionRegistry["update"],
+): SessionLookup {
   return {
     async getParentID(sessionID: string): Promise<string | null | undefined> {
       let response: unknown;
@@ -163,6 +185,12 @@ export function createSdkLookup(sessionClient: SessionGetClient): SessionLookup 
         return undefined;
       }
       const parentID = session.parentID;
+      if (parentID != null && (typeof parentID !== "string" || !parentID.length)) return undefined;
+      onSession?.(
+        sessionID, typeof parentID === "string" ? parentID : null,
+        typeof session.title === "string" ? session.title : undefined,
+        isRecord(session.time) && typeof session.time.archived === "number" && session.time.archived > 0,
+      );
       if (typeof parentID === "string" && parentID.length > 0) {
         return parentID;
       }

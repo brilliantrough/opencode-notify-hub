@@ -14,27 +14,32 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-function setup(directory: string, response: () => Response | Promise<Response>, remoteDirectories: string[] = []) {
+function setup(directory: string, response: (request: Request) => Response | Promise<Response>, remoteDirectories: string[] = []) {
   const start = vi.fn();
+  const stop = vi.fn();
+  const enqueue = vi.fn();
   const warn = vi.fn();
   const fetch = vi.fn(async (request: Request) => {
     const url = new URL(request.url);
-    expect(url.pathname).toBe("/session");
-    expect(url.searchParams.get("directory")).toBe(directory);
-    expect(url.searchParams.get("roots")).toBe("true");
-    expect(["1", "50", "200"]).toContain(url.searchParams.get("limit"));
+    if (url.pathname === "/session") {
+      expect(url.searchParams.get("directory")).toBe(directory);
+      expect(url.searchParams.get("roots")).toBe("true");
+      expect(["1", "50", "200"]).toContain(url.searchParams.get("limit"));
+    } else {
+      expect(url.pathname).toBe("/session/ses_old");
+    }
     expect(request.headers.get("authorization")).toBe("Basic fixture");
-    return response();
+    return response(request);
   });
   const client = createOpencodeClient({ baseUrl: "http://localhost:4096", headers: { authorization: "Basic fixture" }, fetch });
   const input = { directory, worktree: directory, project: { worktree: directory }, serverUrl: new URL("http://localhost:4096"), client } as PluginInput;
   const hook = createSessionNotifyHooks(input, { ...config, remoteDirectories }, {
-    control: { start, stop: async () => {} },
-    pump: { enqueue: () => {}, stop: async () => {} },
+    control: { start, stop },
+    pump: { enqueue, stop: async () => {} },
     logger: { info: () => {}, debug: () => {}, warn, error: () => {} },
   });
   hooks.push(hook);
-  return { hook, start, fetch, warn };
+  return { hook, start, stop, enqueue, fetch, warn };
 }
 
 it("130 browsed directories register only the 10 with idle history, without querying status", async () => {
@@ -109,4 +114,90 @@ it("a late discovery response cannot reopen a disposed plugin or undo event-driv
   await vi.advanceTimersByTimeAsync(0);
   expect(entry.start).toHaveBeenCalledTimes(1);
   expect(disposed.start).not.toHaveBeenCalled();
+});
+
+const emit = (hook: Hooks, type: string, info: object) =>
+  hook.event!({ event: { type, properties: { info } } as never });
+
+it("ignores root Magic Context workers in history, creation and subsequent notifications", async () => {
+  const info = { ...session("/work/project"), title: "magic-context-dream-user-memories" };
+  const entry = setup(info.directory, () => Response.json([info]));
+  await vi.advanceTimersByTimeAsync(0);
+  await emit(entry.hook, "session.created", info);
+  await entry.hook.event!({ event: { type: "session.status", properties: { sessionID: info.id, status: { type: "busy" } } } as never });
+  await entry.hook.event!({ event: { type: "session.error", properties: { sessionID: info.id, error: { name: "UnknownError" } } } as never });
+  await emit(entry.hook, "session.deleted", info);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(entry.start).not.toHaveBeenCalled();
+  expect(entry.enqueue).not.toHaveBeenCalled();
+});
+
+it.each(["session.deleted", "session.updated"])("withdraws an empty entry after %s and permits a later real session", async type => {
+  const info = session("/work/project");
+  let rows = [info];
+  const entry = setup(info.directory, () => Response.json(rows));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(entry.start).toHaveBeenCalledTimes(1);
+  rows = [];
+  await emit(entry.hook, type, { ...info, time: { updated: 2, archived: 2 } });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(entry.stop).toHaveBeenCalledTimes(1);
+  await entry.hook.event!({ event: { type: "session.status", properties: { sessionID: info.id, status: { type: "busy" } } } as never });
+  expect(entry.start).toHaveBeenCalledTimes(1);
+  await emit(entry.hook, "session.created", { ...info, id: "ses_new" });
+  expect(entry.start).toHaveBeenCalledTimes(2);
+});
+
+it("keeps idle history, explicit entries and unknown directories on deletion", async () => {
+  const info = session("/work/project");
+  const idle = setup(info.directory, () => Response.json([{ ...info, id: "ses_other" }]));
+  const explicit = setup(info.directory, () => Response.json([]), [info.directory]);
+  const unknown = setup(info.directory, () => new Response(null, { status: 503 }));
+  await vi.advanceTimersByTimeAsync(0);
+  for (const entry of [idle, explicit, unknown]) await emit(entry.hook, "session.deleted", info);
+  await vi.advanceTimersByTimeAsync(0);
+  for (const entry of [idle, explicit, unknown]) expect(entry.stop).not.toHaveBeenCalled();
+});
+
+it("an empty deletion snapshot cannot withdraw a newly created session", async () => {
+  const info = session("/work/project");
+  let resolve!: (response: Response) => void;
+  let response = () => Promise.resolve(Response.json([info]));
+  const entry = setup(info.directory, () => response());
+  await vi.advanceTimersByTimeAsync(0);
+  response = () => new Promise(r => { resolve = r; });
+  await emit(entry.hook, "session.deleted", info);
+  await vi.advanceTimersByTimeAsync(0);
+  await emit(entry.hook, "session.created", { ...info, id: "ses_new" });
+  resolve(Response.json([]));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(entry.stop).not.toHaveBeenCalled();
+});
+
+it("filters internal workers through SDK lookup even if their creation event was missed", async () => {
+  const info = { ...session("/work/project"), title: "magic-context-dream-user-memories" };
+  const entry = setup(info.directory, request => Response.json(new URL(request.url).pathname === "/session" ? [] : info));
+  await vi.advanceTimersByTimeAsync(0);
+  for (let i = 0; i < 2; i++) {
+    await entry.hook.event!({ event: { type: "session.status", properties: { sessionID: info.id, status: { type: "busy" } } } as never });
+  }
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(entry.start).not.toHaveBeenCalled();
+  expect(entry.enqueue).not.toHaveBeenCalled();
+  expect(entry.fetch).toHaveBeenCalledTimes(2); // initial list and one cached lookup
+});
+
+it("ignores foreign deletion and restores an archived session with archived=0", async () => {
+  const info = session("/work/project");
+  const entry = setup(info.directory, () => Response.json([]));
+  await vi.advanceTimersByTimeAsync(0);
+  await emit(entry.hook, "session.created", info);
+  await emit(entry.hook, "session.deleted", { ...info, directory: "/work/other" });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(entry.stop).not.toHaveBeenCalled();
+  await emit(entry.hook, "session.updated", { ...info, time: { archived: 2 } });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(entry.stop).toHaveBeenCalledTimes(1);
+  await emit(entry.hook, "session.updated", { ...info, time: { archived: 0 } });
+  expect(entry.start).toHaveBeenCalledTimes(2);
 });

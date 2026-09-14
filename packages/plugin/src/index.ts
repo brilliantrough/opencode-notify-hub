@@ -59,6 +59,7 @@ import { WebUiProxy } from "./webui-proxy.js";
 import { GatewaySender } from "./sender.js";
 import {
   createSdkLookup,
+  isInternalSession,
   SessionRegistry,
   type SessionLookup,
 } from "./session-registry.js";
@@ -143,8 +144,8 @@ export function createSessionNotifyHooks(
       ],
       sink: (entry) => input.client.app.log({ body: entry }),
     });
-  const registry = new SessionRegistry(
-    deps.lookup ?? createSdkLookup(input.client.session),
+  const registry: SessionRegistry = new SessionRegistry(
+    deps.lookup ?? createSdkLookup(input.client.session, (...info) => registry.updateFromLookup(...info)),
   );
   const cache = new MessageCache();
   const source = {
@@ -353,10 +354,16 @@ export function createSessionNotifyHooks(
   });
   let disposed = false;
   let controlStarted = false;
+  let controlWanted = false;
+  let controlStopping = false;
+  let directoryRevision = 0;
   const discoveryAbort = new AbortController();
 
   function startControl(): void {
-    if (disposed || controlStarted || !control) return;
+    if (disposed || !control) return;
+    if (!controlWanted) directoryRevision++;
+    controlWanted = true;
+    if (controlStarted || controlStopping) return;
     try {
       control.start();
       controlStarted = true;
@@ -365,8 +372,24 @@ export function createSessionNotifyHooks(
     }
   }
 
+  async function stopEmptyControl(): Promise<void> {
+    controlWanted = false;
+    if (!controlStarted || !control) return;
+    controlStarted = false;
+    controlStopping = true;
+    try {
+      await control.stop();
+    } catch {
+      logger.error("notify: empty directory control channel failed to stop");
+    } finally {
+      controlStopping = false;
+      if (controlWanted) startControl();
+    }
+  }
+
   async function discoverRemoteEntry(): Promise<void> {
-    if (disposed || controlStarted || !control) return;
+    if (disposed || !control) return;
+    const revision = ++directoryRevision;
     const path = directory.includes("\\") ? win32 : posix;
     if (config.remoteDirectories?.includes(path.normalize(directory))) {
       startControl();
@@ -379,15 +402,19 @@ export function createSessionNotifyHooks(
       for (const limit of [1, 50, 200]) {
         const query = { directory, roots: true, limit };
         const result = await input.client.session.list({ query, signal, throwOnError: true });
-        if (disposed || controlStarted) return;
+        if (disposed || revision !== directoryRevision) return;
         if (!Array.isArray(result.data) || result.data.some(s =>
           !s || typeof s.id !== "string" || s.directory !== directory || !s.time,
         )) throw new Error("Invalid directory session list");
-        if (result.data.some(s => !s.parentID && !("archived" in s.time && s.time.archived))) {
+        for (const s of result.data) {
+          registry.updateFromLookup(s.id, s.parentID ?? null, s.title, !!("archived" in s.time && s.time.archived));
+        }
+        if (result.data.some(s => !s.parentID && !isInternalSession(s.title) && !("archived" in s.time && s.time.archived))) {
           startControl();
           return;
         }
         if (result.data.length < limit) {
+          await stopEmptyControl();
           logger.info("notify: empty directory; remote registration deferred until a main session exists");
           return;
         }
@@ -395,16 +422,19 @@ export function createSessionNotifyHooks(
       // ponytail: cap archived-history scans at 200; keep unknown entries rather than hide older sessions.
       throw new Error("Session discovery page exhausted");
     } catch {
-      if (disposed || controlStarted) return;
+      if (disposed || revision !== directoryRevision) return;
       // Unknown is not empty: preserve access on API/auth/transport failure.
       logger.warn("notify: session discovery failed; retaining remote entry (directory state unknown)");
       startControl();
     }
   }
 
-  const controlStart = setImmediate(() => {
-    void discoverRemoteEntry();
-  });
+  let controlStart: ReturnType<typeof setImmediate>;
+  function scheduleDiscovery(): void {
+    clearImmediate(controlStart);
+    controlStart = setImmediate(() => { void discoverRemoteEntry(); });
+  }
+  scheduleDiscovery();
   logger.info("opencode-notify enabled", {
     machine: source.machine,
     project: source.project,
@@ -493,11 +523,23 @@ export function createSessionNotifyHooks(
 
     // Session info is authoritative ancestry/title data; it updates the
     // registry directly and never passes through the main-session gate.
-    if (normalized.kind === "session.upsert") {
+    if (normalized.kind === "session.upsert" || normalized.kind === "session.deleted") {
       if (normalized.directory !== undefined && normalized.directory !== directory) return;
       try {
-        registry.update(normalized.sessionID, normalized.parentID ?? null, normalized.title);
-        if (!normalized.parentID && !normalized.archived) startControl();
+        const wasExcluded = registry.excluded(normalized.sessionID);
+        const removed = normalized.kind === "session.deleted" || normalized.archived === true;
+        registry.update(normalized.sessionID, normalized.parentID ?? null, normalized.title, removed);
+        if (registry.excluded(normalized.sessionID)) {
+          machine.disposeSession(normalized.sessionID);
+          cache.clearSession(normalized.sessionID);
+          if (removed || !wasExcluded) {
+            directoryRevision++;
+            scheduleDiscovery();
+          }
+        } else {
+          directoryRevision++;
+          startControl();
+        }
       } catch {
         logger.error("notify: failed to record session info", {
           sessionID: normalized.sessionID,
@@ -527,7 +569,7 @@ export function createSessionNotifyHooks(
     if (!main) {
       return; // child sessions are never notified
     }
-    if (disposed) {
+    if (disposed || registry.excluded(sessionID)) {
       return; // an ancestry lookup may have completed while disposal began
     }
     startControl();

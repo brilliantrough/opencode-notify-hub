@@ -173,6 +173,7 @@ export class ControlChannel implements PluginControl {
   private socket: ControlSocket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private running = false;
+  private generation = 0;
   private attempt = 0;
   private openCodeVersion: string | null = null;
   private registered = false;
@@ -196,6 +197,7 @@ export class ControlChannel implements PluginControl {
 
   stop(): void {
     this.running = false;
+    this.generation++;
     this.registered = false;
     for (const tunnelId of [...this.webUiAborts.keys()]) {
       this.closeWebUiTunnel(tunnelId);
@@ -217,6 +219,7 @@ export class ControlChannel implements PluginControl {
     if (!this.running || this.socket !== null) {
       return;
     }
+    const generation = this.generation;
     if (this.openCodeVersion === null || this.openCodeVersion === "unknown") {
       this.openCodeVersion = null;
       // The plugin factory can be invoked before the OpenCode HTTP server is
@@ -226,9 +229,10 @@ export class ControlChannel implements PluginControl {
       // "unknown" cache was the incompatible-forever bug.
       const deadline = Date.now() + (this.options.versionReadyTimeoutMs ?? VERSION_READY_TIMEOUT_MS);
       let delay = 500;
-      while (this.running && this.openCodeVersion === null) {
+      while (this.running && generation === this.generation && this.openCodeVersion === null) {
         try {
           const version = await this.resolveVersion();
+          if (!this.running || generation !== this.generation) return;
           if (version.trim().length > 0 && version.trim() !== "unknown") {
             this.openCodeVersion = version.trim();
             break;
@@ -236,6 +240,7 @@ export class ControlChannel implements PluginControl {
         } catch {
           // Not ready yet; fall through to the retry wait.
         }
+        if (!this.running || generation !== this.generation) return;
         if (Date.now() >= deadline) {
           this.openCodeVersion = "unknown";
           break;
@@ -244,7 +249,7 @@ export class ControlChannel implements PluginControl {
         delay = Math.min(delay * 2, 5_000);
       }
     }
-    if (!this.running) {
+    if (!this.running || generation !== this.generation || this.socket !== null) {
       return;
     }
 

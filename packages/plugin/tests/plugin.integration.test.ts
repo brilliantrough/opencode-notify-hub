@@ -225,6 +225,8 @@ function makeAnswerFetch(options: {
         ? String((url as { url: unknown }).url)
         : String(url);
     let requestBody: unknown = init?.body;
+    // Health probing is separate from the lazily-created command adapters.
+    if (requestUrl.endsWith("/global/health")) return Response.json({ healthy: true, version: "1.18.30" });
     if (url !== null && typeof url === "object" && "body" in url && url.body !== null) {
       try {
         requestBody = await (url as Request).text();
@@ -328,6 +330,8 @@ function makePermissionFetch(options: {
       url !== null && typeof url === "object" && "url" in url
         ? String((url as { url: unknown }).url)
         : String(url);
+    // Keep command-query capture independent of the HTTP health probe.
+    if (requestUrl.endsWith("/global/health")) return Response.json({ healthy: true, version: "1.18.30" });
     calls.push({
       url: requestUrl,
       body: String(init?.body),
@@ -475,7 +479,9 @@ describe("SessionNotifyPlugin", () => {
       },
     );
     const { client } = makeClient();
-    const hooks = await SessionNotifyPlugin(makeInput(client));
+    const hooks = await SessionNotifyPlugin(makeInput(client), {
+      serverFetch: async () => Response.json({ healthy: true, version: "1.18.30" }),
+    });
 
     await vi.advanceTimersByTimeAsync(0);
     await emit(hooks, sessionCreated());
@@ -1018,6 +1024,8 @@ describe("SessionNotifyPlugin", () => {
         url !== null && typeof url === "object" && "url" in url
           ? String((url as { url: unknown }).url)
           : String(url);
+      // Capture pending queries separately from the deferred health probe.
+      if (requestUrl.endsWith("/global/health")) return Response.json({ healthy: true, version: "1.18.30" });
       calls.push({
         url: requestUrl,
         body: String(init?.body),

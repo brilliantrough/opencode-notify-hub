@@ -35,6 +35,30 @@ describe("ControlChannel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does not let a withdrawn entry's late health probe create a second connection after restart", async () => {
+    const pending: Array<(version: string) => void> = [];
+    const socketFactory = vi.fn(() => new FakeSocket());
+    const channel = new ControlChannel({
+      gatewayUrl: "https://notify.example.com", credential: "key.secret",
+      machine: "devbox", project: "notify", directory: "/work/notify",
+      resolveOpenCodeVersion: () => new Promise(resolve => pending.push(resolve)),
+      socketFactory,
+    });
+    channel.start();
+    channel.stop();
+    channel.start();
+    pending[1]("1.18.30");
+    await vi.waitFor(() => expect(socketFactory).toHaveBeenCalledTimes(1));
+    pending[0]("1.18.18");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(socketFactory).toHaveBeenCalledTimes(1);
+    const socket = socketFactory.mock.results[0].value;
+    socket.emit("open");
+    expect(JSON.parse(socket.sent[0]).openCodeVersion).toBe("1.18.30");
+    channel.stop();
+  });
+
   it("authenticates and registers the owning OpenCode instance after version discovery", async () => {
     const socket = new FakeSocket();
     const calls: Array<{ url: string; authorization: string }> = [];
@@ -69,6 +93,7 @@ describe("ControlChannel", () => {
         project: "notify",
         directory: "/work/notify",
         openCodeVersion: "1.18.18",
+        webUiAvailable: false,
         protocolVersion: 2,
       },
     ]);
@@ -207,15 +232,17 @@ describe("ControlChannel", () => {
       directory: "/work/notify",
       resolveOpenCodeVersion: () => new Promise(() => undefined),
       versionTimeoutMs: 50,
+      versionReadyTimeoutMs: 0,
       randomUUID: () => "6f0d91b0-93e4-43a9-9449-0bed03e651aa",
       socketFactory: () => socket,
     });
 
     channel.start();
-    await vi.runAllTimersAsync();
+    await vi.advanceTimersByTimeAsync(50);
     socket.emit("open");
 
     expect(JSON.parse(socket.sent[0])).toMatchObject({ openCodeVersion: "unknown" });
+    channel.stop();
   });
 
   it("retries the version probe until the host server is ready (TUI startup race)", async () => {

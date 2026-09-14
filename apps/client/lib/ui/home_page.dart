@@ -325,7 +325,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   ) {
     final label = switch (instance.state) {
       InstancePresenceState.controllable =>
-        instance.webUiAvailable ? '在线' : '在线 · 仅通知',
+        instance.webUiAvailable ? '在线' : '在线 · WebUI 未确认',
       InstancePresenceState.conflicting => '在线 · 项目冲突',
       InstancePresenceState.incompatible => '在线 · Plugin 协议不兼容',
       InstancePresenceState.offline => '离线',
@@ -333,56 +333,49 @@ class _HomePageState extends ConsumerState<HomePage> {
     final version = instance.openCodeVersion == 'unknown'
         ? ''
         : ' · OpenCode ${instance.openCodeVersion}';
-    return ListTile(
+    return _HomeRecordTile(
       key: ValueKey('instance-${instance.instanceId}'),
-      title: Text('${instance.machine} · ${instance.project}'),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('$label$version'),
-          Text(
-            instance.directory,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+      title: '${instance.machine} · ${instance.project}',
+      subtitle: '$label · ${instance.directory}',
+      detail: '$label$version\n${instance.directory}',
+      actions: (compact) => [
+        if (instance.state != InstancePresenceState.offline)
+          IconButton(
+            tooltip: catalog.isFollowed(instance) ? '取消关注' : '关注此入口',
+            icon: Icon(
+              catalog.isFollowed(instance) ? Icons.star : Icons.star_outline,
+            ),
+            onPressed: () => _save(
+              ref.read(sessionCatalogProvider.notifier).toggleFollow(instance),
+            ),
           ),
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            children: [
-              if (instance.canOpen)
-                FilledButton.tonalIcon(
-                  key: ValueKey('webui-instance-${instance.instanceId}'),
-                  onPressed: webUi.openingFor(instance.instanceId)
-                      ? null
-                      : () => _open(instance),
-                  icon: const Icon(Icons.open_in_browser),
-                  label: const Text('打开'),
-                ),
-              if (instance.state != InstancePresenceState.offline)
-                IconButton(
-                  tooltip: catalog.isFollowed(instance) ? '取消关注' : '关注此入口',
-                  icon: Icon(
-                    catalog.isFollowed(instance)
-                        ? Icons.star
-                        : Icons.star_outline,
-                  ),
-                  onPressed: () => _save(
-                    ref
-                        .read(sessionCatalogProvider.notifier)
-                        .toggleFollow(instance),
-                  ),
-                ),
-              if (instance.state == InstancePresenceState.offline)
-                IconButton(
-                  key: ValueKey('delete-instance-${instance.instanceId}'),
-                  tooltip: '删除本机离线入口记录',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () => _forget(instance),
-                ),
-            ],
+        if (instance.canOpen)
+          if (compact)
+            IconButton.filledTonal(
+              key: ValueKey('webui-instance-${instance.instanceId}'),
+              tooltip: '打开',
+              onPressed: webUi.openingFor(instance.instanceId)
+                  ? null
+                  : () => _open(instance),
+              icon: const Icon(Icons.open_in_browser),
+            )
+          else
+            FilledButton.tonalIcon(
+              key: ValueKey('webui-instance-${instance.instanceId}'),
+              onPressed: webUi.openingFor(instance.instanceId)
+                  ? null
+                  : () => _open(instance),
+              icon: const Icon(Icons.open_in_browser, size: 18),
+              label: const Text('打开'),
+            ),
+        if (instance.state == InstancePresenceState.offline)
+          IconButton(
+            key: ValueKey('delete-instance-${instance.instanceId}'),
+            tooltip: '删除本机离线入口记录',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () => _forget(instance),
           ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -393,55 +386,58 @@ class _HomePageState extends ConsumerState<HomePage> {
   ) {
     final session = item.session;
     final target = sessionControlTarget(session, instances.values);
-    return ListTile(
+    return _HomeRecordTile(
       key: ValueKey('session-${session.sessionId}'),
-      title: Text(session.title.isEmpty ? session.sessionId : session.title),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${session.machine} · ${session.project} · ${target == null ? "离线记录" : "历史快捷入口"}',
-          ),
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              if (target?.canOpen == true)
-                TextButton.icon(
-                  onPressed: webUi.openingFor(target!.instanceId)
-                      ? null
-                      : () => _open(target, item),
-                  icon: const Icon(Icons.open_in_browser),
-                  label: const Text('打开会话'),
+      title: session.title.isEmpty ? session.sessionId : session.title,
+      subtitle:
+          '${session.machine} · ${session.project} · ${target == null ? "离线记录" : "历史快捷入口"}',
+      actions: (compact) => [
+        IconButton(
+          tooltip: item.pinned ? '取消固定' : '固定会话',
+          icon: Icon(item.pinned ? Icons.star : Icons.star_outline),
+          onPressed: () =>
+              _save(ref.read(sessionCatalogProvider.notifier).togglePin(item)),
+        ),
+        if (target?.canOpen == true)
+          if (compact)
+            IconButton(
+              tooltip: '打开会话',
+              onPressed: webUi.openingFor(target!.instanceId)
+                  ? null
+                  : () => _open(target, item),
+              icon: const Icon(Icons.open_in_browser),
+            )
+          else
+            TextButton.icon(
+              onPressed: webUi.openingFor(target!.instanceId)
+                  ? null
+                  : () => _open(target, item),
+              icon: const Icon(Icons.open_in_browser, size: 18),
+              label: const Text('打开会话'),
+            ),
+        PopupMenuButton<String>(
+          tooltip: '更多会话操作',
+          onSelected: (action) {
+            if (action == 'delete') {
+              _save(
+                ref.read(sessionCatalogProvider.notifier).deleteSession(item),
+              );
+            } else {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      SessionPromptPage(session: session, target: target!),
                 ),
-              if (target?.canOpen == true)
-                IconButton(
-                  tooltip: '发送到 OpenCode',
-                  icon: const Icon(Icons.edit_outlined),
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          SessionPromptPage(session: session, target: target!),
-                    ),
-                  ),
-                ),
-              IconButton(
-                tooltip: item.pinned ? '取消固定' : '固定会话',
-                icon: Icon(item.pinned ? Icons.star : Icons.star_outline),
-                onPressed: () => _save(
-                  ref.read(sessionCatalogProvider.notifier).togglePin(item),
-                ),
-              ),
-              IconButton(
-                tooltip: '删除本机会话记录',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => _save(
-                  ref.read(sessionCatalogProvider.notifier).deleteSession(item),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+              );
+            }
+          },
+          itemBuilder: (_) => [
+            if (target?.canOpen == true)
+              const PopupMenuItem(value: 'send', child: Text('发送到 OpenCode')),
+            const PopupMenuItem(value: 'delete', child: Text('删除本机会话记录')),
+          ],
+        ),
+      ],
     );
   }
 
@@ -477,6 +473,69 @@ class _HomePageState extends ConsumerState<HomePage> {
         ),
       ),
     ),
+  );
+}
+
+/// Shared by online entries and saved sessions; keep touch targets full size.
+class _HomeRecordTile extends StatelessWidget {
+  const _HomeRecordTile({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.actions,
+    this.detail,
+  });
+
+  final String title;
+  final String subtitle;
+  final String? detail;
+  final List<Widget> Function(bool compact) actions;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final theme = Theme.of(context);
+      final compact =
+          constraints.maxWidth < 600 ||
+          MediaQuery.textScalerOf(context).scale(14) > 20;
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
+          ),
+        ),
+        child: ListTile(
+          dense: true,
+          minTileHeight: 64,
+          minVerticalPadding: 8,
+          horizontalTitleGap: 12,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          titleTextStyle: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+          subtitleTextStyle: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          title: Tooltip(
+            message: title,
+            child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          subtitle: Tooltip(
+            message: detail ?? subtitle,
+            child: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          trailing: IconTheme.merge(
+            data: const IconThemeData(size: 20),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: actions(compact),
+            ),
+          ),
+        ),
+      );
+    },
   );
 }
 

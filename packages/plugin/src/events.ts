@@ -60,7 +60,7 @@ export interface NormalizedQuestion {
  */
 export type NormalizedEvent =
   | {
-      kind: "session.upsert";
+      kind: "session.upsert" | "session.deleted";
       sessionID: string;
       parentID?: string;
       title: string;
@@ -191,7 +191,7 @@ function readSessionInfo(properties: Record<string, unknown>): Record<string, un
   return null;
 }
 
-function normalizeSessionUpsert(properties: Record<string, unknown>): NormalizedEvent | null {
+function normalizeSessionUpsert(properties: Record<string, unknown>): Extract<NormalizedEvent, { kind: "session.upsert" | "session.deleted" }> | null {
   const info = readSessionInfo(properties);
   if (info === null) {
     return null;
@@ -206,7 +206,7 @@ function normalizeSessionUpsert(properties: Record<string, unknown>): Normalized
     kind: "session.upsert", sessionID, title,
     ...(parentID === null ? {} : { parentID }),
     ...(typeof info.directory === "string" ? { directory: info.directory } : {}),
-    ...(isRecord(info.time) && typeof info.time.archived === "number" ? { archived: true } : {}),
+    ...(isRecord(info.time) && typeof info.time.archived === "number" && info.time.archived > 0 ? { archived: true } : {}),
   };
 }
 
@@ -422,6 +422,10 @@ export function normalizeEvent(event: unknown): NormalizedEvent | null {
       case "session.created":
       case "session.updated":
         return properties === null ? null : normalizeSessionUpsert(properties);
+      case "session.deleted": {
+        const session = properties === null ? null : normalizeSessionUpsert(properties);
+        return session === null ? null : { ...session, kind: "session.deleted" };
+      }
       case "session.status":
         return properties === null ? null : normalizeSessionStatus(properties);
       case "session.idle":

@@ -2,6 +2,22 @@
 
 Updated: 2026-09-14
 
+## 当前发布任务：0.2.0-beta.3
+
+- 维护者已确认紧凑首页验证包可用并授权发布；沿用验收，不重复UI自动化/全矩阵。Linux统一协调，最终SHA以本轮prompt为准；客户端`0.2.0-beta.3+5`，Plugin`0.2.0-beta.3`。
+- 本轮客户端生产代码与已验`63f118b + client-ui.patch`完全相同，仅版本号变更；修复已纳入Git。Windows现有工作区可能仍有该已验补丁：优先在仓库外为最终SHA创建干净detached worktree构建，保留原工作区/stash，不再次apply旧补丁。
+- 最终包必须从指定SHA+原锁文件构建，不将旧beta.2验证ZIP改名。根目录镜像环境下`flutter pub get --enforce-lockfile`；`apps/client`下`flutter build windows --release`，核对内嵌版本及源码/锁文件无漂移。
+- 整个Release目录+LICENSE打包为`opencode-notify-client-windows-x64-0.2.0-beta.3.zip`，记录SHA、版本、大小、SHA256及关键二进制哈希，通过现有SCP传回`pezayo-physical:/tmp/opencode/notify-release-0.2.0-beta.3/assets/`。
+- Windows不创建标签/Release、不触发CI；Linux收齐四包后统一发布。本节优先于下文暂缓发布及补丁验证的历史记录。
+
+## 当前修复交接：空目录生命周期与紧凑条目
+
+- 维护者要求暂缓发布。共享 `apps/client/lib/ui/home_page.dart` 将在线入口及固定/历史会话改为两行条目，文本左、收藏与打开右，细分隔线；窄于600px或大字号时打开按钮改为带提示的图标，完整名称/路径可悬停或长按查看。历史会话的发送/删除收进“更多会话操作”。
+- 能力标志为false统一显示“WebUI 未确认”，不再将旧Plugin或健康检查失败武断显示为“仅通知”。无客户端/Gateway协议改动。
+- Plugin 修复在OpenCode主机生效：统一排除 `magic-context-` 内部任务；删除/归档后确认空目录撤下入口，idle历史/显式入口及查询失败继续保留，新会话可重连。旧探测不能在停启后重复建立连接。
+- 本轮按协调端 prompt 的基线及补丁标识对齐；不要把带补丁构建称为原始SHA的干净构建。三端共用Dart；Windows只需锁定依赖、静态分析、完整Release构建和打包，UI由维护者验收；不打标签、不发布、不触发CI。
+- 重点看右侧操作对齐、长路径不撑高、窄窗/大字号、历史“更多”菜单；本轮Plugin需要另行替换并重启实际OpenCode进程，之前刚安装的63f118b文件尚不含这次生命周期修复。
+
 ## 当前开发交接：在线入口与本机历史（beta.2 之后）
 
 - 首页共享 Dart 已改为“在线入口 / 本机历史”。默认只看 Gateway 在线连接池，点“打开”直达项目 WebUI，不再逐目录轮询会话；历史和固定会话退居次要位置。

@@ -573,7 +573,6 @@ describe("normalizeEvent — ignored and malformed input", () => {
         },
       },
       { type: "server.connected", properties: {} },
-      { type: "session.deleted", properties: { info: { id: "s", title: "t" } } },
       { type: "session.compacted", properties: { sessionID: "s" } },
       { type: "message.removed", properties: { sessionID: "s", messageID: "m" } },
       { type: "message.part.removed", properties: { sessionID: "s", messageID: "m", partID: "p" } },

@@ -466,7 +466,13 @@ export class SessionMachine {
 
   /** Clear every timer and all per-session state. */
   disposeAll(): void {
-    for (const state of this.sessions.values()) {
+    for (const sessionID of this.sessions.keys()) this.disposeSession(sessionID);
+  }
+
+  /** Removed/archived sessions cannot keep emitting heartbeats or completions. */
+  disposeSession(sessionID: string): void {
+    const state = this.sessions.get(sessionID);
+    if (state) {
       if (state.idleTimer !== null) {
         this.scheduler.clearTimeout(state.idleTimer);
         state.idleTimer = null;
@@ -476,7 +482,7 @@ export class SessionMachine {
         state.heartbeatTimer = null;
       }
     }
-    this.sessions.clear();
+    this.sessions.delete(sessionID);
   }
 
   private onActive(sessionID: string, status: "busy" | "retry"): void {
