@@ -12,6 +12,9 @@ function notFound(reply: FastifyReply): FastifyReply {
 /** Owner-scoped lifecycle operations for the in-memory instance projection. */
 export function instanceRoutes(registry: InstanceRegistry): FastifyPluginAsync {
   return async (app) => {
+    app.get("/v1/instances", { preHandler: app.authenticate }, async (request) => ({
+      instances: registry.snapshot(request.userId as string),
+    }));
     app.delete<{ Params: { instanceId: string } }>(
       "/v1/instances/:instanceId",
       { preHandler: app.authenticate },

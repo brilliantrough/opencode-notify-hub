@@ -121,16 +121,18 @@ final offlineLastKnownProvider = Provider<List<OfflinePendingInteraction>>((
       .watch(pendingInteractionsProvider.notifier)
       .lastKnownByInstance;
   final offline = <OfflinePendingInteraction>[];
-  for (final presence in instances.values) {
-    if (presence.state != InstancePresenceState.offline) {
+  for (final instanceId in {
+    ...lastKnown.keys,
+    ...?snapshot.value?.map((i) => i.instanceId),
+  }) {
+    final presence = instances[instanceId];
+    if (presence != null && presence.state != InstancePresenceState.offline) {
       continue;
     }
     final seen = <String>{};
     final items = [
-      ...?snapshot.value?.where(
-        (item) => item.instanceId == presence.instanceId,
-      ),
-      ...?lastKnown[presence.instanceId],
+      ...?snapshot.value?.where((item) => item.instanceId == instanceId),
+      ...?lastKnown[instanceId],
     ];
     for (final interaction in items) {
       if (!seen.add(interaction.requestId)) {
@@ -139,7 +141,7 @@ final offlineLastKnownProvider = Provider<List<OfflinePendingInteraction>>((
       offline.add(
         OfflinePendingInteraction(
           interaction: interaction,
-          lastSeenAt: presence.lastSeenAt,
+          lastSeenAt: presence?.lastSeenAt ?? interaction.occurredAt,
         ),
       );
     }
@@ -325,6 +327,26 @@ class PendingInteractionsController
   /// delivery may still fail upstream, but an accepted card does not reappear
   /// from a briefly stale snapshot. Logout clears the set.
   final Set<String> _submittedInteractionKeys = {};
+  final Set<String> _forgottenOfflineKeys = {};
+
+  void forgetOffline(PendingInteraction item) {
+    final presence = ref.read(instancePresencesProvider)[item.instanceId];
+    if (presence != null && presence.state != InstancePresenceState.offline) {
+      return;
+    }
+    _forgottenOfflineKeys.add(_interactionKey(item.instanceId, item.requestId));
+    _lastKnownByInstance[item.instanceId] = [
+      for (final i
+          in _lastKnownByInstance[item.instanceId] ?? <PendingInteraction>[])
+        if (i.requestId != item.requestId) i,
+    ];
+    state = AsyncData([
+      for (final current in state.value ?? <PendingInteraction>[])
+        if (current.instanceId != item.instanceId ||
+            current.requestId != item.requestId)
+          current,
+    ]);
+  }
 
   /// Unmodifiable view of the per-instance last-known retention.
   Map<String, List<PendingInteraction>> get lastKnownByInstance =>
@@ -361,6 +383,7 @@ class PendingInteractionsController
   void _clearRetention() {
     _lastKnownByInstance.clear();
     _submittedInteractionKeys.clear();
+    _forgottenOfflineKeys.clear();
   }
 
   @override
@@ -438,8 +461,18 @@ class PendingInteractionsController
     final interactions = [
       for (final interaction in load.interactions)
         if (!_submittedInteractionKeys.contains(
-          _interactionKey(interaction.instanceId, interaction.requestId),
-        ))
+              _interactionKey(interaction.instanceId, interaction.requestId),
+            ) &&
+            (!_forgottenOfflineKeys.contains(
+                  _interactionKey(
+                    interaction.instanceId,
+                    interaction.requestId,
+                  ),
+                ) ||
+                ref
+                        .read(instancePresencesProvider)[interaction.instanceId]
+                        ?.state ==
+                    InstancePresenceState.controllable))
           interaction,
     ];
     interactions.sort((left, right) {
@@ -754,7 +787,8 @@ class PendingInteractionsController
     final current = state.value ?? const <PendingInteraction>[];
     state = AsyncData([
       for (final interaction in current)
-        if (interaction.instanceId != instanceId || interaction.requestId != requestId)
+        if (interaction.instanceId != instanceId ||
+            interaction.requestId != requestId)
           interaction,
     ]);
   }
@@ -785,10 +819,7 @@ class PendingInteractionsController
               (instance) =>
                   instance.state == InstancePresenceState.controllable,
             )
-            .map(
-              (instance) =>
-                  '${instance.instanceId}:${instance.lastSeenAt.toIso8601String()}',
-            )
+            .map((instance) => instance.instanceId)
             .toList()
           ..sort();
     return values.join('|');

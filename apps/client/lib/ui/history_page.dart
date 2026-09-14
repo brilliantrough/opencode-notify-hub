@@ -229,14 +229,14 @@ class _HistoryTableHeader extends StatelessWidget {
   }
 }
 
-class _HistoryEntryTile extends StatelessWidget {
+class _HistoryEntryTile extends ConsumerWidget {
   const _HistoryEntryTile({required this.entry, required this.wide});
 
   final HistoryEntry entry;
   final bool wide;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colors = Theme.of(context).colorScheme;
     return ExpansionTile(
       key: HistoryPage.entryKey(entry.eventId),
@@ -247,7 +247,26 @@ class _HistoryEntryTile extends StatelessWidget {
       shape: Border(bottom: BorderSide(color: colors.outlineVariant)),
       collapsedShape: Border(bottom: BorderSide(color: colors.outlineVariant)),
       title: wide ? _wideTitle(context) : _compactTitle(context),
-      children: [_HistoryDetails(entry: entry)],
+      children: [
+        _HistoryDetails(entry: entry),
+        TextButton.icon(
+          icon: const Icon(Icons.delete_outline),
+          label: const Text('删除本机通知记录'),
+          onPressed: () async {
+            try {
+              await ref
+                  .read(historyControllerProvider.notifier)
+                  .remove(entry.eventId);
+            } catch (_) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('删除失败，请重试')));
+              }
+            }
+          },
+        ),
+      ],
     );
   }
 

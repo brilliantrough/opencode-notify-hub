@@ -134,7 +134,7 @@ class RealtimeController {
       _onInstancePresences,
     );
     _statusSubscription = _client.status.listen((status) {
-      if (status == WsStatus.connected) {
+      if (status != WsStatus.connected) {
         _onInstancePresences(const []);
       }
     });

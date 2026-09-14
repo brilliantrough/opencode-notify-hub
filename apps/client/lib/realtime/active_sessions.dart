@@ -1,5 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../auth/auth_controller.dart';
+import '../auth/auth_state.dart';
+import '../config/server_config.dart';
 import 'notify_event.dart';
 
 final activeSessionsProvider =
@@ -65,7 +68,15 @@ class ActiveSession {
 /// or orphaned events can never corrupt the map.
 class ActiveSessions extends Notifier<Map<String, ActiveSession>> {
   @override
-  Map<String, ActiveSession> build() => const {};
+  Map<String, ActiveSession> build() {
+    ref.watch(
+      authControllerProvider.select(
+        (auth) => auth is Authenticated ? auth.email.toLowerCase() : null,
+      ),
+    );
+    ref.watch(appConfigProvider.select((config) => config.gatewayHttpBase));
+    return const {};
+  }
 
   /// Creates or refreshes the session from a heartbeat event. A heartbeat
   /// always marks the session as running and refreshes its identity and

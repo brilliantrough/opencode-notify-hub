@@ -11,7 +11,7 @@ import '../config/server_config.dart';
 import '../devices/devices_controller.dart' show sharedPreferencesProvider;
 import '../realtime/active_sessions.dart';
 import '../realtime/instance_presence.dart';
-import '../realtime/realtime_controller.dart';
+import 'session_target.dart';
 
 // Project identity survives an OpenCode process restart (instance UUID does not).
 String sessionSourceKey(String machine, String directory) =>
@@ -45,9 +45,10 @@ class RemoteSession {
     DateTime? openedAt,
     bool? verified,
     String? status,
+    String? instanceId,
   }) => RemoteSession(
     session: session,
-    instanceId: instanceId,
+    instanceId: instanceId ?? this.instanceId,
     status: status ?? this.status,
     pinned: pinned ?? this.pinned,
     openedAt: openedAt ?? this.openedAt,
@@ -93,6 +94,7 @@ class SessionCatalogState {
     this.followedSources = const {},
     this.hiddenSources = const {},
     this.hiddenSessions = const {},
+    this.deletedSessions = const {},
   });
   final Map<String, RemoteSession> sessions;
   final Map<String, String> errors;
@@ -103,6 +105,7 @@ class SessionCatalogState {
   final Set<String> followedSources;
   final Set<String> hiddenSources;
   final Set<String> hiddenSessions;
+  final Set<String> deletedSessions;
 
   bool isHidden(String machine, String directory) =>
       hiddenSources.contains(sessionSourceKey(machine, directory));
@@ -119,6 +122,7 @@ class SessionCatalogState {
     Set<String>? followedSources,
     Set<String>? hiddenSources,
     Set<String>? hiddenSessions,
+    Set<String>? deletedSessions,
   }) => SessionCatalogState(
     sessions: sessions ?? this.sessions,
     errors: errors ?? this.errors,
@@ -129,6 +133,7 @@ class SessionCatalogState {
     followedSources: followedSources ?? this.followedSources,
     hiddenSources: hiddenSources ?? this.hiddenSources,
     hiddenSessions: hiddenSessions ?? this.hiddenSessions,
+    deletedSessions: deletedSessions ?? this.deletedSessions,
   );
 
   List<RemoteSession> get visible {
@@ -138,6 +143,7 @@ class SessionCatalogState {
           (s) =>
               !isHidden(s.session.machine, s.session.directory) &&
               !hiddenSessions.contains(s.key) &&
+              !deletedSessions.contains(s.key) &&
               '${s.session.title} ${s.session.machine} ${s.session.project} ${s.session.directory}'
                   .toLowerCase()
                   .contains(query),
@@ -199,16 +205,9 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
           ),
         ),
       );
-      _schedule();
+      _captureLocalSessions();
     });
-    ref.listen(activeSessionsProvider, (_, _) => _schedule());
-    ref.listen(appForegroundProvider, (_, foreground) {
-      if (foreground) _schedule();
-    });
-    final timer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (ref.read(appForegroundProvider)) unawaited(refresh());
-    });
-    ref.onDispose(timer.cancel);
+    ref.listen(activeSessionsProvider, (_, _) => _captureLocalSessions());
     unawaited(Future(() => _load(epoch)));
     return const SessionCatalogState(loading: true);
   }
@@ -240,6 +239,9 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
           hiddenSessions: Set<String>.from(
             values['hiddenSessions'] as List? ?? [],
           ),
+          deletedSessions: Set<String>.from(
+            values['deletedSessions'] as List? ?? [],
+          ),
         );
       }
     } catch (_) {
@@ -247,7 +249,43 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
     }
     if (epoch != _epoch || !ref.mounted) return;
     _loaded = true;
-    await refresh();
+    state = state.copyWith(loading: false);
+    _captureLocalSessions();
+  }
+
+  void _captureLocalSessions() {
+    if (!_loaded) return;
+    final next = Map<String, RemoteSession>.of(state.sessions);
+    final instances = ref.read(instancePresencesProvider).values;
+    for (final session in ref.read(activeSessionsProvider).values) {
+      final target = sessionControlTarget(session, instances);
+      final item = RemoteSession(
+        session: session,
+        instanceId: target?.instanceId ?? '',
+        status: session.running ? 'busy' : 'unknown',
+        verified: target != null,
+      );
+      final old = next[item.key];
+      next[item.key] = item.copyWith(
+        pinned: old?.pinned,
+        openedAt: old?.openedAt,
+      );
+    }
+    next.removeWhere((key, _) => state.deletedSessions.contains(key));
+    state = state.copyWith(
+      sessions: next.map((key, item) {
+        final target = sessionControlTarget(item.session, instances);
+        return MapEntry(
+          key,
+          item.copyWith(
+            instanceId: target?.instanceId,
+            verified: target != null,
+            status: target == null ? 'unknown' : item.status,
+          ),
+        );
+      }),
+    );
+    unawaited(_save());
   }
 
   void _schedule() {
@@ -261,7 +299,6 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
   void search(String query) {
     _queryVersion++;
     state = state.copyWith(search: query.trim(), limit: 50);
-    _schedule();
   }
 
   Future<void> loadMore() async {
@@ -498,8 +535,24 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
         }),
     );
     final saved = await _save();
-    if (!hidden) _schedule();
     return saved ? null : '无法保存隐藏设置，请重试';
+  }
+
+  Future<String?> deleteSession(RemoteSession item) async {
+    final epoch = _epoch;
+    state = state.copyWith(
+      sessions: Map.of(state.sessions)..remove(item.key),
+      hiddenSessions: Set.of(state.hiddenSessions)..remove(item.key),
+      deletedSessions: {...state.deletedSessions, item.key},
+    );
+    if (await _save()) return null;
+    if (ref.mounted && epoch == _epoch) {
+      state = state.copyWith(
+        sessions: {item.key: item, ...state.sessions},
+        deletedSessions: Set.of(state.deletedSessions)..remove(item.key),
+      );
+    }
+    return '本机历史删除未能保存，请重试';
   }
 
   Future<String?> hideSession(RemoteSession item) async {
@@ -566,6 +619,7 @@ class SessionCatalogController extends Notifier<SessionCatalogState> {
       'followed': state.followedSources.toList(),
       'hiddenSources': state.hiddenSources.toList(),
       'hiddenSessions': state.hiddenSessions.toList(),
+      'deletedSessions': state.deletedSessions.toList(),
     });
     var saved = false;
     final prefs = ref.read(sharedPreferencesProvider);

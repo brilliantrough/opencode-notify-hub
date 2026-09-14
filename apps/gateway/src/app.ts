@@ -323,6 +323,10 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
         ? { maxCommandOutcomes: deps.control.maxCommandOutcomes }
         : {}),
     });
+    const presenceSync = setInterval(() => {
+      for (const userId of registry.userIds()) instances.publishSnapshot(userId);
+    }, 10 * 60 * 1000);
+    presenceSync.unref();
     await app.register(
       ingestKeyRoutes(ingestKeyRepository, { onRevoked: (id) => instances.revokeKey(id) }),
     );
@@ -332,6 +336,7 @@ export async function buildServer(deps: GatewayDeps = {}): Promise<FastifyInstan
     // `ws` ignores close() on an already-CLOSING socket, so the plugin's
     // later code-less close cannot overwrite our 1012.
     app.addHook("preClose", async () => {
+      clearInterval(presenceSync);
       registry.closeAll(WS_CLOSE_SERVER_SHUTDOWN);
       instances.closeAll();
     });

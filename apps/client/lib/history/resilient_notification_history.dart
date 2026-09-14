@@ -36,6 +36,10 @@ class ResilientNotificationHistory implements NotificationHistory {
   @override
   Future<void> add(HistoryEntry entry) => _run((history) => history.add(entry));
 
+  // A failed persistent delete must not appear successful through a fallback.
+  @override
+  Future<void> remove(String eventId) => _active.remove(eventId);
+
   @override
   Future<HistoryBatch> loadPage({required int offset, required int limit}) =>
       _run((history) => history.loadPage(offset: offset, limit: limit));

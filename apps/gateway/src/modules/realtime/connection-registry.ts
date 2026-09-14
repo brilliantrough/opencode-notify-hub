@@ -138,6 +138,11 @@ export class ConnectionRegistry implements EventDispatcher {
     sockets.add(connection);
   }
 
+  /** Accounts with at least one connected client; used for periodic snapshots. */
+  userIds(): string[] {
+    return [...this.byUser.keys()];
+  }
+
   /** Number of registered sockets (all users, or one user). */
   count(userId?: string): number {
     if (userId !== undefined) {

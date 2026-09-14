@@ -2,7 +2,17 @@
 
 Updated: 2026-09-14
 
-## 当前发布任务：0.2.0-beta.2
+## 当前开发交接：在线入口与本机历史（beta.2 之后）
+
+- 首页共享 Dart 已改为“在线入口 / 本机历史”。默认只看 Gateway 在线连接池，点“打开”直达项目 WebUI，不再逐目录轮询会话；历史和固定会话退居次要位置。
+- Gateway 在连接/重连和 Plugin 上下线时发送完整快照，每 10 分钟对同账号所有在线客户端广播；手动刷新走 `GET /v1/instances`，不查询 Plugin。
+- 离线入口、历史/固定会话、离线请求和通知历史均可本机删除；入口与会话缓存按 Gateway/账号隔离。删除不影响远端会话或其他客户端。
+- Plugin 使用带 OpenCode 服务认证的真实 HTTP health 检查识别版本，并上报 `webUiAvailable`；普通无监听端口 TUI 不提供“打开”。必须先更新 Gateway，再更新 Plugin 并重启实际 OpenCode 服务；旧 Plugin 缺标志时按钮不可用。
+- 此轮无需 Windows 原生改码，后续从协调端指定的新 SHA 对齐；Linux 已做静态分析、Release 构建和本机 health 实证。Windows/Android 新 UI 原生验收待维护者进行，本段优先于下文已完成的 beta.2 发布记录。
+- 本轮是验证构建，版本仍 `0.2.0-beta.2+4`，不替换已发布 beta.2 资产。按最新 prompt SHA 快进后，使用下文镜像环境，在仓库根运行 `flutter pub get --enforce-lockfile`，`apps/client` 中运行 `flutter analyze --no-pub`、`flutter build windows --release`；本轮遵循 quick-do，不运行旧首页测试套件或 UI 自动化。仅修实际遇到的 Windows 阻塞并回报 diff，完整 Release + LICENSE 制作带源码短 SHA 的 validation ZIP。
+- 维护者验收重点：中途打开客户端立即出现在线入口、手动刷新无需等待各目录查询、机器/项目/状态可读；新版服务 Plugin 才有“打开”；离线入口/固定与历史会话/离线请求/通知历史可本机逐项删除且不影响另一客户端；跨重启保留删除结果。Linux 会协调部署 Gateway，Plugin 由维护者自行分发至各服务器。
+
+## 已完成发布背景：0.2.0-beta.2
 
 - 维护者已确认 `19eedcac8f65737a57ad0569b11d672c0dbb9035` 的 Windows 构建与手动验收通过，Windows 无源码修改，并已授权发布。本节取代下文旧验证任务；不重复 UI 自动化、两组测试或全平台矩阵。
 - Linux 是本次 Release 协调端。使用维护者 prompt 提供的最终发布 SHA，客户端版本 `0.2.0-beta.2+4`、Plugin `0.2.0-beta.2`；发布准备仅更新版本和文档。旧 `19eedca` 验证 ZIP 不可改名冒充新版本。

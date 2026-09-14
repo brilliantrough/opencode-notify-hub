@@ -493,6 +493,21 @@ const document = {
         },
       },
     },
+    "/v1/instances": {
+      get: {
+        operationId: "getOnlineInstances",
+        tags: ["instances"],
+        security: bearerSecurity,
+        summary: "Read the current user's online Plugin connection pool without querying Plugins.",
+        responses: {
+          "200": { description: "Complete online snapshot, including an empty pool.", content: {
+            "application/json": { schema: { type: "object", required: ["instances"], additionalProperties: false,
+              properties: { instances: { type: "array", items: instancePresenceSchema } } } },
+          } },
+          "401": errorResponse("Missing or invalid access token."),
+        },
+      },
+    },
     "/v1/instances/{instanceId}": {
       delete: {
         operationId: "deleteOfflineInstance",

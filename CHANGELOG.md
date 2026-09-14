@@ -5,6 +5,16 @@ All notable changes will be documented in this file. The project intends to use
 
 ## [Unreleased]
 
+### Changed
+
+- 首页改为在线入口优先：机器、项目、连接状态和“打开”；固定与历史会话移到次级入口，停止客户端每 30 秒逐目录查询及“实例暂未同步”提示。
+- Gateway 提供同账号 `GET /v1/instances` 在线连接池、连接/重连和上下线即时快照、每 10 分钟完整广播（含空池）。
+- 离线入口、历史/固定会话、离线请求及通知历史支持本机逐项删除，不删除远端会话或其他客户端记录。
+
+### Fixed
+
+- Plugin 到 OpenCode 的真实 HTTP 请求保留服务认证，修复 health 查询 401 导致版本 unknown；仅健康检查通过的入口上报 WebUI 可用性，未知版本可重新探测。
+
 ## [0.2.0-beta.2] - 2026-09-14
 
 - Home now defaults to bounded favorite/recent shortcuts, with separate session

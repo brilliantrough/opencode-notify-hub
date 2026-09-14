@@ -63,6 +63,7 @@ export interface ControlChannelOptions {
   project: string;
   directory: string;
   resolveOpenCodeVersion: () => Promise<string>;
+  webUiAvailable?: () => boolean;
   socketFactory?: SocketFactory;
   randomUUID?: () => string;
   random?: () => number;
@@ -216,7 +217,8 @@ export class ControlChannel implements PluginControl {
     if (!this.running || this.socket !== null) {
       return;
     }
-    if (this.openCodeVersion === null) {
+    if (this.openCodeVersion === null || this.openCodeVersion === "unknown") {
+      this.openCodeVersion = null;
       // The plugin factory can be invoked before the OpenCode HTTP server is
       // ready (observed on the 1.18.18 TUI: the embedded server 502s for the
       // first seconds). A failed probe must not stick: retry with backoff
@@ -270,6 +272,7 @@ export class ControlChannel implements PluginControl {
         project: this.options.project,
         directory: this.options.directory,
         openCodeVersion: this.openCodeVersion ?? "unknown",
+        webUiAvailable: this.options.webUiAvailable?.() ?? false,
         protocolVersion: 2,
       };
       try {
@@ -292,6 +295,13 @@ export class ControlChannel implements PluginControl {
       }
       this.onServerFrame(socket, event);
     });
+    if (this.openCodeVersion === "unknown") {
+      // Retry failed startup/auth probes instead of keeping unknown forever.
+      const retry = setTimeout(() => {
+        if (this.running && this.socket === socket) this.drop(socket);
+      }, 60_000);
+      socket.addEventListener("close", () => clearTimeout(retry));
+    }
   }
 
   /**

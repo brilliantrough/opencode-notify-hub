@@ -1,35 +1,26 @@
 import 'dart:async';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../pending/pending_controller.dart';
 import '../pending/pending_interaction.dart';
-import '../realtime/active_sessions.dart';
 import '../realtime/instance_presence.dart';
 import '../realtime/realtime_controller.dart';
 import '../realtime/ws_client.dart';
-import '../sessions/webui_browser_controller.dart';
 import '../sessions/session_catalog.dart';
+import '../sessions/session_target.dart';
+import '../sessions/webui_browser_controller.dart';
 import 'pending_interaction_page.dart';
 import 'session_prompt_page.dart';
-import '../sessions/session_target.dart';
 
-/// Live socket status for the dashboard chip. Drives (and therefore starts)
-/// the [realtimeControllerProvider] while authenticated; `disconnected`
-/// otherwise. Overridden in tests.
 final wsStatusProvider = StreamProvider<WsStatus>((ref) {
   if (ref.watch(realtimeControllerProvider) == null) {
     return Stream.value(WsStatus.disconnected);
   }
   return ref.watch(wsClientProvider).status;
 });
-
-enum _HomeView { favorites, sessions, instances }
-
-enum _InstanceFilter { online, all, hidden }
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -38,126 +29,138 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  _HomeView _view = _HomeView.favorites;
-  _InstanceFilter _instanceFilter = _InstanceFilter.online;
+  final _search = TextEditingController();
+  bool _history = false;
+  bool _refreshing = false;
   int _shown = 20;
-  bool _clearing = false;
 
-  void _show(_HomeView view) {
-    FocusScope.of(context).unfocus();
-    setState(() {
-      _view = view;
-      _shown = 20;
-    });
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _message(String text) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
+
+  Future<void> _save(Future<String?> operation) async {
+    final error = await operation;
+    if (error != null) _message(error);
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _refreshing = true);
+    try {
+      await ref.read(instancePresencesProvider.notifier).refresh();
+    } catch (_) {
+      _message('获取在线入口失败，请检查 Gateway 连接后重试');
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  Future<void> _open(
+    OpenCodeInstancePresence instance, [
+    RemoteSession? session,
+  ]) async {
+    final error = await ref
+        .read(webUiBrowserControllerProvider.notifier)
+        .open(
+          instance.instanceId,
+          directory: instance.directory,
+          sessionId: session?.session.sessionId,
+        );
+    if (!mounted) return;
+    if (error != null) {
+      _message(error);
+    } else if (session != null) {
+      await ref
+          .read(sessionCatalogProvider.notifier)
+          .markOpened(instance.instanceId, session.session.sessionId);
+    }
+  }
+
+  Future<void> _forget(OpenCodeInstancePresence instance) async {
+    try {
+      await ref
+          .read(instancePresencesProvider.notifier)
+          .forgetOffline(instance.instanceId);
+    } catch (_) {
+      _message('本机历史删除未能保存，请重试');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(wsStatusProvider).value ?? WsStatus.disconnected;
-    final sessions = ref.watch(activeSessionsProvider);
     final instances = ref.watch(instancePresencesProvider);
-    final pending = ref.watch(pendingInteractionsProvider);
-    final interactions = pending.value ?? const <PendingInteraction>[];
-    final offline = ref.watch(offlineLastKnownProvider);
-    final webUi = ref.watch(webUiBrowserControllerProvider);
     final catalog = ref.watch(sessionCatalogProvider);
-    // Notifications are a fallback source for the same list, not a second UI.
-    final merged = Map<String, RemoteSession>.of(catalog.sessions);
-    for (final session in sessions.values) {
-      final target = sessionControlTarget(session, instances.values);
-      final item = RemoteSession(
-        session: session,
-        instanceId: target?.instanceId ?? '',
-        verified: target != null,
-        status: session.running ? 'busy' : 'unknown',
-      );
-      merged.putIfAbsent(item.key, () => item);
-    }
-    final allSessions = catalog.copyWith(sessions: merged).visible;
-    final browsing =
-        _view == _HomeView.sessions ||
-        (_view == _HomeView.favorites && catalog.search.isNotEmpty);
-    final remoteSessions = browsing
-        ? allSessions.take(_shown).toList()
-        : [
-            ...allSessions.where((s) => s.pinned).take(6),
-            ...allSessions
-                .where(
-                  (s) =>
-                      !s.pinned &&
-                      (s.openedAt != null ||
-                          (s.verified || s.session.running) &&
-                              (catalog.followedSources.isEmpty ||
-                                  catalog.followedSources.contains(
-                                    sessionSourceKey(
-                                      s.session.machine,
-                                      s.session.directory,
-                                    ),
-                                  ))),
-                )
-                .take(6),
-          ];
-    final query = catalog.search.toLowerCase();
-    final managedInstances =
-        instances.values.where((instance) {
-          final hidden = catalog.isHidden(instance.machine, instance.directory);
-          return switch (_instanceFilter) {
-                _InstanceFilter.hidden => hidden,
-                _InstanceFilter.online =>
-                  !hidden && instance.state != InstancePresenceState.offline,
-                _InstanceFilter.all => !hidden,
-              } &&
-              '${instance.machine} ${instance.project} ${instance.directory}'
-                  .toLowerCase()
-                  .contains(query);
-        }).toList()..sort((a, b) {
-          final followed = (catalog.isFollowed(b) ? 1 : 0).compareTo(
-            catalog.isFollowed(a) ? 1 : 0,
-          );
-          return followed != 0
-              ? followed
-              : b.lastSeenAt.compareTo(a.lastSeenAt);
-        });
-    final instanceGroups = _groupInstances(managedInstances.take(_shown));
-    final followedInstances =
+    final webUi = ref.watch(webUiBrowserControllerProvider);
+    final pending = ref.watch(pendingInteractionsProvider);
+    final interactions = (pending.value ?? const <PendingInteraction>[])
+        .where(
+          (item) =>
+              instances[item.instanceId]?.state ==
+              InstancePresenceState.controllable,
+        )
+        .toList();
+    final offlineRequests = ref.watch(offlineLastKnownProvider);
+    final query = _search.text.trim().toLowerCase();
+    bool matches(String text) => text.toLowerCase().contains(query);
+    final entries =
         instances.values
             .where(
               (i) =>
-                  catalog.isFollowed(i) &&
-                  !catalog.isHidden(i.machine, i.directory),
+                  (_history
+                      ? i.state == InstancePresenceState.offline
+                      : i.state != InstancePresenceState.offline) &&
+                  matches('${i.machine} ${i.project} ${i.directory}'),
             )
             .toList()
           ..sort((a, b) {
-            final order = _presenceOrder(
-              a.state,
-            ).compareTo(_presenceOrder(b.state));
-            return order != 0 ? order : b.lastSeenAt.compareTo(a.lastSeenAt);
+            final followed = (catalog.isFollowed(b) ? 1 : 0).compareTo(
+              catalog.isFollowed(a) ? 1 : 0,
+            );
+            return followed != 0
+                ? followed
+                : '${a.machine} ${a.project}'.compareTo(
+                    '${b.machine} ${b.project}',
+                  );
           });
-    final sourceKeys = <String>{};
-    final shortcuts = followedInstances
-        .where((i) => sourceKeys.add(sessionSourceKey(i.machine, i.directory)))
-        .take(4)
-        .toList();
+    // History includes previously hidden records so every local item can be deleted.
+    final sessions =
+        catalog.sessions.values
+            .where(
+              (s) =>
+                  !catalog.deletedSessions.contains(s.key) &&
+                  matches(
+                    '${s.session.title} ${s.session.machine} ${s.session.project} ${s.session.directory}',
+                  ),
+            )
+            .toList()
+          ..sort((a, b) {
+            if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+            return (b.openedAt ?? b.session.lastHeartbeatAt).compareTo(
+              a.openedAt ?? a.session.lastHeartbeatAt,
+            );
+          });
     return Scaffold(
       appBar: AppBar(
         title: const Text('首页'),
         actions: [
           IconButton(
-            key: const ValueKey('pending-refresh'),
-            tooltip: '刷新会话和待处理请求',
+            key: const ValueKey('presence-refresh'),
+            tooltip: '刷新在线入口',
+            onPressed: _refreshing ? null : _refresh,
             icon: const Icon(Icons.refresh),
-            onPressed: () {
-              unawaited(
-                ref.read(pendingInteractionsProvider.notifier).refresh(),
-              );
-              unawaited(ref.read(sessionCatalogProvider.notifier).refresh());
-            },
           ),
-          if (webUi.status != WebUiBrowserStatus.idle)
+          if (webUi.connections.isNotEmpty)
             IconButton(
-              key: const ValueKey('webui-tunnel-close'),
               tooltip: '关闭全部 WebUI 连接',
-              icon: const Icon(Icons.link_off_outlined),
+              icon: const Icon(Icons.link_off),
               onPressed: () => unawaited(
                 ref.read(webUiBrowserControllerProvider.notifier).close(),
               ),
@@ -172,148 +175,65 @@ class _HomePageState extends ConsumerState<HomePage> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SegmentedButton<_HomeView>(
-                segments: const [
-                  ButtonSegment(
-                    value: _HomeView.favorites,
-                    label: Text('常用'),
-                    icon: Icon(Icons.star_outline),
-                  ),
-                  ButtonSegment(
-                    value: _HomeView.sessions,
-                    label: Text('会话'),
-                    icon: Icon(Icons.chat_bubble_outline),
-                  ),
-                  ButtonSegment(
-                    value: _HomeView.instances,
-                    label: Text('实例'),
-                    icon: Icon(Icons.dns_outlined),
-                  ),
-                ],
-                selected: {_view},
-                onSelectionChanged: (value) => _show(value.single),
+            child: SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  label: Text('在线入口'),
+                  icon: Icon(Icons.dns_outlined),
+                ),
+                ButtonSegment(
+                  value: true,
+                  label: Text('本机历史'),
+                  icon: Icon(Icons.history),
+                ),
+              ],
+              selected: {_history},
+              onSelectionChanged: (values) {
+                FocusScope.of(context).unfocus();
+                setState(() {
+                  _history = values.single;
+                  _shown = 20;
+                });
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: TextField(
+              key: const ValueKey('session-search'),
+              controller: _search,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => FocusScope.of(context).unfocus(),
+              onChanged: (_) => setState(() => _shown = 20),
+              decoration: InputDecoration(
+                hintText: _history ? '搜索本机会话、项目或机器' : '搜索项目或机器',
+                prefixIcon: const Icon(Icons.search),
+                border: const OutlineInputBorder(),
+                suffixIcon: query.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: '清空搜索',
+                        icon: const Icon(Icons.clear),
+                        onPressed: () => setState(() {
+                          _search.clear();
+                          _shown = 20;
+                        }),
+                      ),
               ),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: _SessionSearchField(),
-          ),
-          if (catalog.loading)
-            const LinearProgressIndicator(
-              key: ValueKey('session-catalog-loading'),
-            ),
+          if (_refreshing) const LinearProgressIndicator(),
           Expanded(
             child: ListView(
-              key: ValueKey('home-list-$_view'),
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
-                if (catalog.errors.isNotEmpty)
-                  ListTile(
-                    key: const ValueKey('catalog-error-summary'),
-                    dense: true,
-                    leading: const Icon(Icons.sync_problem_outlined),
-                    title: Text('${catalog.errors.length} 个实例暂未同步'),
-                    subtitle: const Text('其他入口仍可使用；点此查看原因'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _showSyncErrors(context, catalog, instances),
-                  ),
-                if (webUi.connections.isNotEmpty)
-                  ExpansionTile(
-                    title: Text('浏览器连接 · ${webUi.connections.length}'),
-                    children: [
-                      for (final connection in webUi.connections.values)
-                        ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.link),
-                          title: Text(
-                            '${instances[connection.instanceId]?.project ?? "OpenCode"} · ${connection.status == WebUiBrowserStatus.active ? "已连接" : "正在重连"}',
-                          ),
-                          subtitle: connection.localUri == null
-                              ? null
-                              : Text(connection.localUri!.origin),
-                          onTap: connection.localUri == null
-                              ? null
-                              : () async {
-                                  final error = await ref
-                                      .read(
-                                        webUiBrowserControllerProvider.notifier,
-                                      )
-                                      .reopen(connection.instanceId);
-                                  if (error != null && context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text(error)),
-                                    );
-                                  }
-                                },
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (connection.localUri != null)
-                                IconButton(
-                                  tooltip: '复制会话浏览器地址',
-                                  icon: const Icon(Icons.copy),
-                                  onPressed: () async {
-                                    try {
-                                      await Clipboard.setData(
-                                        ClipboardData(
-                                          text: connection.localUri.toString(),
-                                        ),
-                                      );
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              '地址已复制；需在本机保持 Notify 运行',
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                    } catch (_) {
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('复制失败，请重试'),
-                                          ),
-                                        );
-                                      }
-                                    }
-                                  },
-                                ),
-                              IconButton(
-                                tooltip: '关闭此实例的 WebUI 连接',
-                                icon: const Icon(Icons.link_off),
-                                onPressed: () => unawaited(
-                                  ref
-                                      .read(
-                                        webUiBrowserControllerProvider.notifier,
-                                      )
-                                      .close(connection.instanceId),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-                if (_view == _HomeView.favorites && !browsing) ...[
-                  if (pending.isLoading && interactions.isEmpty)
-                    const LinearProgressIndicator(
-                      key: ValueKey('pending-loading'),
-                    ),
-                  if (pending.hasError && interactions.isEmpty)
+                if (!_history) ...[
+                  if (interactions.isNotEmpty || pending.hasError)
                     ListTile(
-                      key: const ValueKey('pending-error'),
-                      leading: const Icon(Icons.sync_problem_outlined),
-                      title: const Text('待处理请求同步失败'),
+                      title: Text(pending.hasError ? '待处理请求暂不可用' : '待处理请求'),
                       trailing: IconButton(
-                        tooltip: '重试',
+                        tooltip: '刷新待处理请求',
                         icon: const Icon(Icons.refresh),
                         onPressed: () => unawaited(
                           ref
@@ -322,236 +242,68 @@ class _HomePageState extends ConsumerState<HomePage> {
                         ),
                       ),
                     ),
-                  if (interactions.isNotEmpty) ...[
-                    const _SectionHeader('待处理请求'),
-                    for (final interaction in interactions)
-                      _PendingTile(interaction: interaction),
-                  ],
-                  if (offline.isNotEmpty) ...[
+                  for (final item in interactions) _requestTile(item),
+                  if (webUi.connections.isNotEmpty)
                     ExpansionTile(
-                      title: Text('离线请求（只读） · ${offline.length}'),
+                      title: Text('浏览器连接 · ${webUi.connections.length}'),
                       children: [
-                        for (final item in offline.take(_shown))
-                          _OfflineTile(item: item),
-                        if (offline.length > _shown)
-                          TextButton(
-                            onPressed: () => setState(() => _shown += 20),
-                            child: const Text('显示更多离线请求'),
+                        for (final connection in webUi.connections.values)
+                          _LocalConnectionTile(
+                            instanceId: connection.instanceId,
+                            title:
+                                instances[connection.instanceId]?.project ??
+                                'OpenCode',
+                            uri: connection.localUri,
+                            reconnecting:
+                                connection.status != WebUiBrowserStatus.active,
                           ),
                       ],
                     ),
-                  ],
-                  ListTile(
-                    title: const Text('关注的实例'),
-                    subtitle: shortcuts.isEmpty
-                        ? const Text('在实例中点星标，只把常用项目留在这里')
-                        : null,
-                    trailing: TextButton(
-                      onPressed: () => _show(_HomeView.instances),
-                      child: const Text('管理实例'),
-                    ),
-                  ),
-                  for (final instance in shortcuts)
-                    _instanceTile(instance, webUi, catalog),
-                ],
-                if (_view != _HomeView.instances) ...[
-                  for (final pinned in [true, false]) ...[
-                    if (remoteSessions.any((s) => s.pinned == pinned))
-                      _SectionHeader(pinned ? '固定会话' : '最近会话'),
-                    for (final item in remoteSessions.where(
-                      (s) => s.pinned == pinned,
-                    ))
-                      _SessionTile(
-                        session: item.session.copyWith(
-                          pendingRequestIds: {
-                            ...item.session.pendingRequestIds,
-                            for (final interaction in interactions)
-                              if (interaction.instanceId == item.instanceId &&
-                                  interaction.sessionId ==
-                                      item.session.sessionId)
-                                interaction.requestId,
-                          },
-                        ),
-                        target:
-                            item.verified &&
-                                instances[item.instanceId]?.state ==
-                                    InstancePresenceState.controllable
-                            ? instances[item.instanceId]
-                            : null,
-                        webUi: webUi,
-                        pinned: item.pinned,
-                        statusLabel:
-                            instances[item.instanceId]?.state !=
-                                InstancePresenceState.controllable
-                            ? '离线 / 等待实例同步'
-                            : switch (item.status) {
-                                'busy' => '运行中',
-                                'retry' => '重试中',
-                                'idle' => '空闲',
-                                'missing' => '会话已删除或归档',
-                                _ => '状态待确认',
-                              },
-                        onPin: () async {
-                          final error = await ref
-                              .read(sessionCatalogProvider.notifier)
-                              .togglePin(item);
-                          if (error != null && context.mounted) {
-                            ScaffoldMessenger.of(
-                              context,
-                            ).showSnackBar(SnackBar(content: Text(error)));
-                          }
-                        },
-                        onHide: () => _savePreference(
-                          ref
-                              .read(sessionCatalogProvider.notifier)
-                              .hideSession(item),
-                        ),
-                        onOpenWebUi: (session, target) => _openWebUi(
-                          context,
-                          ref,
-                          target.instanceId,
-                          directory: session.directory,
-                          sessionId: session.sessionId,
-                        ),
-                      ),
-                  ],
-                  if (remoteSessions.isEmpty &&
-                      interactions.isEmpty &&
-                      offline.isEmpty &&
-                      !catalog.loading)
-                    const ListTile(
-                      title: Text('暂无匹配会话'),
-                      subtitle: Text('可在“会话”中查找历史记录，或在“实例”中关注常用项目'),
-                    ),
-                  if (!browsing)
-                    TextButton(
-                      onPressed: () => _show(_HomeView.sessions),
-                      child: Text('查看全部会话（${allSessions.length}）'),
-                    ),
-                  if (browsing &&
-                      (allSessions.length > _shown || catalog.hasMore))
-                    TextButton(
-                      onPressed: catalog.loading
-                          ? null
-                          : () {
-                              if (allSessions.length > _shown) {
-                                setState(() => _shown += 20);
-                              } else if (catalog.limit < 200) {
-                                unawaited(
-                                  ref
-                                      .read(sessionCatalogProvider.notifier)
-                                      .loadMore(),
-                                );
-                                setState(() => _shown += 20);
-                              }
-                            },
-                      child: Text(
-                        allSessions.length <= _shown && catalog.limit >= 200
-                            ? '请搜索更早的会话'
-                            : '加载更多会话',
+                  if (entries.isEmpty)
+                    ListTile(
+                      title: const Text('暂无在线入口'),
+                      subtitle: Text(
+                        status == WsStatus.connected
+                            ? '服务器 Plugin 连接 Gateway 后会自动出现'
+                            : '正在等待 Gateway 连接；历史记录可在“本机历史”查看',
                       ),
                     ),
-                  if (browsing && catalog.hiddenSessions.isNotEmpty)
-                    TextButton(
-                      onPressed: () => _savePreference(
-                        ref
-                            .read(sessionCatalogProvider.notifier)
-                            .restoreHiddenSessions(),
-                      ),
-                      child: Text('恢复已隐藏会话（${catalog.hiddenSessions.length}）'),
-                    ),
-                ],
-                if (_view == _HomeView.instances) ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Wrap(
-                      spacing: 8,
+                  for (final entry in entries.take(_shown))
+                    _entryTile(entry, catalog, webUi),
+                  if (entries.length > _shown) _more('显示更多在线入口'),
+                  if (sessions.any((s) => s.pinned))
+                    ExpansionTile(
+                      title: const Text('固定会话快捷入口'),
                       children: [
-                        for (final filter in _InstanceFilter.values)
-                          ChoiceChip(
-                            label: Text(switch (filter) {
-                              _InstanceFilter.online => '在线',
-                              _InstanceFilter.all => '全部',
-                              _InstanceFilter.hidden => '已隐藏',
-                            }),
-                            selected: _instanceFilter == filter,
-                            onSelected: (_) => setState(() {
-                              _instanceFilter = filter;
-                              _shown = 20;
-                            }),
-                          ),
-                        if (instances.values.any(
-                          (i) => i.state == InstancePresenceState.offline,
-                        ))
-                          TextButton.icon(
-                            onPressed: _clearing
-                                ? null
-                                : () async {
-                                    setState(() => _clearing = true);
-                                    await _clearOfflineGroup(
-                                      context,
-                                      ref,
-                                      _InstanceMachineGroup(
-                                        machine: '全部机器',
-                                        instances: instances.values.toList(),
-                                      ),
-                                    );
-                                    if (mounted) {
-                                      setState(() => _clearing = false);
-                                    }
-                                  },
-                            icon: const Icon(Icons.delete_sweep_outlined),
-                            label: const Text('清理全部离线'),
-                          ),
+                        for (final session in sessions.where((s) => s.pinned))
+                          _sessionTile(session, instances, webUi),
                       ],
                     ),
-                  ),
+                ] else ...[
                   const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text(
-                      '星标关注常用项目；隐藏会同时收起该项目会话并停止自动查询，可在“已隐藏”恢复。不会停止 OpenCode，也不影响待处理请求。',
-                    ),
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('仅保存本机记录；删除不会删除服务器会话或其他客户端的数据。'),
                   ),
-                  if (managedInstances.isEmpty)
-                    const ListTile(title: Text('暂无匹配实例')),
-                  for (final group in instanceGroups)
-                    _MachineInstanceGroup(
-                      key: ValueKey(
-                        'machine-group-${group.machine.trim().toLowerCase()}',
-                      ),
-                      group: group,
-                      webUi: webUi,
-                      onOpenWebUi: (target) =>
-                          _openInstance(context, ref, target),
-                      onDelete: (instance) =>
-                          _forgetInstance(context, ref, instance),
-                      onClearOffline: () =>
-                          _clearOfflineGroup(context, ref, group),
-                      catalog: catalog,
-                      onFollow: (instance) => _savePreference(
-                        ref
-                            .read(sessionCatalogProvider.notifier)
-                            .toggleFollow(instance),
-                      ),
-                      onHide: (instance) => _savePreference(
-                        ref
-                            .read(sessionCatalogProvider.notifier)
-                            .setSourceHidden(
-                              instance,
-                              !catalog.isHidden(
-                                instance.machine,
-                                instance.directory,
-                              ),
-                            ),
-                      ),
+                  if (offlineRequests.isNotEmpty)
+                    ExpansionTile(
+                      title: Text('离线请求（只读） · ${offlineRequests.length}'),
+                      children: [
+                        for (final item in offlineRequests)
+                          _requestTile(item.interaction, offline: item),
+                      ],
                     ),
-                  if (managedInstances.length > _shown)
-                    TextButton(
-                      onPressed: () => setState(() => _shown += 20),
-                      child: Text(
-                        '显示更多实例（已显示 $_shown / ${managedInstances.length}）',
-                      ),
-                    ),
+                  if (entries.isNotEmpty) const _SectionHeader('离线入口'),
+                  for (final entry in entries.take(_shown))
+                    _entryTile(entry, catalog, webUi),
+                  if (sessions.isNotEmpty) const _SectionHeader('固定与历史会话'),
+                  for (final session in sessions.take(_shown))
+                    _sessionTile(session, instances, webUi),
+                  if (entries.length > _shown || sessions.length > _shown)
+                    _more('显示更多历史记录'),
+                  if (entries.isEmpty &&
+                      sessions.isEmpty &&
+                      offlineRequests.isEmpty)
+                    const ListTile(title: Text('暂无本机历史')),
                 ],
               ],
             ),
@@ -561,615 +313,249 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _instanceTile(
+  Widget _more(String label) => TextButton(
+    onPressed: () => setState(() => _shown += 20),
+    child: Text(label),
+  );
+
+  Widget _entryTile(
     OpenCodeInstancePresence instance,
+    SessionCatalogState catalog,
     WebUiBrowserState webUi,
-    SessionCatalogState catalog,
-  ) => _InstanceTile(
-    instance: instance,
-    webUi: webUi,
-    followed: catalog.isFollowed(instance),
-    hidden: catalog.isHidden(instance.machine, instance.directory),
-    onOpenWebUi: (target) => _openInstance(context, ref, target),
-    onDelete: (target) => _forgetInstance(context, ref, target),
-    onFollow: (target) => _savePreference(
-      ref.read(sessionCatalogProvider.notifier).toggleFollow(target),
-    ),
-    onHide: (target) => _savePreference(
-      ref
-          .read(sessionCatalogProvider.notifier)
-          .setSourceHidden(
-            target,
-            !catalog.isHidden(target.machine, target.directory),
-          ),
-    ),
-  );
-
-  Future<void> _savePreference(Future<String?> operation) async {
-    final error = await operation;
-    if (error != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error)));
-    }
-  }
-
-  void _showSyncErrors(
-    BuildContext context,
-    SessionCatalogState catalog,
-    Map<String, OpenCodeInstancePresence> instances,
   ) {
-    final errors = catalog.errors.entries.toList();
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('会话同步详情'),
-        scrollable: true,
-        content: SizedBox(
-          width: 480,
-          height: 320,
-          child: ListView.builder(
-            itemCount: errors.length,
-            itemBuilder: (context, index) {
-              final error = errors[index];
-              final instance = instances[error.key];
-              return ListTile(
-                title: Text(
-                  instance == null
-                      ? '实例已离线'
-                      : '${instance.machine} · ${instance.project}',
-                ),
-                subtitle: Text(error.value),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _show(_HomeView.instances);
-            },
-            child: const Text('管理实例'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              unawaited(ref.read(sessionCatalogProvider.notifier).refresh());
-            },
-            child: const Text('重试'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _openWebUi(
-    BuildContext context,
-    WidgetRef ref,
-    String instanceId, {
-    String? directory,
-    String? sessionId,
-  }) async {
-    final error = await ref
-        .read(webUiBrowserControllerProvider.notifier)
-        .open(instanceId, directory: directory, sessionId: sessionId);
-    if (error != null && context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error)));
-    }
-    if (error == null && sessionId != null && ref.context.mounted) {
-      await ref
-          .read(sessionCatalogProvider.notifier)
-          .markOpened(instanceId, sessionId);
-    }
-  }
-
-  Future<void> _openInstance(
-    BuildContext context,
-    WidgetRef ref,
-    OpenCodeInstancePresence instance,
-  ) async {
-    final controller = ref.read(sessionCatalogProvider.notifier);
-    if (controller.preferred(instance) == null) {
-      await controller.refresh(instanceId: instance.instanceId);
-    }
-    if (!context.mounted) return;
-    final preferred = controller.preferred(instance);
-    await _openWebUi(
-      context,
-      ref,
-      instance.instanceId,
-      directory: instance.directory,
-      sessionId: preferred?.session.sessionId,
-    );
-  }
-
-  Future<void> _forgetInstance(
-    BuildContext context,
-    WidgetRef ref,
-    OpenCodeInstancePresence instance,
-  ) async {
-    try {
-      await ref
-          .read(instancePresencesProvider.notifier)
-          .forgetOffline(instance.instanceId);
-      if (ref.context.mounted) {
-        await ref
-            .read(sessionCatalogProvider.notifier)
-            .forgetInstance(instance.instanceId);
-      }
-    } catch (error) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(_instanceRemovalError(error))));
-      }
-    }
-  }
-
-  Future<void> _clearOfflineGroup(
-    BuildContext context,
-    WidgetRef ref,
-    _InstanceMachineGroup group,
-  ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('清除 ${group.machine} 的离线实例？'),
-        content: Text('将从首页移除 ${group.offline.length} 个离线实例。它们重新连接后会再次出现。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('清除'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !context.mounted) return;
-    var failures = 0;
-    Object? firstError;
-    for (final instance in group.offline) {
-      try {
-        await ref
-            .read(instancePresencesProvider.notifier)
-            .forgetOffline(instance.instanceId);
-        if (ref.context.mounted) {
-          await ref
-              .read(sessionCatalogProvider.notifier)
-              .forgetInstance(instance.instanceId);
-        }
-      } catch (error) {
-        failures += 1;
-        firstError ??= error;
-        if (_gatewayErrorMessage(error) == 'Route not found') break;
-      }
-    }
-    if (failures > 0 && context.mounted) {
-      final message = _gatewayErrorMessage(firstError!) == 'Route not found'
-          ? _instanceRemovalError(firstError)
-          : '$failures 个实例未能删除，请刷新后重试';
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    }
-  }
-}
-
-String _instanceRemovalError(Object error) {
-  if (error is DioException) {
-    if (error.response?.statusCode == 404) {
-      return _gatewayErrorMessage(error) == 'Route not found'
-          ? '当前服务器尚未部署离线实例清理接口'
-          : '该实例已不存在，请刷新后重试';
-    }
-    if (error.response?.statusCode == 409) {
-      return '该实例已重新上线，无法删除';
-    }
-  }
-  return '删除离线实例失败，请刷新后重试';
-}
-
-String? _gatewayErrorMessage(Object error) {
-  if (error is! DioException) return null;
-  final data = error.response?.data;
-  if (data is! Map<Object?, Object?>) return null;
-  final detail = data['error'];
-  if (detail is! Map<Object?, Object?>) return null;
-  return detail['message'] as String?;
-}
-
-class _InstanceMachineGroup {
-  const _InstanceMachineGroup({required this.machine, required this.instances});
-
-  final String machine;
-  final List<OpenCodeInstancePresence> instances;
-
-  int get activeCount => instances
-      .where((instance) => instance.state != InstancePresenceState.offline)
-      .length;
-
-  List<OpenCodeInstancePresence> get offline => instances
-      .where((instance) => instance.state == InstancePresenceState.offline)
-      .toList(growable: false);
-}
-
-List<_InstanceMachineGroup> _groupInstances(
-  Iterable<OpenCodeInstancePresence> instances,
-) {
-  final grouped = <String, List<OpenCodeInstancePresence>>{};
-  for (final instance in instances) {
-    final key = instance.machine.trim().toLowerCase();
-    grouped.putIfAbsent(key, () => []).add(instance);
-  }
-  final groups = [
-    for (final entries in grouped.values)
-      _InstanceMachineGroup(machine: entries.first.machine, instances: entries),
-  ];
-  for (final group in groups) {
-    group.instances.sort((left, right) {
-      final byState = _presenceOrder(
-        left.state,
-      ).compareTo(_presenceOrder(right.state));
-      if (byState != 0) return byState;
-      final bySeen = right.lastSeenAt.compareTo(left.lastSeenAt);
-      if (bySeen != 0) return bySeen;
-      return left.project.toLowerCase().compareTo(right.project.toLowerCase());
-    });
-  }
-  groups.sort((left, right) {
-    final byActive = right.activeCount.compareTo(left.activeCount);
-    if (byActive != 0) return byActive;
-    return left.machine.toLowerCase().compareTo(right.machine.toLowerCase());
-  });
-  return groups;
-}
-
-int _presenceOrder(InstancePresenceState state) => switch (state) {
-  InstancePresenceState.controllable => 0,
-  InstancePresenceState.conflicting => 1,
-  InstancePresenceState.incompatible => 2,
-  InstancePresenceState.offline => 3,
-};
-
-class _PendingTile extends StatelessWidget {
-  const _PendingTile({required this.interaction});
-
-  final PendingInteraction interaction;
-
-  @override
-  Widget build(BuildContext context) {
-    final isQuestion = interaction is PendingQuestion;
-    return ListTile(
-      key: ValueKey(
-        'interaction-${interaction.instanceId}-${interaction.requestId}',
-      ),
-      leading: Icon(isQuestion ? Icons.help_outline : Icons.shield_outlined),
-      title: Text('${interaction.machine} · ${interaction.project}'),
-      subtitle: Text(
-        '${interaction.sessionTitle.isEmpty ? interaction.sessionId : interaction.sessionTitle} · ${_waitingText(interaction.occurredAt)}',
-      ),
-      trailing: Chip(
-        label: Text(isQuestion ? '待回答' : '待授权'),
-        visualDensity: VisualDensity.compact,
-      ),
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => PendingInteractionPage(interaction: interaction),
-        ),
-      ),
-    );
-  }
-}
-
-String _waitingText(DateTime occurredAt) {
-  final elapsed = DateTime.now().difference(occurredAt);
-  if (elapsed.inSeconds < 60) return '等待不到1分钟';
-  if (elapsed.inMinutes < 60) return '等待${elapsed.inMinutes}分钟';
-  return '等待${elapsed.inHours}小时';
-}
-
-class _OfflineTile extends StatelessWidget {
-  const _OfflineTile({required this.item});
-
-  final OfflinePendingInteraction item;
-
-  @override
-  Widget build(BuildContext context) {
-    final interaction = item.interaction;
-    final isQuestion = interaction is PendingQuestion;
-    return ListTile(
-      key: ValueKey(
-        'offline-${interaction.instanceId}-${interaction.requestId}',
-      ),
-      leading: Icon(isQuestion ? Icons.help_outline : Icons.shield_outlined),
-      title: Text('${interaction.machine} · ${interaction.project}'),
-      subtitle: Text(
-        '${interaction.sessionTitle.isEmpty ? interaction.sessionId : interaction.sessionTitle} · ${_elapsedText(item.lastSeenAt)}',
-      ),
-      trailing: Chip(
-        label: Text(isQuestion ? '待回答' : '待授权'),
-        visualDensity: VisualDensity.compact,
-      ),
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => PendingInteractionPage(
-            interaction: interaction,
-            readOnly: true,
-            lastSeenAt: item.lastSeenAt,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-    child: Text(label, style: Theme.of(context).textTheme.titleSmall),
-  );
-}
-
-class _MachineInstanceGroup extends StatefulWidget {
-  const _MachineInstanceGroup({
-    super.key,
-    required this.group,
-    required this.webUi,
-    required this.onOpenWebUi,
-    required this.onDelete,
-    required this.onClearOffline,
-    required this.catalog,
-    required this.onFollow,
-    required this.onHide,
-  });
-
-  final _InstanceMachineGroup group;
-  final WebUiBrowserState webUi;
-  final void Function(OpenCodeInstancePresence target) onOpenWebUi;
-  final Future<void> Function(OpenCodeInstancePresence target) onDelete;
-  final Future<void> Function() onClearOffline;
-  final SessionCatalogState catalog;
-  final void Function(OpenCodeInstancePresence) onFollow;
-  final void Function(OpenCodeInstancePresence) onHide;
-
-  @override
-  State<_MachineInstanceGroup> createState() => _MachineInstanceGroupState();
-}
-
-class _MachineInstanceGroupState extends State<_MachineInstanceGroup> {
-  bool _clearing = false;
-  bool _expanded = false;
-  final ExpansibleController _expansion = ExpansibleController();
-
-  @override
-  void dispose() {
-    _expansion.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final group = widget.group;
-    return ExpansionTile(
-      key: ValueKey('machine-${group.machine.toLowerCase()}'),
-      controller: _expansion,
-      initiallyExpanded: false,
-      onExpansionChanged: (expanded) => setState(() => _expanded = expanded),
-      title: Text(group.machine),
-      subtitle: Text('${group.activeCount} 在线 / ${group.instances.length} 个实例'),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (group.offline.isNotEmpty)
-            IconButton(
-              key: ValueKey('clear-offline-${group.machine.toLowerCase()}'),
-              tooltip: '清除此机器的离线实例',
-              icon: _clearing
-                  ? const SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.delete_sweep_outlined),
-              onPressed: _clearing
-                  ? null
-                  : () async {
-                      setState(() => _clearing = true);
-                      await widget.onClearOffline();
-                      if (mounted) setState(() => _clearing = false);
-                    },
-            ),
-          IconButton(
-            tooltip: _expanded ? '折叠机器实例' : '展开机器实例',
-            icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more),
-            onPressed: () =>
-                _expanded ? _expansion.collapse() : _expansion.expand(),
-          ),
-        ],
-      ),
-      children: [
-        for (final instance in group.instances)
-          _InstanceTile(
-            instance: instance,
-            webUi: widget.webUi,
-            onOpenWebUi: widget.onOpenWebUi,
-            onDelete: widget.onDelete,
-            followed: widget.catalog.isFollowed(instance),
-            hidden: widget.catalog.isHidden(
-              instance.machine,
-              instance.directory,
-            ),
-            onFollow: widget.onFollow,
-            onHide: widget.onHide,
-          ),
-      ],
-    );
-  }
-}
-
-class _InstanceTile extends StatefulWidget {
-  const _InstanceTile({
-    required this.instance,
-    required this.webUi,
-    required this.onOpenWebUi,
-    required this.onDelete,
-    required this.followed,
-    required this.hidden,
-    required this.onFollow,
-    required this.onHide,
-  });
-
-  final OpenCodeInstancePresence instance;
-  final WebUiBrowserState webUi;
-  final void Function(OpenCodeInstancePresence target) onOpenWebUi;
-  final Future<void> Function(OpenCodeInstancePresence target) onDelete;
-  final bool followed;
-  final bool hidden;
-  final void Function(OpenCodeInstancePresence) onFollow;
-  final void Function(OpenCodeInstancePresence) onHide;
-
-  @override
-  State<_InstanceTile> createState() => _InstanceTileState();
-}
-
-class _InstanceTileState extends State<_InstanceTile> {
-  bool _deleting = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final instance = widget.instance;
-    final webUi = widget.webUi;
-    final (label, icon) = switch (instance.state) {
-      InstancePresenceState.controllable => (
-        '可远程操作',
-        Icons.cloud_done_outlined,
-      ),
-      InstancePresenceState.conflicting => (
-        '项目冲突',
-        Icons.warning_amber_outlined,
-      ),
-      InstancePresenceState.incompatible => ('版本不兼容', Icons.block_outlined),
-      InstancePresenceState.offline => ('离线', Icons.cloud_off_outlined),
+    final label = switch (instance.state) {
+      InstancePresenceState.controllable =>
+        instance.webUiAvailable ? '在线' : '在线 · 仅通知',
+      InstancePresenceState.conflicting => '在线 · 项目冲突',
+      InstancePresenceState.incompatible => '在线 · Plugin 协议不兼容',
+      InstancePresenceState.offline => '离线',
     };
-    final detail = instance.state == InstancePresenceState.offline
-        ? '${instance.openCodeVersion} · ${_elapsedText(instance.lastSeenAt)}'
-        : 'OpenCode ${instance.openCodeVersion}';
-    final webUiOpening = webUi.openingFor(instance.instanceId);
-    final webUiActive = webUi.activeFor(instance.instanceId);
-    final actions = <Widget>[
-      IconButton(
-        key: ValueKey('follow-instance-${instance.instanceId}'),
-        tooltip: widget.followed ? '取消关注' : '关注此项目实例',
-        icon: Icon(widget.followed ? Icons.star : Icons.star_border),
-        onPressed: () => widget.onFollow(instance),
-      ),
-      if (instance.state == InstancePresenceState.controllable)
-        IconButton(
-          key: ValueKey('webui-instance-${instance.instanceId}'),
-          tooltip: webUiActive ? '继续此实例的上次会话' : '打开上次会话或最近会话',
-          icon: webUiOpening
-              ? const SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(
-                  webUiActive ? Icons.open_in_browser : Icons.language_outlined,
-                ),
-          onPressed: webUiOpening ? null : () => widget.onOpenWebUi(instance),
-        ),
-      if (instance.state == InstancePresenceState.offline)
-        IconButton(
-          key: ValueKey('delete-instance-${instance.instanceId}'),
-          tooltip: '删除离线实例',
-          icon: _deleting
-              ? const SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.delete_outline),
-          onPressed: _deleting
-              ? null
-              : () async {
-                  setState(() => _deleting = true);
-                  await widget.onDelete(instance);
-                  if (mounted) setState(() => _deleting = false);
-                },
-        ),
-      IconButton(
-        key: ValueKey('hide-instance-${instance.instanceId}'),
-        tooltip: widget.hidden ? '恢复此项目实例' : '隐藏此项目实例',
-        icon: Icon(
-          widget.hidden
-              ? Icons.visibility_outlined
-              : Icons.visibility_off_outlined,
-        ),
-        onPressed: () => widget.onHide(instance),
-      ),
-    ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final stacked =
-            constraints.maxWidth < 600 ||
-            MediaQuery.textScalerOf(context).scale(14) > 21;
-        final detailWidget = Text(
-          '${instance.machine} · $label · $detail\n${instance.directory}',
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-        );
-        return ListTile(
-          key: ValueKey('instance-${instance.instanceId}'),
-          leading: Icon(icon),
-          title: Text(
-            instance.project,
+    final version = instance.openCodeVersion == 'unknown'
+        ? ''
+        : ' · OpenCode ${instance.openCodeVersion}';
+    return ListTile(
+      key: ValueKey('instance-${instance.instanceId}'),
+      title: Text('${instance.machine} · ${instance.project}'),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('$label$version'),
+          Text(
+            instance.directory,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          subtitle: stacked
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    detailWidget,
-                    Wrap(children: actions),
-                  ],
-                )
-              : detailWidget,
-          trailing: stacked
-              ? null
-              : Row(mainAxisSize: MainAxisSize.min, children: actions),
-        );
-      },
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            children: [
+              if (instance.canOpen)
+                FilledButton.tonalIcon(
+                  key: ValueKey('webui-instance-${instance.instanceId}'),
+                  onPressed: webUi.openingFor(instance.instanceId)
+                      ? null
+                      : () => _open(instance),
+                  icon: const Icon(Icons.open_in_browser),
+                  label: const Text('打开'),
+                ),
+              if (instance.state != InstancePresenceState.offline)
+                IconButton(
+                  tooltip: catalog.isFollowed(instance) ? '取消关注' : '关注此入口',
+                  icon: Icon(
+                    catalog.isFollowed(instance)
+                        ? Icons.star
+                        : Icons.star_outline,
+                  ),
+                  onPressed: () => _save(
+                    ref
+                        .read(sessionCatalogProvider.notifier)
+                        .toggleFollow(instance),
+                  ),
+                ),
+              if (instance.state == InstancePresenceState.offline)
+                IconButton(
+                  key: ValueKey('delete-instance-${instance.instanceId}'),
+                  tooltip: '删除本机离线入口记录',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _forget(instance),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
+
+  Widget _sessionTile(
+    RemoteSession item,
+    Map<String, OpenCodeInstancePresence> instances,
+    WebUiBrowserState webUi,
+  ) {
+    final session = item.session;
+    final target = sessionControlTarget(session, instances.values);
+    return ListTile(
+      key: ValueKey('session-${session.sessionId}'),
+      title: Text(session.title.isEmpty ? session.sessionId : session.title),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${session.machine} · ${session.project} · ${target == null ? "离线记录" : "历史快捷入口"}',
+          ),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (target?.canOpen == true)
+                TextButton.icon(
+                  onPressed: webUi.openingFor(target!.instanceId)
+                      ? null
+                      : () => _open(target, item),
+                  icon: const Icon(Icons.open_in_browser),
+                  label: const Text('打开会话'),
+                ),
+              if (target?.canOpen == true)
+                IconButton(
+                  tooltip: '发送到 OpenCode',
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          SessionPromptPage(session: session, target: target!),
+                    ),
+                  ),
+                ),
+              IconButton(
+                tooltip: item.pinned ? '取消固定' : '固定会话',
+                icon: Icon(item.pinned ? Icons.star : Icons.star_outline),
+                onPressed: () => _save(
+                  ref.read(sessionCatalogProvider.notifier).togglePin(item),
+                ),
+              ),
+              IconButton(
+                tooltip: '删除本机会话记录',
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => _save(
+                  ref.read(sessionCatalogProvider.notifier).deleteSession(item),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _requestTile(
+    PendingInteraction item, {
+    OfflinePendingInteraction? offline,
+  }) => ListTile(
+    key: ValueKey(
+      '${offline == null ? "interaction" : "offline"}-${item.instanceId}-${item.requestId}',
+    ),
+    leading: Icon(
+      item is PendingQuestion ? Icons.help_outline : Icons.shield_outlined,
+    ),
+    title: Text('${item.machine} · ${item.project}'),
+    subtitle: Text(
+      '${item.sessionTitle.isEmpty ? item.sessionId : item.sessionTitle} · ${item is PendingQuestion ? "待回答" : "待授权"}',
+    ),
+    trailing: offline == null
+        ? null
+        : IconButton(
+            tooltip: '删除本机离线请求记录',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () => ref
+                .read(pendingInteractionsProvider.notifier)
+                .forgetOffline(item),
+          ),
+    onTap: () => Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PendingInteractionPage(
+          interaction: item,
+          readOnly: offline != null,
+          lastSeenAt: offline?.lastSeenAt,
+        ),
+      ),
+    ),
+  );
 }
 
-String _elapsedText(DateTime then) {
-  final elapsed = DateTime.now().difference(then);
-  if (elapsed.inSeconds < 60) return '刚刚在线';
-  if (elapsed.inMinutes < 60) return '${elapsed.inMinutes}分钟前在线';
-  return '${elapsed.inHours}小时前在线';
+class _LocalConnectionTile extends ConsumerWidget {
+  const _LocalConnectionTile({
+    required this.instanceId,
+    required this.title,
+    required this.uri,
+    required this.reconnecting,
+  });
+  final String instanceId;
+  final String title;
+  final Uri? uri;
+  final bool reconnecting;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => ListTile(
+    title: Text('$title · ${reconnecting ? "正在重连" : "已连接"}'),
+    subtitle: Text(uri?.origin ?? ''),
+    onTap: uri == null
+        ? null
+        : () async {
+            final error = await ref
+                .read(webUiBrowserControllerProvider.notifier)
+                .reopen(instanceId);
+            if (error != null && context.mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text(error)));
+            }
+          },
+    trailing: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (uri != null)
+          IconButton(
+            tooltip: '复制浏览器地址',
+            icon: const Icon(Icons.copy),
+            onPressed: () async {
+              try {
+                await Clipboard.setData(ClipboardData(text: uri.toString()));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('地址已复制；需在本机保持 Notify 运行')),
+                  );
+                }
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('复制失败，请重试')));
+                }
+              }
+            },
+          ),
+        IconButton(
+          tooltip: '关闭此 WebUI 连接',
+          icon: const Icon(Icons.link_off),
+          onPressed: () => unawaited(
+            ref.read(webUiBrowserControllerProvider.notifier).close(instanceId),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
-/// Gateway connection status chip: 已连接 / 连接中 / 未连接.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.title);
+  final String title;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+    child: Text(title, style: Theme.of(context).textTheme.titleSmall),
+  );
+}
+
 class WsStatusChip extends StatelessWidget {
   const WsStatusChip({super.key, required this.status});
-
-  /// The status to display.
   final WsStatus status;
-
   @override
   Widget build(BuildContext context) {
     final (label, icon) = switch (status) {
@@ -1183,185 +569,5 @@ class WsStatusChip extends StatelessWidget {
       label: Text(label),
       visualDensity: VisualDensity.compact,
     );
-  }
-}
-
-class _SessionSearchField extends ConsumerStatefulWidget {
-  const _SessionSearchField();
-  @override
-  ConsumerState<_SessionSearchField> createState() =>
-      _SessionSearchFieldState();
-}
-
-class _SessionSearchFieldState extends ConsumerState<_SessionSearchField> {
-  late final TextEditingController _text = TextEditingController(
-    text: ref.read(sessionCatalogProvider).search,
-  );
-  @override
-  void dispose() {
-    _text.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final query = ref.watch(
-      sessionCatalogProvider.select((state) => state.search),
-    );
-    ref.listen(sessionCatalogProvider.select((state) => state.search), (
-      _,
-      next,
-    ) {
-      if (_text.text.trim() != next) _text.text = next;
-    });
-    return TextField(
-      key: const ValueKey('session-search'),
-      controller: _text,
-      maxLength: 200,
-      textInputAction: TextInputAction.search,
-      onSubmitted: (_) => FocusScope.of(context).unfocus(),
-      decoration: InputDecoration(
-        prefixIcon: const Icon(Icons.search),
-        hintText: '搜索会话、项目或机器',
-        counterText: '',
-        border: const OutlineInputBorder(),
-        suffixIcon: query.isEmpty
-            ? null
-            : IconButton(
-                key: const ValueKey('clear-session-search'),
-                tooltip: '清空搜索',
-                icon: const Icon(Icons.clear),
-                onPressed: () {
-                  _text.clear();
-                  ref.read(sessionCatalogProvider.notifier).search('');
-                },
-              ),
-      ),
-      onChanged: ref.read(sessionCatalogProvider.notifier).search,
-    );
-  }
-}
-
-class _SessionTile extends StatelessWidget {
-  const _SessionTile({
-    required this.session,
-    required this.target,
-    required this.webUi,
-    required this.onOpenWebUi,
-    this.pinned,
-    this.statusLabel,
-    this.onPin,
-    this.onHide,
-  });
-
-  final ActiveSession session;
-  final bool? pinned;
-  final String? statusLabel;
-  final VoidCallback? onPin;
-  final VoidCallback? onHide;
-  final OpenCodeInstancePresence? target;
-  final WebUiBrowserState webUi;
-  final void Function(ActiveSession session, OpenCodeInstancePresence target)
-  onOpenWebUi;
-
-  @override
-  Widget build(BuildContext context) {
-    final pending = session.pendingRequestIds;
-    final targetId = target?.instanceId;
-    final webUiOpening = targetId != null && webUi.openingFor(targetId);
-    final webUiActive = targetId != null && webUi.activeFor(targetId);
-    final actions = <Widget>[
-      if (onHide != null)
-        IconButton(
-          tooltip: '隐藏此会话',
-          icon: const Icon(Icons.visibility_off_outlined),
-          onPressed: onHide,
-        ),
-      if (onPin != null)
-        IconButton(
-          tooltip: pinned == true ? '取消固定' : '固定会话',
-          icon: Icon(pinned == true ? Icons.star : Icons.star_border),
-          onPressed: onPin,
-        ),
-      if (pending.isNotEmpty)
-        Badge(
-          key: ValueKey('pending-${session.sessionId}'),
-          label: Text('${pending.length}'),
-          child: const Icon(Icons.notification_important_outlined),
-        ),
-      if (target != null)
-        IconButton(
-          key: ValueKey('prompt-${session.sessionId}'),
-          tooltip: '发送到 OpenCode',
-          icon: const Icon(Icons.edit_outlined),
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) =>
-                  SessionPromptPage(session: session, target: target!),
-            ),
-          ),
-        ),
-      if (target != null)
-        IconButton(
-          key: ValueKey('webui-${session.sessionId}'),
-          tooltip: webUiActive ? '在浏览器中重新打开此会话' : '在浏览器中打开此会话',
-          icon: webUiOpening
-              ? const SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(
-                  webUiActive ? Icons.open_in_browser : Icons.language_outlined,
-                ),
-          onPressed: webUiOpening ? null : () => onOpenWebUi(session, target!),
-        ),
-    ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final stacked =
-            constraints.maxWidth < 560 ||
-            MediaQuery.textScalerOf(context).scale(14) > 21;
-        final subtitle = Text(
-          statusLabel == null
-              ? '${session.title} · ${_elapsedText()}'
-              : '${session.machine} · ${session.project}\n${pending.isNotEmpty ? "等待输入" : statusLabel} · ${_elapsedText()}',
-        );
-        return ListTile(
-          key: ValueKey('session-${session.sessionId}'),
-          title: Text(
-            statusLabel == null
-                ? '${session.machine} · ${session.project}'
-                : session.title,
-          ),
-          subtitle: stacked && actions.isNotEmpty
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    subtitle,
-                    Wrap(
-                      spacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: actions,
-                    ),
-                  ],
-                )
-              : subtitle,
-          trailing: stacked || actions.isEmpty
-              ? null
-              : Row(mainAxisSize: MainAxisSize.min, children: actions),
-        );
-      },
-    );
-  }
-
-  String _elapsedText() {
-    final elapsed = DateTime.now().difference(session.lastHeartbeatAt);
-    if (elapsed.inSeconds < 60) {
-      return '刚刚活跃';
-    }
-    if (elapsed.inMinutes < 60) {
-      return '${elapsed.inMinutes}分钟前活跃';
-    }
-    return '${elapsed.inHours}小时前活跃';
   }
 }

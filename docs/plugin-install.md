@@ -171,7 +171,14 @@ $env:NOTIFY_REMOTE_DIRECTORIES = '["C:/work/project"]'
 
 路径是精确目录，不是递归白名单；未列出的目录仍按会话自动发现。不要把这段可选配置加到所有导出命令里。
 
-更新 `session-notify.js` 后需重启实际 OpenCode 服务进程，重连 `attach` 本身不会卸载旧 Plugin。旧空目录入口会转为离线，可在 Notify 的“实例 → 清理全部离线”移除。无需删除 OpenCode 会话数据库，也无需更新 Gateway/客户端协议。
+更新 `session-notify.js` 后需重启实际 OpenCode 服务进程，重连 `attach` 本身不会卸载旧 Plugin。旧空目录入口会转为离线，可在 Notify 的“本机历史”逐项删除；无需删除 OpenCode 会话数据库。
+
+### 服务入口和版本识别
+
+- Plugin 通过真实 HTTP `/global/health` 获取版本并确认监听服务可用；只有健康响应有效时才上报 `webUiAvailable: true`。普通 TUI 的进程内 SDK 可用不代表存在可隧道访问的服务，无有效 HTTP 服务时仍保留通知功能。
+- Plugin 到 OpenCode 的 HTTP 请求绕过代理，并仅向宿主 `serverUrl` 同源地址附加 `OPENCODE_SERVER_PASSWORD` / `OPENCODE_SERVER_USERNAME` 对应的 Basic 认证；用户名默认 `opencode`。这些是 OpenCode 原有环境变量，不是新的 Notify 配置项，凭据不发给 Gateway 或客户端。
+- 修复旧 SDK 缺少 health 方法后回退 HTTP 客户端未带服务密码的 401；未知版本在控制连接重试时重新探测，不永久缓存 unknown。
+- 此能力字段需要先部署新 Gateway，再安装 Plugin 并重启实际 OpenCode 服务，最后使用新客户端。旧 Plugin 缺少能力字段时显示在线但不提供“打开”。
 
 ### Validation behavior (fail closed)
 

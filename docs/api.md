@@ -99,6 +99,13 @@ frames should be ignored by clients.
 - Other disconnects: reconnect with bounded exponential backoff.
 - Missed events are not replayed.
 
+### 在线入口快照
+
+- `instance_presence` 是同账号的完整**在线** Plugin 连接池；每次客户端连接/重连、Plugin 上下线立即发送，并每 600 秒向同账号所有在线客户端再广播一次。空池仍发送 `instances: []`。
+- `GET /v1/instances` 使用同一 Bearer 认证，返回 `{ "instances": [...] }`，内容直接来自 Gateway 当前内存连接池，不向 Plugin 查询会话。其他账号的连接不会返回。
+- 条目对应目录级 Plugin 上下文，不表示某个 attach 当前打开的会话。客户端自行保留离线历史，删除历史是本机操作。
+- Plugin 注册及 presence 新增可选布尔字段 `webUiAvailable`；只有为 `true` 且状态为 `controllable` 才接受 WebUI 隧道。缺字段视为未证明具备 HTTP 服务能力，客户端不展示“打开”按钮。
+
 ## Pending interactions
 
 `GET /v1/pending-interactions` uses an account access token. The gateway asks

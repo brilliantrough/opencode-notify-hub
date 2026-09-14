@@ -288,6 +288,8 @@ components:
             - incompatible
             - offline
           type: string
+        webUiAvailable:
+          type: boolean
       required:
         - instanceId
         - machine
@@ -1042,6 +1044,8 @@ components:
               type: integer
             type:
               const: register
+            webUiAvailable:
+              type: boolean
           required:
             - type
             - instanceId
@@ -2169,6 +2173,8 @@ components:
                       - incompatible
                       - offline
                     type: string
+                  webUiAvailable:
+                    type: boolean
                 required:
                   - instanceId
                   - machine
@@ -2769,6 +2775,76 @@ paths:
       summary: Revoke an ingest key.
       tags:
         - ingest-keys
+  /v1/instances:
+    get:
+      operationId: getOnlineInstances
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  instances:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        directory:
+                          minLength: 1
+                          type: string
+                        instanceId:
+                          format: uuid
+                          type: string
+                        lastSeenAt:
+                          format: date-time
+                          type: string
+                        machine:
+                          minLength: 1
+                          type: string
+                        openCodeVersion:
+                          minLength: 1
+                          type: string
+                        project:
+                          minLength: 1
+                          type: string
+                        protocolVersion:
+                          minimum: 1
+                          type: integer
+                        state:
+                          enum:
+                            - controllable
+                            - conflicting
+                            - incompatible
+                            - offline
+                          type: string
+                        webUiAvailable:
+                          type: boolean
+                      required:
+                        - instanceId
+                        - machine
+                        - project
+                        - directory
+                        - openCodeVersion
+                        - protocolVersion
+                        - state
+                        - lastSeenAt
+                      type: object
+                    type: array
+                required:
+                  - instances
+                type: object
+          description: Complete online snapshot, including an empty pool.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Missing or invalid access token.
+      security:
+        - bearerAuth: []
+      summary: Read the current user's online Plugin connection pool without querying Plugins.
+      tags:
+        - instances
   /v1/instances/{instanceId}:
     delete:
       description: Removes one offline instance from the authenticated user's in-memory presence projection. An active instance cannot be removed. A later Plugin reconnect or OpenCode restart registers the instance again.

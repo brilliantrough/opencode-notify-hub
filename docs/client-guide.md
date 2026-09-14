@@ -57,8 +57,8 @@ longer used or may have been exposed.
 
 | Page | Purpose |
 | --- | --- |
-| Home | Searchable idle/recent sessions, fixed session shortcuts, action-required state, text sending, and persistent client-held WebUI connections; instances remain grouped by machine |
-| History | Up to 10,000 local notifications with live updates and 20/30/50/100-row pages; select a row for complete event details |
+| Home | Online Plugin entries, machine/project/status and an Open button; secondary local history and pinned session shortcuts, pending requests and persistent WebUI connections |
+| History | Up to 10,000 local notifications with live updates and 20/30/50/100-row pages; expand a row for event details or to delete that local record |
 | Devices | Registered Linux, Windows, and Android devices; rename, enable, or remove them |
 | Keys | Create, recall/copy local secrets, export server configuration, and revoke keys |
 | Plugin | Select a key to export configuration, or copy the install path and environment template |
@@ -84,39 +84,25 @@ uses FCM instead of replay.
 
 ## Session control
 
-### 首页：默认少量入口
+### 首页：在线入口优先
 
 | 入口 | 展示与管理 |
 | --- | --- |
-| 常用（默认） | 待处理请求、最多 4 个关注项目实例、6 个固定会话、6 个最近会话；离线请求和浏览器连接默认折叠 |
-| 会话 | 合并主动发现与通知中的会话，不再额外列“实时会话”；每次显示 20 条，支持搜索、固定、隐藏及恢复隐藏会话 |
-| 实例 | 默认仅在线，按机器折叠，每次最多 20 条；可切到“全部”查看离线记录或“已隐藏”恢复项目 |
-| 星标实例 | 按机器与项目目录保存关注，新进程 UUID 不影响关注；已有关注时，常用页最近会话优先来自关注项目或自己打开过的会话 |
-| 隐藏实例 | 对该机器、目录生效，同时隐藏相关会话并停止自动查询；不停止 OpenCode、不关闭已有浏览器连接，也不屏蔽待处理请求 |
-| 删除 / 清理离线 | 删除 Gateway 的离线记录并清理其未固定会话缓存；支持按机器和一键清理全部离线。在线实例使用隐藏，不做远程关闭 |
-| 同步失败 | 首页只有一条数量汇总，点开查看具体原因；不再为每个失败实例铺一行，不把查询失败当作 idle |
+| 在线入口（默认） | Gateway 当前连接池，每条显示机器、项目和状态；服务健康检查通过的入口提供“打开”，进入该目录 WebUI；每次展示 20 条 |
+| 刷新 | 直接读取 Gateway 已知的连接池，不等待 Plugin 查询目录或会话；失败时保留现有数据并提示本次刷新失败 |
+| 自动同步 | 客户端连接/重连立即收到完整快照，Plugin 上下线即时广播；每 10 分钟对同账号在线客户端再广播完整快照，空池也发送 |
+| 关注 | 星标入口优先排序，关注按机器/目录保存，进程 UUID 变化不影响关注 |
+| 本机历史 | 离线入口、固定与历史会话、离线请求；包含旧版隐藏的会话，均可逐项手动删除 |
+| 删除 | 只删除本机记录，不删远端 OpenCode 会话、不影响其他设备；离线入口真正重新连接后可作为在线入口再次出现 |
 
-关注与隐藏设置按本机 Gateway/账号隔离，客户端或 OpenCode 重启后保留，可随时恢复。首页没有展示的完整会话和实例仍可在对应入口找到。
+首页不再每 30 秒逐个查询目录，不显示“若干实例暂未同步”。连接池中的一个条目是目录级 Plugin 入口，不是某个 attach 当前选中的会话；具体会话在 OpenCode WebUI 内选择。
 
-Home queries each non-hidden online Plugin for main sessions, including idle sessions, on
-startup and reconnect, and every 30 seconds while foregrounded. It first shows
-the local cache, then verifies the current instance binding. Snapshot failures
-show stale/unknown state rather than an empty list or a fabricated idle status.
+- 本机历史来自已有缓存和本机收到的通知；冷启动显示本机记录，不自动抓取所有服务器的历史会话。
+- 入口历史、会话记录和固定设置按 Gateway/账号隔离并持久保存；缓存入口在收到当前在线快照前一律视为离线。
+- 最多固定 50 个具体会话。固定项在默认页折叠展示，也可在本机历史里取消固定或删除；会话快捷入口只按唯一在线目录重新绑定，不声称已重新验证远端会话仍存在。
+- 本地搜索不会触发远端会话查询。想查找服务器上的其他会话，先打开对应在线入口。
 
-- Search by session title, project, machine, or working directory. Title searches
-  also query OpenCode, so older sessions need not first appear in notifications.
-  The clear button resets the search; returning to Home restores its current text.
-- Recent pages start at 50 sessions per instance and can expand to 200; search
-  for older entries. Child/subagent and archived sessions are excluded.
-- Star up to 50 sessions. Bookmarks are looked up even outside the recent page.
-  Missing/deleted/archived bookmarks remain visible but cannot be opened.
-- The local cache holds up to 1,000 metadata records, isolated by Gateway and
-  account; bookmarks and last-opened timestamps survive client restarts.
-- The instance browser icon resumes the last session opened through Notify,
-  otherwise the most recently updated session, then the project's new-session
-  page. A session row's browser icon always opens that exact session.
-
-A verified Session shows two controls when its owning Plugin is online:
+A local Session shortcut shows controls when its unique owning Plugin has an available HTTP server:
 
 - **Send:** opens a native text composer. The Gateway returns as soon as it
   writes the prompt to the Plugin connection; it does not wait for the model
@@ -132,7 +118,7 @@ A verified Session shows two controls when its owning Plugin is online:
   using the copy icon. That URL works on the same device while Notify runs.
 
 Neither mode has an offline queue. The controls disappear when the owning
-instance is offline, incompatible, conflicting, or not yet verified. Each opened
+instance is offline, incompatible, conflicting, or has no verified HTTP listener. Each opened
 instance has an independent loopback origin; switching sessions only changes the
 path, and other instances' browser tabs stay usable. Authentication renews before
 the 900-second token expiry without interrupting SSE. Network failures reconnect
@@ -143,19 +129,20 @@ WebUI does not recover its own request, refresh the existing browser tab.
 Keep Notify running in the desktop tray. Signing out, explicitly closing a
 connection, or exiting the client stops its listener. Ports are stable for that
 listener's lifetime, not across app exits; there is no public browser-only URL.
-An OpenCode process restart creates a new instance identity: bookmarks are
-revalidated against the new online instance before opening a new tunnel.
+An OpenCode process restart creates a new instance identity: local shortcuts are
+rebound only to the unique matching online machine/directory before opening a new tunnel.
 
-Session discovery and seamless WebUI renewal require updated Gateway, Plugin,
-and client builds. Restart OpenCode after updating its Plugin. Older Plugins
-may time out on discovery; the client reports this and retains the old metadata.
+The online-pool interface and WebUI capability flag require updated Gateway,
+Plugin and client builds. Deploy Gateway before updating Plugins, then restart
+the actual OpenCode service. Old Plugins without the capability flag remain
+visible but do not offer an Open button in the new client.
 
-实例是目录级远程入口，不是系统进程数。新版 Plugin 默认跳过没有主会话的目录，有历史 idle 会话则继续自动注册；需要提前保留空项目入口可设置 [NOTIFY_REMOTE_DIRECTORIES](plugin-install.md#目录按需注册)。客户端“隐藏”只改变展示和查询，不关闭 Plugin 控制连接；更新 Plugin 并重启 OpenCode 后，再清理旧离线记录。
+实例是目录级远程入口，不是系统进程数。Plugin 继续跳过已确认没有主会话的目录；需提前保留空项目可设置 [NOTIFY_REMOTE_DIRECTORIES](plugin-install.md#目录按需注册)。只有本机真实 HTTP 健康检查通过才提供隧道；普通 TUI 无可用监听端口时仍可接收通知。
 
 On narrow screens or with large text, session actions wrap below the session
 details. Android uses the in-app WebView and starts the existing foreground
-service before opening when keep-alive is enabled. Returning to Notify refreshes
-the catalog and retries disconnected tunnels. The Windows source also forwards
+service before opening when keep-alive is enabled. Returning to Notify receives
+a fresh connection-pool snapshot and retries disconnected tunnels. The Windows source also forwards
 power-resume events to reconnect remote sockets behind the same local listener.
 These platform changes await native acceptance; see
 [Android handoff](android-agent-handoff.md) and

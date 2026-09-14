@@ -183,7 +183,8 @@ export function createSessionNotifyHooks(
   // (always a local embedded/serve listener) and must not traverse any
   // HTTP_PROXY from the host environment (issue #14: a proxy without a
   // localhost no_proxy answers 502 for loopback, breaking the control path).
-  const loopbackFetch = deps.serverFetch ?? createLoopbackDirectFetch();
+  const loopbackFetch = deps.serverFetch ?? createLoopbackDirectFetch(input.serverUrl);
+  let webUiAvailable = false;
   let v2: (PendingListClient & QuestionReplyClient & PermissionReplyClient) | null = null;
   const v2Client = (): PendingListClient &
     QuestionReplyClient &
@@ -210,23 +211,20 @@ export function createSessionNotifyHooks(
           machine: source.machine,
           project: source.project,
           directory,
+          webUiAvailable: () => webUiAvailable,
           resolveOpenCodeVersion: async () => {
-            const hostGlobal = (
-              input.client as unknown as {
-                global?: { health?: () => Promise<{ data?: { version?: string } }> };
-              }
-            ).global;
-            if (hostGlobal?.health !== undefined) {
-              const result = await hostGlobal.health();
-              return result.data?.version ?? "unknown";
-            }
-            const client = createOpencodeClient({
-              baseUrl: input.serverUrl.toString(),
-              directory,
-              fetch: loopbackFetch,
+            // A host in-process fetch can work without a listening server. Probe
+            // the real authenticated HTTP endpoint before offering a tunnel.
+            const response = await loopbackFetch(new URL("/global/health", input.serverUrl), {
+              signal: AbortSignal.timeout(config.httpTimeoutMs),
             });
-            const result = await client.global.health();
-            return result.data?.version ?? "unknown";
+            if (!response.ok) throw new Error(`OpenCode health HTTP ${response.status}`);
+            const health = await response.json() as { healthy?: boolean; version?: string };
+            if (health.healthy !== true || typeof health.version !== "string" || !health.version.trim()) {
+              throw new Error("Invalid OpenCode health response");
+            }
+            webUiAvailable = true;
+            return health.version;
           },
           listPendingInteractions: (pendingSource, signal) => {
             pending ??= new PendingAdapter({

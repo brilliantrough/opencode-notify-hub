@@ -78,6 +78,11 @@ class HistoryController extends AsyncNotifier<HistoryViewState> {
     );
   }
 
+  Future<void> remove(String eventId) async {
+    await _history.remove(eventId);
+    await refresh();
+  }
+
   Future<void> setPageSize(int pageSize) {
     if (!historyPageSizes.contains(pageSize)) {
       throw ArgumentError.value(pageSize, 'pageSize', 'unsupported page size');

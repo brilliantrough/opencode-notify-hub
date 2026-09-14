@@ -15,15 +15,25 @@ import { request as httpRequest } from "node:http";
 import { Readable } from "node:stream";
 
 /** Fetch-compatible function that bypasses proxies for http:// loopback URLs. */
-export function createLoopbackDirectFetch(): typeof fetch {
+export function createLoopbackDirectFetch(serverUrl?: URL): typeof fetch {
   return (async (input: unknown, init?: unknown): Promise<Response> => {
     const request = await toRequestParts(input, init);
+    // The host SDK retains this credential; separately created HTTP clients do not.
+    const password = process.env.OPENCODE_SERVER_PASSWORD;
+    if (password && serverUrl && new URL(request.url).origin === serverUrl.origin) {
+      request.headers.authorization = `Basic ${Buffer.from(
+        `${process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${password}`,
+      ).toString("base64")}`;
+    }
     if (!request.url.startsWith("http://")) {
       const globalFetch = globalThis.fetch as unknown as (
         input: unknown,
         init?: unknown,
       ) => Promise<Response>;
-      return globalFetch(input as never, init as never);
+      return globalFetch(request.url, {
+        method: request.method, headers: request.headers, body: request.body,
+        signal: request.signal, redirect: "manual",
+      });
     }
     return directHttp(request);
   }) as typeof fetch;

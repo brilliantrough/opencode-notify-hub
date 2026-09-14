@@ -15,6 +15,9 @@ class FailingHistory implements NotificationHistory {
   Future<void> add(HistoryEntry entry) => Future.error(StateError('disk'));
 
   @override
+  Future<void> remove(String eventId) => Future.error(StateError('disk'));
+
+  @override
   Future<bool> contains(String eventId) => Future.error(StateError('disk'));
 
   @override

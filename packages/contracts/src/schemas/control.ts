@@ -41,6 +41,7 @@ export const instancePresenceSchema = {
     project: nonEmptyString,
     directory: nonEmptyString,
     openCodeVersion: nonEmptyString,
+    webUiAvailable: { type: "boolean" },
     protocolVersion: { type: "integer", minimum: 1 },
     state: instancePresenceStateSchema,
     lastSeenAt: { type: "string", format: "date-time" },
@@ -66,6 +67,7 @@ const pluginRegistrationSchema = {
     project: nonEmptyString,
     directory: nonEmptyString,
     openCodeVersion: nonEmptyString,
+    webUiAvailable: { type: "boolean" },
     protocolVersion: { type: "integer", minimum: 1 },
   },
 } as const satisfies JSONSchema;

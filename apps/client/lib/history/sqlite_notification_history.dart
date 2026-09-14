@@ -150,6 +150,14 @@ class SqliteNotificationHistory extends _$SqliteNotificationHistory
     await _changes.close();
     await super.close();
   }
+
+  @override
+  Future<void> remove(String eventId) async {
+    await (delete(
+      historyRecords,
+    )..where((row) => row.eventId.equals(eventId))).go();
+    _changes.add(null);
+  }
 }
 
 HistoryRecordsCompanion _toCompanion(HistoryEntry entry) =>

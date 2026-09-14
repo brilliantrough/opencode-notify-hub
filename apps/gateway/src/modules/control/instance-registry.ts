@@ -408,6 +408,7 @@ export class InstanceRegistry {
         if (
           record === undefined ||
           record.state !== "controllable" ||
+          record.registration.webUiAvailable !== true ||
           record.connection === undefined ||
           record.connection.socket.readyState !== READY_OPEN
         ) {
@@ -440,14 +441,16 @@ export class InstanceRegistry {
     });
   }
 
-  publishSnapshot(userId: string): void {
-    const instances = [...this.records.values()]
-      .filter((record) => record.userId === userId)
+  snapshot(userId: string): InstancePresence[] {
+    return [...this.records.values()]
+      .filter((record) => record.userId === userId &&
+        record.state !== "offline" && record.connection?.socket.readyState === READY_OPEN)
       .sort((left, right) => left.sequence - right.sequence)
       .map((record) => this.toPresence(record));
-    if (instances.length > 0) {
-      this.publish(userId, { type: "instance_presence", instances });
-    }
+  }
+
+  publishSnapshot(userId: string): void {
+    this.publish(userId, { type: "instance_presence", instances: this.snapshot(userId) });
   }
 
   async collectSessions(userId: string, instanceId: string, query: SessionCatalogQuery): Promise<CatalogResult> {
@@ -481,11 +484,7 @@ export class InstanceRegistry {
       return "not_offline";
     }
     this.records.delete(key);
-    const instances = [...this.records.values()]
-      .filter((candidate) => candidate.userId === userId)
-      .sort((left, right) => left.sequence - right.sequence)
-      .map((candidate) => this.toPresence(candidate));
-    this.publish(userId, { type: "instance_presence", instances });
+    this.publishSnapshot(userId);
     return "deleted";
   }
 
@@ -1373,6 +1372,7 @@ export class InstanceRegistry {
       project: record.registration.project,
       directory: record.registration.directory,
       openCodeVersion: record.registration.openCodeVersion,
+      webUiAvailable: record.registration.webUiAvailable === true,
       protocolVersion: record.registration.protocolVersion,
       state: record.state,
       lastSeenAt: record.lastSeenAt,

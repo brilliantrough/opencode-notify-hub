@@ -83,14 +83,16 @@ class HistoryBatch {
   final int totalCount;
 }
 
-/// Device-local append-only notification history.
+/// Device-local notification history.
 abstract interface class NotificationHistory {
-  /// Emits after this adapter inserts a new unique event.
+  /// Emits after an insertion or a local deletion.
   Stream<void> get changes;
 
   Future<bool> contains(String eventId);
 
   Future<void> add(HistoryEntry entry);
+
+  Future<void> remove(String eventId);
 
   Future<HistoryBatch> loadPage({required int offset, required int limit});
 
@@ -146,6 +148,12 @@ class InMemoryNotificationHistory implements NotificationHistory {
       entries: List.unmodifiable(_entries.sublist(start, end)),
       totalCount: _entries.length,
     );
+  }
+
+  @override
+  Future<void> remove(String eventId) async {
+    _entries.removeWhere((entry) => entry.eventId == eventId);
+    _changes.add(null);
   }
 
   @override
