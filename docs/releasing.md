@@ -82,8 +82,8 @@ Do not publish these as Release assets:
 - CI artifacts downloaded directly from Actions;
 - `.env` files, ingest keys, Firebase service-account JSON, keystores,
   `key.properties`, access/refresh tokens, staging logs, or production logs;
-- Android APK/AAB until Firebase configuration, signing, and Android release
-  gates are complete.
+- Android APK/AAB without the existing release signing identity and explicit
+  disclosure of the delivery mode and remaining device acceptance items.
 
 The Gateway is not bundled into either desktop archive. Publish its immutable
 container image tag and digest in the release notes or a separate operator
@@ -108,7 +108,9 @@ release gates:
 
 ```bash
 pnpm install --frozen-lockfile
-flutter pub get
+export PUB_HOSTED_URL=https://pub.flutter-io.cn
+export FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn
+flutter pub get --enforce-lockfile
 pnpm docs:check
 pnpm test
 pnpm typecheck
@@ -249,7 +251,9 @@ needed to diagnose a build/native failure:
 ```powershell
 corepack enable
 pnpm install --frozen-lockfile
-flutter pub get
+$env:PUB_HOSTED_URL = "https://pub.flutter-io.cn"
+$env:FLUTTER_STORAGE_BASE_URL = "https://storage.flutter-io.cn"
+flutter pub get --enforce-lockfile
 
 Set-Location apps\client
 flutter build windows --release
@@ -385,8 +389,31 @@ container tag, record its digest in the notes, run migrations explicitly, and
 verify `/health/ready`, WebSocket routing, backup, and rollback before changing
 traffic.
 
-Do not publish an Android APK/AAB until the release Firebase project, release
-signing key, notification delivery, and install/upgrade gates are complete.
+Android has shipped since `0.2.0-beta.1` using foreground-service/WebSocket
+delivery. Firebase configuration is required for a claim of FCM delivery, not
+for that existing delivery mode. Preserve the original release signing identity,
+increment the Flutter build number, verify the APK signature and archive/native
+contents, and disclose install/upgrade or device acceptance not yet performed.
+The maintainer's release authorization does not imply those checks occurred.
+
+For an Android-inclusive release, also stage
+`opencode-notify-client-android-universal-<version>.apk`, include it in
+`SHA256SUMS.txt` and the final upload, and state the delivery mode in the notes.
+Build all assets from the same release SHA. Flutter dependency resolution must
+use the hosted source already recorded in `pubspec.lock`:
+
+```bash
+export PUB_HOSTED_URL=https://pub.flutter-io.cn
+export FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn
+flutter pub get --enforce-lockfile
+# From apps/client; keep pub enabled to generate Android plugin registration.
+flutter build apk --release
+git diff --exit-code -- pubspec.lock
+```
+
+Use the same environment for Windows and Linux Flutter builds. A different
+hosted source can re-resolve and upgrade dependencies despite the same source
+SHA; do not publish such a build as an unchanged release checkout.
 
 ## Repository Safety
 

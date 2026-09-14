@@ -1,8 +1,16 @@
 # Windows Development Handoff
 
-Updated: 2026-09-13
+Updated: 2026-09-14
 
-## 统一交接：新首页与目录按需注册（当前任务）
+## 当前发布任务：0.2.0-beta.2
+
+- 维护者已确认 `19eedcac8f65737a57ad0569b11d672c0dbb9035` 的 Windows 构建与手动验收通过，Windows 无源码修改，并已授权发布。本节取代下文旧验证任务；不重复 UI 自动化、两组测试或全平台矩阵。
+- Linux 是本次 Release 协调端。使用维护者 prompt 提供的最终发布 SHA，客户端版本 `0.2.0-beta.2+4`、Plugin `0.2.0-beta.2`；发布准备仅更新版本和文档。旧 `19eedca` 验证 ZIP 不可改名冒充新版本。
+- 先按下文分支协调流程保护本地工作，再快进 `main` 并核对准确 SHA。依赖和打包都使用 `$env:PUB_HOSTED_URL = 'https://pub.flutter-io.cn'`、`$env:FLUTTER_STORAGE_BASE_URL = 'https://storage.flutter-io.cn'`；仓库根目录 `flutter pub get --enforce-lockfile`，`apps/client` 下 `flutter build windows --release`。构建后确认 `pubspec.lock` 和源码未变，失败则报告，不升级依赖绕过。
+- 将完整 `apps/client/build/windows/x64/runner/Release/` 加仓库 `LICENSE`，放入顶层 `opencode-notify-client-windows-x64-0.2.0-beta.2/` 后打 ZIP。交付 ZIP、SHA-256、准确源 SHA、版本和 `git status`，以及 `client.exe`、`data/app.so` 和原生 DLL 的哈希，参照 [releasing.md](releasing.md)。
+- Windows 负责构建与传回 ZIP，不创建标签、Release 或触发 CI；Linux 收齐、复核后统一上传。若无已配置传输通道，将完整 ZIP 交给维护者转交，不以“本机路径”冒充已传至 Linux。
+
+## 统一交接：新首页与目录按需注册（已完成的验证背景）
 
 - 使用维护者最新 prompt 的完整 SHA，一次拉取即可包含 `799d9b2` 的客户端体验改动、`1d6fc41` 的首页重做/平台适配/Gateway 修复，以及本轮 Plugin 目录按需注册。上次 Windows 已验证的是 `799d9b2`；不要再以它或 `1d6fc41` 作为本轮最终对齐点。
 - 最新改动在 OpenCode 主机运行的 `session-notify.js`：确认空目录不注册，有非归档历史主会话（含 idle）或后续主会话事件则注册；查询失败保留入口，`NOTIFY_REMOTE_DIRECTORIES` 可精确指定空目录入口。详见 [plugin-install.md](plugin-install.md#目录按需注册)。不涉及新的 Windows 原生依赖或客户端/Gateway 协议变动。

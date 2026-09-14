@@ -1,6 +1,10 @@
 # Android 远程会话入口交接
 
-更新：2026-09-13；状态：源码已准备，设备与原生构建验证待环境恢复。
+更新：2026-09-14；当前发布版本 `0.2.0-beta.2+4`，以发布协调端提供的最终 SHA 为准。
+
+- 维护者已确认 `19eedca` 的 Windows 手动验收通过并授权发布。Android 同基线验证 APK 已在 Linux 构建，原发布签名、ZIP 完整性和三 ABI 检查通过；本轮 Android 真机验收仍未确认，不将构建通过表述为真机通过。
+- Linux 从最终发布 SHA 重建新版 APK，沿用已有发布签名与前台保活/WebSocket 路线。设置 `PUB_HOSTED_URL=https://pub.flutter-io.cn` 和 `FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn`，先 `flutter pub get --enforce-lockfile`，同环境 `flutter build apk --release`（不加 `--no-pub`），构建后确认锁文件无变动。
+- 下文为开发阶段记录，验收状态以上述最新记录为准。
 
 - 后续首页改为常用/会话/实例，默认限量预览、折叠机器分组，支持关注/隐藏/恢复及离线清理，错误只显示汇总；共享 Dart 的 360px 页面检查通过，Android 原生仍待验证。这批改动随本文提交到 `main`，使用维护者交接 prompt 中的新完整 SHA，`799d9b2` 仅是上轮基线。
 - 已核对 Android 底部导航直接使用共享 `HomePage`，关注/隐藏复用现有 SharedPreferences，无需新增 Kotlin 代码或插件。搜索键盘显示“搜索”，提交及切换首页分栏时收起；同步详情可滚动适配横屏/大字号。

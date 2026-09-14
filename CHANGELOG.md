@@ -5,6 +5,8 @@ All notable changes will be documented in this file. The project intends to use
 
 ## [Unreleased]
 
+## [0.2.0-beta.2] - 2026-09-14
+
 - Home now defaults to bounded favorite/recent shortcuts, with separate session
   and instance browsers, collapsed machine groups, persistent follow/hide/restore,
   offline cleanup, and one expandable synchronization error summary.
@@ -36,7 +38,9 @@ All notable changes will be documented in this file. The project intends to use
   WebUI requests; disconnected writes are never replayed automatically.
 - Source-level Android/Windows alignment: responsive session actions, foreground
   resume refresh/reconnect, Android keep-alive before WebUI launch, and a Windows
-  power-resume bridge. Native platform acceptance is pending.
+  power-resume bridge. The maintainer confirmed Windows acceptance at `19eedca`
+  without source changes; Android release signing and package checks passed,
+  while this round's Android device acceptance remains unverified.
 
 ## [0.2.0-beta.1] - 2026-08-21
 
