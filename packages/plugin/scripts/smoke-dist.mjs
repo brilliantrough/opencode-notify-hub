@@ -10,9 +10,7 @@
  * Two invariants are proven against `dist/session-notify.js`:
  *
  * 1. Export shape: the module's own keys are exactly `["default"]` and
- *    the default export is a function. Older OpenCode loaders reject
- *    plugin modules that carry extra named runtime exports, so this is
- *    a hard release gate, not a nicety.
+ *    the default export has the V1 server() and V2 setup() entrypoints.
  *
  * 2. Loader behavior without network: the plugin is invoked with a fake
  *    OpenCode host (capturing `app.log` sink + fake `session.get`) and a
@@ -75,8 +73,8 @@ const keys = Object.keys(mod);
 if (keys.length !== 1 || keys[0] !== "default") {
   fail(`module exports ${JSON.stringify(keys)}, expected exactly ["default"]`);
 }
-if (typeof mod.default !== "function") {
-  fail(`default export is ${typeof mod.default}, expected function`);
+if (mod.default?.id !== "opencode-notify" || typeof mod.default.server !== "function" || typeof mod.default.setup !== "function") {
+  fail("expected a dual-generation plugin definition");
 }
 
 // --- Invariant 2: loads and handles events with no network --------------
@@ -100,7 +98,7 @@ const input = {
   worktree: "/tmp",
 };
 
-const hooks = await mod.default(input);
+const hooks = await mod.default.server(input);
 if (typeof hooks.event !== "function" || typeof hooks.dispose !== "function") {
   fail(`expected {event, dispose} hooks, got ${JSON.stringify(Object.keys(hooks).sort())}`);
 }

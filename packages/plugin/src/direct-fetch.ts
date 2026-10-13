@@ -43,7 +43,7 @@ interface RequestParts {
   url: string;
   method: string;
   headers: Record<string, string>;
-  body: string | null;
+  body: string | Uint8Array | null;
   signal: AbortSignal | null;
 }
 
@@ -53,7 +53,7 @@ async function toRequestParts(input: unknown, init: unknown): Promise<RequestPar
       url: input.url,
       method: input.method,
       headers: Object.fromEntries(input.headers.entries()),
-      body: input.method === "GET" || input.method === "HEAD" ? null : await input.text(),
+      body: input.method === "GET" || input.method === "HEAD" ? null : new Uint8Array(await input.arrayBuffer()),
       signal: input.signal,
     };
   }
@@ -61,7 +61,7 @@ async function toRequestParts(input: unknown, init: unknown): Promise<RequestPar
   const options = (init ?? {}) as {
     method?: string;
     headers?: Record<string, string> | Headers;
-    body?: string | null;
+    body?: string | Uint8Array | null;
     signal?: AbortSignal | null;
   };
   const headers =

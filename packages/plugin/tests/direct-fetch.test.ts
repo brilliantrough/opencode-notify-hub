@@ -15,12 +15,15 @@ describe("createLoopbackDirectFetch", () => {
   });
 
   async function serve(
-    handler: (req: { method?: string; body: string }, res: import("node:http").ServerResponse) => void,
+    handler: (req: { method?: string; body: string; bytes: Buffer }, res: import("node:http").ServerResponse) => void,
   ): Promise<string> {
     server = createServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on("data", (chunk) => chunks.push(chunk));
-      req.on("end", () => handler({ method: req.method, body: Buffer.concat(chunks).toString() }, res));
+      req.on("end", () => {
+        const bytes = Buffer.concat(chunks);
+        handler({ method: req.method, body: bytes.toString(), bytes }, res);
+      });
     });
     await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
     const address = server!.address();
@@ -41,6 +44,13 @@ describe("createLoopbackDirectFetch", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ healthy: true, method: "GET" });
+  });
+
+  it("preserves binary uploads when authentication wraps the body in a Request", async () => {
+    const base = await serve((req, res) => res.end(req.bytes));
+    const body = Uint8Array.from([0, 128, 255, 195, 40]);
+    const response = await createLoopbackDirectFetch()(new Request(base, { method: "POST", body }));
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(body);
   });
 
   it("posts a JSON body and honors abort signals", async () => {

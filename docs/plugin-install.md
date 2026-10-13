@@ -5,19 +5,20 @@ The plugin ships as a single self-contained ESM file,
 events and POSTs privacy-bounded notification envelopes to your
 notification gateway (`POST {NOTIFY_GATEWAY_URL}/v1/events`, HMAC-signed).
 
-The bundle's entire module surface is **one default function export** —
-no named runtime exports. This is deliberate: older OpenCode plugin
-loaders reject plugin modules that carry extra named exports. The shape
-is enforced by a smoke gate chained into the build itself
-(`pnpm --filter @notify/plugin build` runs `tsup` and then
-`packages/plugin/scripts/smoke-dist.mjs`, which fails the build if any named export ever
-reappears or if the plugin cannot load against a fake host without
-network).
+同一份 `session-notify.js` 兼容 **OpenCode V1 ≥ 1.18.29 与 V2**。
+唯一默认导出包含 `id`、V1 `server()`、V2 `setup()`；宿主选择自己的入口。
+无需额外安装 SDK，也无需分发两份插件。构建后的 smoke 检查导出形状与通知链路。
+
+## 下载预构建插件
+
+从 [Plugin 0.2.0-beta.4](https://github.com/brilliantrough/opencode-notify-hub/releases/tag/v0.2.0-beta.4)
+下载 `opencode-notify-plugin-0.2.0-beta.4.zip` 与 `SHA256SUMS.txt`，核对 SHA256 后解压。
+ZIP 内含 `session-notify.js`、`LICENSE`、`PLUGIN-INSTALL.md`；只需安装 JS，保留现有环境变量配置。
+客户端继续使用 [0.2.0-beta.3](https://github.com/brilliantrough/opencode-notify-hub/releases/tag/v0.2.0-beta.3)，Gateway 无需更新。
 
 ## Prerequisites
 
-- **OpenCode** installed, with a plugin API compatible with
-  `@opencode-ai/plugin` 1.18.x.
+- **OpenCode V1 ≥ 1.18.29 或 V2**；V1 更早版本不支持本插件的双入口导出。
 - **Node.js ≥ 22** and **pnpm 9** to build the bundle. (The produced
   bundle itself also runs under Bun, which is what OpenCode's plugin
   host uses.)
@@ -30,7 +31,7 @@ From the repository root:
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm --filter @notify/plugin build
+pnpm --filter @notify/plugin... build
 ```
 
 This produces `packages/plugin/dist/session-notify.js`. The bundle is
@@ -40,11 +41,11 @@ runtime parts of `@opencode-ai/sdk` are bundled, while
 imports are Node builtins. No `node_modules` needs to sit next to the installed
 file.
 
-Optional sanity check (both must print `function`):
+可选加载检查：两条命令均应输出 `opencode-notify function function`。
 
 ```bash
-node -e "import('./packages/plugin/dist/session-notify.js').then(m => console.log(typeof m.default))"
-bun  -e "import('./packages/plugin/dist/session-notify.js').then(m => console.log(typeof m.default))"
+node -e "import('./packages/plugin/dist/session-notify.js').then(({default:p}) => console.log(p.id, typeof p.server, typeof p.setup))"
+bun  -e "import('./packages/plugin/dist/session-notify.js').then(({default:p}) => console.log(p.id, typeof p.server, typeof p.setup))"
 ```
 
 For a stronger gate, the committed smoke script additionally asserts the
@@ -148,11 +149,40 @@ Never commit the ingest key or paste it into OpenCode itself.
 | `NOTIFY_IDLE_DEBOUNCE_MS` | `15000` | Integer 1–600 000. Stable-idle delay before a round is declared completed. |
 | `NOTIFY_HTTP_TIMEOUT_MS` | `5000` | Integer 1–300 000. Per-attempt gateway POST timeout; also the total startup session-discovery deadline. |
 | `NOTIFY_MAX_RETRIES` | `3` | Integer 1–100. Delivery retries with backoff before an event is dropped. |
+| `NOTIFY_OPENCODE_URL` | 自动发现 V2 本机服务 | 仅 V2：独立 `serve` 的 HTTP(S) origin，例如 `http://127.0.0.1:4096`；必须指向承载插件的同一进程。 |
+| `NOTIFY_OPENCODE_PASSWORD` | V2 服务注册文件中的密码 | 指定 URL 时使用的服务密码；未设置则读取 `OPENCODE_PASSWORD` / `OPENCODE_SERVER_PASSWORD`。不上传 Gateway。 |
+
+### V1 / V2 API 兼容
+
+| 能力 | V1 | V2 |
+| --- | --- | --- |
+| 插件生命周期 | `server(input)` 返回 hooks | `setup(ctx)` 订阅事件，返回清理函数 |
+| 会话事件 | `properties`、`session.status` | `data`、`session.execution.*`、`session.retry.scheduled` |
+| 问答 | question 请求与 `string[][]` 答案 | 内置 question 工具的 `form`，按 `q0/q1` 转换答案 |
+| 权限回复 | SDK 的 `reply` | `/api/session/:id/permission/:requestID/reply` 的 `decision` |
+| 会话状态 | `/session/status` | `/api/session/active` + 实时执行事件；查询失败为 unknown |
+| WebUI 深链 | 目录编码 + session | 插件将旧客户端链接转换为浏览器 origin 对应的 V2 链接 |
+
+- Gateway：继续使用 Notify control protocol **2**；现有支持 `webUiAvailable` 的 Gateway 可直接使用，不因 OpenCode 升级而部署。
+- V2 只将内置 question 工具的表单转为远程问答；登录、MCP 等通用表单在 WebUI 中处理。
+- V2 默认从 `$XDG_STATE_HOME/opencode/service.json`（默认 `~/.local/state/opencode/service.json`）发现服务，核对注册 PID、HTTP `/api/info` 的 PID 与宿主版本，再使用本机 Basic 认证。
+- V2 独立 `serve`：在**服务进程环境**显式设置 URL 和密码，避免误连另一份共享服务：
+
+  ```bash
+  export OPENCODE_PASSWORD='your-server-password'
+  export NOTIFY_OPENCODE_URL='http://127.0.0.1:4096'
+  export NOTIFY_OPENCODE_PASSWORD="$OPENCODE_PASSWORD"
+  opencode serve --hostname 127.0.0.1 --port 4096
+  ```
+
+- V2 无可认证 HTTP 入口时仍接收宿主通知事件；远程列表、问答回复和隧道不可用，日志提示 `V2 HTTP endpoint unavailable`。
+- V2 的普通 TUI 默认连接共享服务，因此共享服务中的插件可以提供隧道；私有进程不能冒用共享服务的入口。
+- 对照来源：[双入口与插件迁移](https://opencode.ai/v2/docs/build/plugins)、[V2 API](https://opencode.ai/v2/docs/api)、[V2 WebUI](https://opencode.ai/v2/docs/cli/web)。
 
 ### 目录按需注册
 
 - 同一个 `opencode serve` 可以加载许多目录，Notify 的实例并不等于系统进程。
-- Plugin 返回初始化 hooks 后，通过宿主 SDK 查询本目录的主会话元数据，保留宿主认证；有未归档的历史会话（含 idle）才自动建立控制连接。通常只查最近 1 条，若被归档记录占据则扩大到 50/200 条，总超时默认 5 秒，不查询消息正文或运行状态。
+- Plugin 初始化完成后查询本目录的主会话元数据：V1 使用宿主 SDK，V2 使用已认证 HTTP；有未归档的历史会话（含 idle）才自动建立控制连接。通常只查最近 1 条，若被归档记录占据则扩大到 50/200 条，总超时默认 5 秒，不查询消息正文或运行状态。
 - 没有有效主会话、或已完整确认只有归档/内部任务的目录只保留事件 hooks；首次创建或收到可确认的用户主会话事件时自动注册。仅浏览 `.cache`、`node_modules` 等空目录不会创建 Notify 连接。
 - `magic-context-` 标题前缀保留给 Magic Context 内部后台任务，启动查询、生命周期事件和 SDK 补查统一排除，既不激活入口也不发送任务通知；即使任务没有 `parentID` 也一样。当前依据该插件的命名约定识别，尚无通用的上游内部会话标志；其他自动化创建的普通根会话仍按主会话处理。
 - 删除或归档会话时重新查询目录：确认没有有效主会话就撤下控制入口并关闭关联隧道，hooks 保留，后续新建或取消归档可重新注册；有真实 idle 历史或在 `NOTIFY_REMOTE_DIRECTORIES` 中显式指定则保留。没有新增周期轮询。
@@ -175,7 +205,7 @@ $env:NOTIFY_REMOTE_DIRECTORIES = '["C:/work/project"]'
 
 更新 `session-notify.js` 后需重启实际 OpenCode 服务进程，重连 `attach` 本身不会卸载旧 Plugin。旧空目录入口会转为离线，可在 Notify 的“本机历史”逐项删除；无需删除 OpenCode 会话数据库。
 
-### 服务入口和版本识别
+### V1 服务入口和版本识别
 
 - Plugin 通过真实 HTTP `/global/health` 获取版本并确认监听服务可用；只有健康响应有效时才上报 `webUiAvailable: true`。普通 TUI 的进程内 SDK 可用不代表存在可隧道访问的服务，无有效 HTTP 服务时仍保留通知功能。
 - Plugin 到 OpenCode 的 HTTP 请求绕过代理，并仅向宿主 `serverUrl` 同源地址附加 `OPENCODE_SERVER_PASSWORD` / `OPENCODE_SERVER_USERNAME` 对应的 Basic 认证；用户名默认 `opencode`。这些是 OpenCode 原有环境变量，不是新的 Notify 配置项，凭据不发给 Gateway 或客户端。
@@ -183,6 +213,8 @@ $env:NOTIFY_REMOTE_DIRECTORIES = '["C:/work/project"]'
 - 此能力字段需要先部署新 Gateway，再安装 Plugin 并重启实际 OpenCode 服务，最后使用新客户端。旧 Plugin 缺少能力字段时显示在线但不提供“打开”。
 
 ### Validation behavior (fail closed)
+
+通知投递配置在插件加载时校验；V2 HTTP 入口另行探测，失败只影响远程能力。
 
 Configuration is validated once at plugin load. **Any** missing or
 invalid value — including a malformed URL, a bad key format, a
@@ -229,6 +261,8 @@ Plugin log entries go through OpenCode's `app.log` with service name
 run OpenCode in the foreground with `opencode --print-logs` /
 `--log-level DEBUG`.
 
+V2 使用进程 stderr，前缀 `[opencode-notify]`；查看共享服务或独立 `serve` 的输出。
+
 - **No notifications, one "disabled" warning** → a required variable is
   missing/invalid; see *Validation behavior* above.
 - **Events dropped with a gateway error in the log** → the gateway is
@@ -241,10 +275,9 @@ run OpenCode in the foreground with `opencode --print-logs` /
 
 ## Restart required
 
-Plugins are loaded at startup. After copying the bundle or changing any
-`NOTIFY_*` variable, **quit and restart OpenCode** — neither file
-changes in the plugin directory nor environment edits apply to an
-already-running instance.
+替换文件或修改 `NOTIFY_*` 后，重启承载插件的服务进程。V2 支持本地插件热加载，
+但环境变量不会随终端修改自动更新；共享服务用 `opencode service restart`，
+独立 `serve` 则在正确环境下重新启动。只重连 TUI/attach 不会更新服务环境。
 
 ## Non-interactive shutdown
 

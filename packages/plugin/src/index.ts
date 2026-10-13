@@ -36,6 +36,7 @@ import { posix, win32 } from "node:path";
 import { loadConfig, type PluginConfig } from "./config.js";
 import {
   ControlChannel,
+  type ControlChannelOptions,
   type PluginControl,
   type WebUiHttpRequest,
   type WebUiResponseFrame,
@@ -47,7 +48,7 @@ import {
   type TerminalOutcome,
 } from "./envelope.js";
 import { normalizeEvent, type NormalizedEvent } from "./events.js";
-import { createSafeLogger, type SafeLogger } from "./log.js";
+import { createSafeLogger, type SafeLogger, type LogEntry } from "./log.js";
 import { MessageCache } from "./message-cache.js";
 import { PendingAdapter, type PendingListClient } from "./pending-adapter.js";
 import { QueuePump } from "./pump.js";
@@ -68,6 +69,32 @@ import { SessionMachine, type SessionTerminal } from "./state-machine.js";
 /** Service name stamped on every structured log entry. */
 export const LOG_SERVICE = "opencode-notify";
 
+export interface HostSession {
+  id: string;
+  parentID?: string;
+  title: string;
+  directory: string;
+  time: { updated: number; archived?: number };
+}
+
+export interface NotifyInput {
+  directory: string;
+  worktree: string;
+  project?: { worktree?: string };
+  serverUrl?: URL;
+  client: {
+    app: { log(input: { body: LogEntry }): unknown };
+    session: {
+      get(input: { path: { id: string } }): Promise<unknown>;
+      list(input: { query: { directory: string; roots: boolean; limit: number }; signal: AbortSignal; throwOnError: boolean }): Promise<{ data?: HostSession[] }>;
+    };
+  };
+}
+
+export type RemoteApi = Pick<ControlChannelOptions, "resolveOpenCodeVersion" | "webUiAvailable" |
+  "listPendingInteractions" | "answerQuestion" | "decidePermission" | "sendPrompt" |
+  "listSessions" | "webUiRequest">;
+
 /**
  * The pump surface the wiring consumes (`QueuePump` satisfies it).
  * Injectable so tests can prove queue throws are absorbed.
@@ -79,6 +106,7 @@ export interface NotificationPump {
 
 /** Construction seams; production uses none of them. */
 export interface SessionNotifyDeps {
+  remote?: RemoteApi;
   /** Ancestry lookup; defaults to `createSdkLookup(input.client.session)`. */
   lookup?: SessionLookup;
   /** Structured logger; defaults to a safe logger over `client.app.log`. */
@@ -103,8 +131,8 @@ function safeNonEmpty(value: unknown, fallback: string): string {
 }
 
 /** Human-readable project label; OpenCode's `project.id` is an internal hash. */
-function projectLabel(input: PluginInput): string {
-  const project = input.project as PluginInput["project"] | undefined;
+function projectLabel(input: NotifyInput): string {
+  const project = input.project;
   for (const root of [project?.worktree, input.worktree, input.directory]) {
     if (typeof root !== "string" || root.trim().length === 0) {
       continue;
@@ -129,7 +157,7 @@ function describeError(error: unknown): string {
  * failing subsystem can never take down the event hook.
  */
 export function createSessionNotifyHooks(
-  input: PluginInput,
+  input: NotifyInput,
   config: PluginConfig,
   deps: SessionNotifyDeps = {},
 ): Hooks {
@@ -191,7 +219,7 @@ export function createSessionNotifyHooks(
     QuestionReplyClient &
     PermissionReplyClient => {
     v2 ??= createOpencodeClient({
-      baseUrl: input.serverUrl.toString(),
+      baseUrl: input.serverUrl!.toString(),
       directory,
       fetch: loopbackFetch,
     }).v2;
@@ -205,7 +233,7 @@ export function createSessionNotifyHooks(
   let catalog: SessionCatalogAdapter | null = null;
   const control =
     deps.control ??
-    (input.serverUrl instanceof URL
+    (deps.remote || input.serverUrl instanceof URL
       ? new ControlChannel({
           gatewayUrl: config.gatewayUrl,
           credential: `${config.ingestKey.keyId}.${config.ingestKey.secret}`,
@@ -244,14 +272,14 @@ export function createSessionNotifyHooks(
           },
           sendPrompt: (sessionID, text, signal) => {
             prompter ??= new SessionPromptAdapter({
-              baseUrl: input.serverUrl,
+              baseUrl: input.serverUrl!,
               directory,
               fetch: loopbackFetch,
             });
             return prompter.send(sessionID, text, signal);
           },
           listSessions: (query, signal) => {
-            catalog ??= new SessionCatalogAdapter(directory, input.serverUrl, loopbackFetch);
+            catalog ??= new SessionCatalogAdapter(directory, input.serverUrl!, loopbackFetch);
             return catalog.list(query, signal);
           },
           webUiRequest: (
@@ -260,12 +288,13 @@ export function createSessionNotifyHooks(
             emit: (frame: WebUiResponseFrame) => void,
           ) => {
             webUiProxy ??= new WebUiProxy({
-              baseUrl: input.serverUrl,
+              baseUrl: input.serverUrl!,
               directory,
               fetch: loopbackFetch,
             });
             return webUiProxy.request(request, signal, emit);
           },
+          ...deps.remote,
         })
       : null);
 

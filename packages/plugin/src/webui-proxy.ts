@@ -16,6 +16,7 @@ export interface WebUiProxyOptions {
   baseUrl: URL;
   directory: string;
   fetch?: typeof fetch;
+  generation?: 1 | 2;
 }
 
 /** HTTP/SSE bridge from Gateway tunnel frames to the local OpenCode server. */
@@ -23,11 +24,13 @@ export class WebUiProxy {
   private readonly baseUrl: URL;
   private readonly directory: string;
   private readonly fetch: typeof fetch;
+  private readonly generation: 1 | 2;
 
   constructor(options: WebUiProxyOptions) {
     this.baseUrl = options.baseUrl;
     this.directory = options.directory;
     this.fetch = options.fetch ?? fetch;
+    this.generation = options.generation ?? 1;
   }
 
   async request(
@@ -40,7 +43,23 @@ export class WebUiProxy {
         request.path.includes("\\") || url.origin !== this.baseUrl.origin) {
       throw new Error("WebUI requests must stay on the local OpenCode origin");
     }
-    if (!url.searchParams.has("directory") && this.directory !== "unknown") {
+    if (this.generation === 2) {
+      // Older Notify clients open V1 deep links; translate in the browser's own origin.
+      const legacy = /^\/([A-Za-z0-9_-]+)\/session(?:\/(ses[A-Za-z0-9_-]+))?$/.exec(url.pathname);
+      if (request.method === "GET" && legacy && Buffer.from(legacy[1]!, "base64url").toString("utf8") === this.directory) {
+        const session = legacy[2];
+        const script = session
+          ? `const key=btoa(location.origin).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');location.replace('/server/'+key+'/session/'+${JSON.stringify(session)});`
+          : "location.replace('/');";
+        emit({ type: "webui_http_response_start", tunnelId: request.tunnelId, requestId: request.requestId,
+          status: 200, headers: { "content-type": ["text/html; charset=utf-8"], "cache-control": ["no-store"] } });
+        emit({ type: "webui_http_response_chunk", tunnelId: request.tunnelId, requestId: request.requestId,
+          body: Buffer.from(`<!doctype html><script>${script}</script>`).toString("base64") });
+        emit({ type: "webui_http_response_end", tunnelId: request.tunnelId, requestId: request.requestId });
+        return;
+      }
+    }
+    if (this.generation === 1 && !url.searchParams.has("directory") && this.directory !== "unknown") {
       url.searchParams.set("directory", this.directory);
     }
     const headers = new Headers();
@@ -67,7 +86,7 @@ export class WebUiProxy {
     if (request.headers.referer !== undefined) {
       headers.set("referer", this.baseUrl.toString());
     }
-    headers.set("x-opencode-directory", this.directory);
+    if (this.generation === 1) headers.set("x-opencode-directory", this.directory);
     const body = request.body === undefined ? undefined : Buffer.from(request.body, "base64");
     const response = await this.fetch(url, {
       method: request.method,

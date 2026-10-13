@@ -5,6 +5,25 @@ All notable changes will be documented in this file. The project intends to use
 
 ## [Unreleased]
 
+## [0.2.0-beta.4] - 2026-10-13
+
+本次仅发布 Plugin；客户端继续使用 `0.2.0-beta.3`，Gateway 无需更新。
+
+### Added
+
+- 同一份 `session-notify.js` 兼容 OpenCode V1 ≥ 1.18.29 与 V2；默认导出提供 V1 `server()`、V2 `setup()`。
+- V2 会话事件、question 表单、权限决策、会话列表与远程发送适配现有 Notify 协议。
+- V2 共享服务自动发现并核验 PID；独立服务支持显式地址与密码配置，WebUI 隧道兼容旧客户端深链。
+
+### Fixed
+
+- HTTP `Request` 转发保留原始字节，避免 WebUI 二进制上传被文本解码损坏。
+
+### Compatibility
+
+- V1 低于 1.18.29 请继续使用旧插件；V2 通用非 question 表单仍在 WebUI 处理。
+- 已验证 V1 1.18.29、V2 2.0.28 的真实进程加载与关键 API 链路；桌面完整交互与真实权限批准仍待维护者验收。
+
 ## [0.2.0-beta.3] - 2026-09-14
 
 ### Changed

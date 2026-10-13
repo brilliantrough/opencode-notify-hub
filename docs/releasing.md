@@ -51,6 +51,12 @@ Keep component versions intentionally mapped in the release notes:
 Update `CHANGELOG.md` before the release-preparation commit. Do not tag a
 working tree containing only local version edits.
 
+### 单组件发布
+
+- 维护者指定仅发布 Plugin 时，只更新 Plugin 版本与变更记录；客户端版本、包和 Gateway 部署保留现状。
+- 仍从 `main` 的精确 SHA 在干净检出中构建，只上传 Plugin ZIP 与 `SHA256SUMS.txt`；跳过客户端构建、交接和验收流程。
+- 发布说明标明组件范围、兼容要求、已有客户端包链接与未验证项。完整多端发布继续遵循下文的全部平台流程。
+
 ## Asset Layout
 
 The first desktop/Plugin beta publishes these separate assets:
@@ -182,7 +188,7 @@ authorized the release:
 ```bash
 test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
 
-pnpm --filter @notify/plugin build
+pnpm --filter @notify/plugin... build
 (cd apps/client && flutter build linux --release --no-pub)
 ```
 

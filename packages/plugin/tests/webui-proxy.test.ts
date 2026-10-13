@@ -20,6 +20,24 @@ const request: WebUiHttpRequest = {
 };
 
 describe("WebUiProxy", () => {
+  it("bridges old client deep links to the V2 browser origin without changing V2 API queries", async () => {
+    const upstream = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
+      expect(String(url)).toBe("http://localhost:4096/api/session?limit=1");
+      expect(new Headers(init?.headers).has("x-opencode-directory")).toBe(false);
+      return new Response("{}");
+    });
+    const proxy = new WebUiProxy({ baseUrl: new URL("http://localhost:4096"), directory: "/work", generation: 2, fetch: upstream as typeof fetch });
+    const frames: WebUiResponseFrame[] = [];
+    await proxy.request({ ...request, method: "GET", path: "/L3dvcms/session/ses_1", body: undefined }, new AbortController().signal, frame => frames.push(frame));
+    const chunk = frames.find(frame => frame.type === "webui_http_response_chunk")!;
+    const html = Buffer.from(chunk.body, "base64").toString();
+    const location = { origin: "http://127.0.0.1:8888", replace: vi.fn() };
+    new Function("location", html.match(/<script>(.*)<\/script>/)![1])(location);
+    expect(location.replace).toHaveBeenCalledWith(`/server/${Buffer.from(location.origin).toString("base64url")}/session/ses_1`);
+    expect(upstream).not.toHaveBeenCalled();
+    await proxy.request({ ...request, method: "GET", path: "/api/session?limit=1", body: undefined }, new AbortController().signal, () => {});
+    expect(upstream).toHaveBeenCalledOnce();
+  });
   it("forwards one HTTP request to the local OpenCode origin and streams the response", async () => {
     const fetchMock = vi.fn(async (_url: URL | RequestInfo, init?: RequestInit) => {
       expect(init?.method).toBe("POST");

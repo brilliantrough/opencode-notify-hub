@@ -10,6 +10,8 @@ self-hosted gateway.
 > SmartScreen warning. Android binaries are not published and Android
 > background notifications require project-specific Firebase configuration.
 
+Plugin 最新版：[0.2.0-beta.4](https://github.com/brilliantrough/opencode-notify-hub/releases/tag/v0.2.0-beta.4)（兼容 OpenCode V1 ≥ 1.18.29 / V2）；客户端安装包：[0.2.0-beta.3](https://github.com/brilliantrough/opencode-notify-hub/releases/tag/v0.2.0-beta.3)。
+
 ## How it works
 
 ```text
@@ -49,7 +51,7 @@ data boundaries.
 
 | Component | Supported | Notes |
 | --- | --- | --- |
-| OpenCode plugin | OpenCode 1.18.x on Node.js/Bun hosts | Built as one self-contained ESM file |
+| OpenCode plugin | OpenCode V1 ≥ 1.18.29 / V2，Node.js/Bun | 同一自包含 ESM 文件，双入口 |
 | Desktop client | Linux and Windows x64 beta | Linux is tested on KDE/X11; Windows is tested on Windows 11, with remaining production-control and lifecycle limitations documented in the release notes |
 | Mobile client | Android | Real Firebase config and release signing are required for distribution |
 | Gateway | Linux containers, Node.js 22+ | PostgreSQL 16+, HTTPS/WSS reverse proxy, SMTP, Firebase service account |
@@ -76,7 +78,7 @@ before starting.
 
    ```bash
    pnpm install --frozen-lockfile
-   pnpm --filter @notify/plugin build
+    pnpm --filter @notify/plugin... build
    mkdir -p ~/.config/opencode/plugins
    cp packages/plugin/dist/session-notify.js ~/.config/opencode/plugins/
    ```
