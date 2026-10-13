@@ -11,7 +11,7 @@ jobs:
   node:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
@@ -32,7 +32,7 @@ jobs:
   gateway-integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
@@ -49,7 +49,7 @@ jobs:
       FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
       PUB_HOSTED_URL: https://pub.flutter-io.cn
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Linux client dependencies
         run: >-
           sudo apt-get update && sudo apt-get install -y
@@ -81,7 +81,7 @@ jobs:
       FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
       PUB_HOSTED_URL: https://pub.flutter-io.cn
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.44.9
@@ -105,6 +105,6 @@ jobs:
   gateway-image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run gateway image smoke test
         run: timeout 15m bash apps/gateway/tests/deploy/image-smoke.sh
